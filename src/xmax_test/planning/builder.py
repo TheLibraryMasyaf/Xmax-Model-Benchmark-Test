@@ -13,11 +13,13 @@ import math
 from typing import Any
 
 from ..hashing import content_hash
+from ..tasks import TaskAllocator
 from ..time import utc_now
 from .budget import BudgetPreview
 from .case_numbers import CaseNumberAllocator
 from .models import PlanSnapshot, PromptBundle
 from .recipes import RecipeResolver, recipe_binding_hash
+from .strategies import StrategyRegistry
 
 PROMPT_TEXT_KIND = "prompt_text"
 PROMPT_REF_KINDS = {"prompt_image", "prompt_video", "mask_video"}
@@ -58,6 +60,7 @@ class TestPlanBuilder:
         scenario_pack: dict[str, Any],
         benchmark: dict[str, Any],
         allocator: CaseNumberAllocator | None = None,
+        strategy_registry: StrategyRegistry | None = None,
         clock: Any = None,
     ) -> None:
         self._repository = repository
@@ -65,6 +68,7 @@ class TestPlanBuilder:
         self._scenario_pack = scenario_pack
         self._benchmark = benchmark
         self._allocator = allocator or CaseNumberAllocator(repository)
+        self._strategies = strategy_registry or StrategyRegistry.defaults()
         self._clock = clock
 
     # ------------------------------------------------------------------
@@ -72,13 +76,19 @@ class TestPlanBuilder:
         assets = self._load_assets(request)
         feeds, prompt_bundles, skipped = self._prepare(assets, request)
         cases, skipped_cases = self._expand(feeds, prompt_bundles, request)
+        selection = self._selection(request)
         budget = BudgetPreview(request.get("cost_config")).preview(
             cases=[case for case, _ in cases],
             skipped=skipped + skipped_cases,
-            repeat_count=request.get("repeat_count", 5),
+            repeat_count=(
+                1
+                if selection["strategy"] == "random_runs"
+                else request.get("repeat_count", 5)
+            ),
         )
         budget["feed_count"] = len(feeds)
         budget["prompt_bundle_count"] = len(prompt_bundles)
+        budget["allocation"] = self._allocation_summary(request, cases)
         return budget
 
     def build(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -90,6 +100,7 @@ class TestPlanBuilder:
         model_id = request.get("model_id", "x2.0")
         repeat_count = int(request.get("repeat_count", 5))
         seed = self._derive_seed(request)
+        selection = self._selection(request)
         plan_hash_payload = {
             # Batch IDs are provenance only. The selected generation inputs
             # define identity; later result assets must not invalidate resume.
@@ -104,6 +115,7 @@ class TestPlanBuilder:
             "generation_modes": sorted(request.get("generation_modes", ["offline"])),
             "generation_config": request.get("generation_config", {}),
             "filters": request.get("filters", {}),
+            "combination_selection": selection,
             "seed": seed,
         }
         plan_hash = content_hash(plan_hash_payload)
@@ -122,6 +134,10 @@ class TestPlanBuilder:
             metadata={
                 "model_id": model_id,
                 "repeat_count": repeat_count,
+                "effective_repeat_count": (
+                    1 if selection["strategy"] == "random_runs" else repeat_count
+                ),
+                "allocation": self._allocation_summary(request, cases),
                 "recipe_pack_version": self._recipes.pack_version,
                 "skipped": all_skipped,
                 "skipped_count": len(all_skipped),
@@ -129,6 +145,9 @@ class TestPlanBuilder:
         )
         plan = snapshot.to_dict()
         plan["frozen"] = True
+        task_batch = TaskAllocator(self._repository, self._clock).create(plan)
+        plan["task_batch_id"] = task_batch["task_batch_id"]
+        plan["task_ids"] = task_batch["task_ids"]
         self._repository.save_test_plan(plan)
         return plan
 
@@ -259,11 +278,7 @@ class TestPlanBuilder:
         bundles: list[PromptBundle],
         request: dict[str, Any],
     ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[dict[str, Any]]]:
-        """Expand Feed x Prompt x recipe x mode x repeat.
-
-        Returns ``(cases_with_skips, skipped)`` where skipped carries
-        ``(case_data, reason)`` pairs before numbering.
-        """
+        """Resolve eligible pairs, allocate them, then freeze exact Cases."""
 
         overrides = {
             item.get("play_name"): item.get("mode")
@@ -274,7 +289,7 @@ class TestPlanBuilder:
         seed = self._derive_seed(request)
         enabled_modes = set(request.get("generation_modes", ["offline"]))
 
-        expanded: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        candidates: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for feed_index, feed in enumerate(feeds, start=1):
             feed_record_number = feed.get("metadata", {}).get("record_number")
@@ -325,26 +340,93 @@ class TestPlanBuilder:
                         }
                     )
                     continue
-                prefix = self._allocator.prefix_for(feed_number, bundle.prompt_number)
-                existing_max = self._allocator.existing_max_suffix(prefix)
-                for repeat_index in range(1, repeat_count + 1):
-                    case = self._freeze_case(
-                        feed,
-                        bundle,
-                        recipe,
-                        mode,
-                        binding,
-                        combo,
-                        repeat_index,
-                        repeat_count,
-                        existing_max,
-                        feed_number,
-                        model_id,
-                        seed,
-                        request,
-                    )
-                    expanded.append((case, combo))
+                candidates.append(
+                    {
+                        "pair_key": content_hash(
+                            {
+                                "feed_asset_id": feed["asset_id"],
+                                "prompt_text": bundle.prompt_text,
+                                "prompt_asset_ids": sorted(bundle.prompt_asset_ids),
+                                "recipe_id": recipe["recipe_id"],
+                                "mode": mode,
+                            }
+                        ),
+                        "feed": feed,
+                        "feed_number": feed_number,
+                        "bundle": bundle,
+                        "prompt_record_number": str(
+                            bundle.metadata.get("record_number") or ""
+                        ),
+                        "recipe": recipe,
+                        "mode": mode,
+                        "binding": binding,
+                        "combo": combo,
+                    }
+                )
+
+        selection = self._selection(request)
+        strategy = self._strategies.get(selection["strategy"])
+        selected = strategy.select(
+            candidates,
+            selection,
+            repeat_count=repeat_count,
+            seed=seed,
+        )
+        expanded: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for item in selected:
+            candidate = item.candidate
+            prefix = self._allocator.prefix_for(
+                candidate["feed_number"], candidate["bundle"].prompt_number
+            )
+            existing_max = self._allocator.existing_max_suffix(prefix)
+            case = self._freeze_case(
+                candidate["feed"],
+                candidate["bundle"],
+                candidate["recipe"],
+                candidate["mode"],
+                candidate["binding"],
+                candidate["combo"],
+                item.repeat_index,
+                item.repeat_count,
+                existing_max,
+                candidate["feed_number"],
+                model_id,
+                seed,
+                request,
+            )
+            case["allocation_index"] = item.allocation_index
+            case["allocation_strategy"] = strategy.name
+            expanded.append((case, candidate["combo"]))
         return expanded, skipped
+
+    def _selection(self, request: dict[str, Any]) -> dict[str, Any]:
+        selection = dict(request.get("combination_selection") or {})
+        selection.setdefault("strategy", "cartesian")
+        return selection
+
+    def _allocation_summary(
+        self,
+        request: dict[str, Any],
+        cases: list[tuple[dict[str, Any], dict[str, Any]]],
+    ) -> dict[str, Any]:
+        selection = self._selection(request)
+        strategy = self._strategies.get(selection["strategy"])
+        pair_keys = {
+            (
+                case.get("feed_asset_id"),
+                case.get("prompt_number"),
+                case.get("operation_recipe_id"),
+                case.get("generation_mode"),
+            )
+            for case, _ in cases
+        }
+        return {
+            "strategy": strategy.name,
+            "strategy_version": strategy.version,
+            "selection": selection,
+            "selected_pair_count": len(pair_keys),
+            "task_count": len(cases),
+        }
 
     def _resolve_combo(
         self,
@@ -576,6 +658,7 @@ class TestPlanBuilder:
                 "generation_mode_overrides", []
             ),
             "generation_config": request.get("generation_config", {}),
+            "combination_selection": self._selection(request),
         }
         digest = hashlib.sha256(content_hash(payload).encode("utf-8")).hexdigest()
         return int(digest[:8], 16)

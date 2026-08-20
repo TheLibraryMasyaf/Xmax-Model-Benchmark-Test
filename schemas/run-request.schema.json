@@ -72,6 +72,49 @@
       "default": 4
     },
     "repeat_count": {"type": "integer", "minimum": 1, "default": 5},
+    "seed": {"type": "integer"},
+    "combination_selection": {
+      "type": "object",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {
+          "enum": ["cartesian", "random_pairs", "random_runs", "explicit_pairs"]
+        },
+        "target_pair_count": {"type": "integer", "minimum": 1},
+        "target_run_count": {"type": "integer", "minimum": 1},
+        "with_replacement": {"type": "boolean"},
+        "pairs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["feed_asset_id", "prompt_record_number"],
+            "properties": {
+              "feed_asset_id": {"type": "string", "minLength": 1},
+              "prompt_record_number": {"type": ["string", "integer"]}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"strategy": {"const": "random_pairs"}}},
+          "then": {"required": ["target_pair_count"]}
+        },
+        {
+          "if": {"properties": {"strategy": {"const": "random_runs"}}},
+          "then": {"required": ["target_run_count"]}
+        },
+        {
+          "if": {"properties": {"strategy": {"const": "explicit_pairs"}}},
+          "then": {"required": ["pairs"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "generation_config": {"type": "object"},
     "generation_mode_overrides": {
       "type": "array",
       "items": {

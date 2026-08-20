@@ -14,6 +14,7 @@ from xmax_test.planning.builder import TestPlanBuilder
 from xmax_test.planning.budget import BudgetPreview
 from xmax_test.planning.case_numbers import CaseNumberAllocator
 from xmax_test.planning.recipes import RecipeResolver
+from xmax_test.planning.strategies import SelectedCombination, StrategyRegistry
 from xmax_test.scenarios import load_scenario_pack
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 from xmax_test.time import FixedClock
@@ -65,9 +66,9 @@ class PlanningTestBase(unittest.TestCase):
 
         asset("feed-1", "feed_video")
         asset("feed-2", "feed_video")
-        asset("prompt-1", "prompt_text", {"text": "换装：把人物替换为参考图的服装", "group_id": "g1"})
+        asset("prompt-1", "prompt_text", {"text": "换装：把人物替换为参考图的服装", "group_id": "g1", "record_number": 1})
         asset("prompt-ref-1", "prompt_image", {"group_id": "g1"})
-        asset("prompt-2", "prompt_text", {"text": "手势舞：按照参考视频完成动作", "group_id": "g2"})
+        asset("prompt-2", "prompt_text", {"text": "手势舞：按照参考视频完成动作", "group_id": "g2", "record_number": 2})
         asset("prompt-ref-2", "prompt_video", {"group_id": "g2"})
 
     def request(self, **extra) -> dict:
@@ -172,6 +173,80 @@ class DeterminismTests(PlanningTestBase):
         pattern = r"^feed\d{3}_prompt\d{3}(?:_\d{2,})?$"
         for case in plan["cases"]:
             self.assertRegex(case["case_number"], pattern)
+
+
+class AllocationStrategyTests(PlanningTestBase):
+    def test_random_runs_selects_exact_attempt_count_and_is_deterministic(self) -> None:
+        request = self.request(
+            seed=91,
+            repeat_count=5,
+            combination_selection={"strategy": "random_runs", "target_run_count": 7},
+        )
+        first = self.builder.build(request)
+        second = self.builder.build(request)
+        self.assertEqual(len(first["cases"]), 7)
+        self.assertEqual(
+            [case["case_id"] for case in first["cases"]],
+            [case["case_id"] for case in second["cases"]],
+        )
+        self.assertEqual(first["metadata"]["effective_repeat_count"], 1)
+
+    def test_random_pairs_applies_configurable_repeat_count(self) -> None:
+        plan = self.builder.build(
+            self.request(
+                seed=19,
+                repeat_count=3,
+                combination_selection={
+                    "strategy": "random_pairs",
+                    "target_pair_count": 2,
+                    "with_replacement": False,
+                },
+            )
+        )
+        self.assertEqual(len(plan["cases"]), 6)
+        self.assertEqual(plan["metadata"]["allocation"]["selected_pair_count"], 2)
+
+    def test_explicit_pairs_do_not_form_a_cartesian_product(self) -> None:
+        plan = self.builder.build(
+            self.request(
+                seed=5,
+                repeat_count=2,
+                combination_selection={
+                    "strategy": "explicit_pairs",
+                    "pairs": [
+                        {"feed_asset_id": "feed-1", "prompt_record_number": 1},
+                        {"feed_asset_id": "feed-2", "prompt_record_number": 2},
+                    ],
+                },
+            )
+        )
+        self.assertEqual(len(plan["cases"]), 4)
+        actual = {(case["feed_asset_id"], case["prompt_number"]) for case in plan["cases"]}
+        self.assertEqual(actual, {("feed-1", "prompt001"), ("feed-2", "prompt002")})
+
+    def test_custom_strategy_can_be_registered_without_builder_changes(self) -> None:
+        class FirstOnly:
+            name = "first_only"
+            version = "test"
+
+            def select(self, candidates, selection, *, repeat_count, seed):
+                return [SelectedCombination(candidates[0], 1, 1, 1)]
+
+        registry = StrategyRegistry.defaults()
+        registry.register(FirstOnly())
+        builder = TestPlanBuilder(
+            self.repository,
+            self.recipes,
+            self.pack,
+            self.benchmark,
+            allocator=self.allocator,
+            strategy_registry=registry,
+            clock=FixedClock(),
+        )
+        plan = builder.build(
+            self.request(combination_selection={"strategy": "first_only"})
+        )
+        self.assertEqual(len(plan["cases"]), 1)
 
 
 class RecipeModeTests(PlanningTestBase):

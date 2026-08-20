@@ -60,6 +60,14 @@ class PipelineRepository:
                 except NotFoundError:
                     continue
             return results
+        if entity_type == "task_batch":
+            tasks = []
+            for item_id in manifest["item_ids"]:
+                try:
+                    tasks.append(self._repository.get_test_task(item_id))
+                except NotFoundError:
+                    continue
+            return tasks
         return manifest.get("item_ids", [])
 
     def run_batch(self, batch_id: str) -> list[dict[str, Any]]:

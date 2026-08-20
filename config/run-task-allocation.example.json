@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/run-request.schema.json",
+  "request_id": "replace-me-task-allocation",
+  "stages": ["plan"],
+  "stage_inputs": {
+    "plan": [
+      {
+        "selector_id": "replace-me-assets",
+        "state": "request",
+        "entity_type": "asset_batch",
+        "match": {"ids": ["assets-replace-me"]}
+      }
+    ]
+  },
+  "dependency_policy": "explicit_only",
+  "missing_input_policy": "error",
+  "sync_policy": "none",
+  "benchmark_path": "BENCHMARK.md",
+  "scenario_pack_path": "config/scenarios.json",
+  "generation_modes": ["offline", "realtime"],
+  "repeat_count": 5,
+  "seed": 20260820,
+  "combination_selection": {
+    "strategy": "random_pairs",
+    "target_pair_count": 10,
+    "with_replacement": false
+  },
+  "filters": {}
+}

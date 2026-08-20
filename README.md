@@ -15,6 +15,8 @@ XMAX 离线与实时视频模型测试平台。已实现可追溯、可续跑、
 
 流程由`ingest / plan / generate / preprocess / evaluate / feedback / report / sync / reconcile`九个可独立运行的阶段组成。默认完整运行按标准Manifest交接；单阶段运行只需提供已有批次/Manifest选择器，不得静默补跑其他阶段。
 
+Plan同时产生冻结Task Batch：上层通过可插拔策略分配全量、随机或指定Feed×Prompt组合，下层Worker每次只领取一条任务执行“生成→预处理→评测→同步→对账”。默认重复5次，`repeat_count`可随每次请求修改。
+
 当前仓库包含真实 REST/COS、浏览器实时 SDK、Qwen3-VL OpenAI兼容Provider、Codex CLI备选Provider、音频指标、CV Python插件、飞书 `lark-cli`的适配边界及全 Fake 回归。巨大 CV 权重、GPU 运行环境、密钥和飞书映射仍是允许插件式提供的外部输入；缺失时该维度返回不可评，不伪造中性分。[BENCHMARK.md](BENCHMARK.md) 已录入当前暂定评测标准，整体以Shadow运行；第一轮测试后通过新版本调整维度、权重和规则，不原地覆盖历史。
 
 没有历史上下文的建设 Agent 先读 [AGENTS.md](AGENTS.md) 和 [IMPLEMENTATION.md](IMPLEMENTATION.md)；项目建成后的操作者只按 [RUNBOOK.md](RUNBOOK.md) 执行。
@@ -51,6 +53,7 @@ xmax-test/
 ├── src/xmax_test/
 │   ├── assets/                  # 素材获取、校验和登记
 │   ├── planning/                # Feed × Prompt × 模式 × 重复次数
+│   ├── tasks/                   # 冻结Task Batch、租约和单条完整执行器
 │   ├── generation/
 │   │   ├── offline/             # 离线生成适配器
 │   │   └── realtime/            # 浏览器实时 SDK 测试 Harness
@@ -75,6 +78,7 @@ xmax-test/
 | [数据合同](docs/data-contracts.md) | ID、状态、Schema、产物和版本 |
 | [素材管理](docs/assets.md) | 下载、去重、校验、素材台账 |
 | [测试计划](docs/test-planning.md) | 组合、重复、预算、可复现性 |
+| [Task Worker](docs/task-execution.md) | 任务批次、原子租约、单条流程和续跑 |
 | [玩法与输入操作配方](docs/operation-recipes.md) | 默认模式、Feed/Prompt API角色、音轨来源和实时互动 |
 | [离线生成](docs/generation-offline.md) | 离线任务适配器和状态机 |
 | [实时生成](docs/generation-realtime.md) | XMAX JS SDK、录流和 R 指标采集 |
@@ -103,6 +107,7 @@ xmax-test/
 10. 输入API角色和音轨来源由Operation Recipe冻结；互动玩法默认实时，其他默认离线，显式指定优先。
 11. 阶段之间只通过版本化批次、实体引用和Stage Manifest交接；生成、评测、报告和飞书同步均可单独授权运行。
 12. 缺失上游输入时报合同错误，禁止静默执行未列入Run Request的阶段，尤其禁止隐式付费生成。
+13. 组合选择只在Plan时发生并冻结；Worker不重新抽样，也不改写重复次数。
 
 ## 5. 运行准备
 

@@ -23,6 +23,12 @@
     "scenario_pack_version": {"type": "string"},
     "created_at": {"type": "string"},
     "seed": {"type": "integer"},
+    "task_batch_id": {"type": "string", "pattern": "^tasks-"},
+    "task_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^task-"}
+    },
     "cases": {
       "type": "array",
       "items": {

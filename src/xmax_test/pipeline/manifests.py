@@ -19,7 +19,7 @@ from ..hashing import content_hash
 from ..time import utc_now
 
 MANIFEST_VERSION = "1.0"
-PRODUCER_VERSION = "0.2.0"
+PRODUCER_VERSION = "0.3.0"
 
 
 def _stage_run_id(clock: Any) -> str:
@@ -91,6 +91,7 @@ def _stable_batch_id(entity_type: str, item_ids: list[str], content_hash_value: 
     prefix = {
         "asset_batch": "assets",
         "test_plan": "plan",
+        "task_batch": "tasks",
         "run_batch": "runs",
         "preprocess_batch": "prep",
         "evaluation_batch": "eval",

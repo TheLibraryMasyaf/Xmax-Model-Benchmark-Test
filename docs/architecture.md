@@ -16,7 +16,7 @@
 
 ```text
 ingest → Asset Batch / imported Run Batch
-plan → TestPlan
+plan → TestPlan + Task Batch
 generate → Generation Run Batch
 preprocess → Preprocess Batch
 evaluate → Evaluation Batch
@@ -39,7 +39,9 @@ flowchart TB
     B --> C[Test Plan Builder]
     AB[Operation Recipe Pack] --> C
     Z[Scenario Pack] --> C
-    C --> D{生成模式}
+    C --> TB[Task Batch]
+    TB --> TW[Task Worker]
+    TW --> D{生成模式}
     D -->|offline| E[Offline Runner]
     D -->|realtime| F[Realtime Browser Harness]
     E --> G[Generation Run Store]
@@ -86,6 +88,10 @@ flowchart TB
 ### 4.2 Test Plan Builder
 
 读取资产台账、场景配置和Operation Recipe Pack，展开 `Feed × Prompt × recipe × mode × repeat_index`。配方负责明确被编辑视频、预期音轨来源、API素材绑定和默认模式：互动玩法默认实时，其他默认离线；用户/Agent可显式覆盖。Builder负责飞书Case后缀、可复现和预算预览，不直接调用模型。
+
+### 4.2.1 Task Allocator and Worker
+
+Builder通过可注册分配策略把TestPlan展开为冻结Task Batch。Worker只原子领取一条Task，然后调用既有Generation、Preprocess、Evaluation和Feishu Service；不读取原始分配请求，不重新抽样。租约、状态和下游引用持久化到SQLite，以支持多Agent并行和中断续跑。
 
 ### 4.3 Generation Runners
 

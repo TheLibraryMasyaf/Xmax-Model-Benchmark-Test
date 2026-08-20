@@ -16,7 +16,8 @@
 | P1 Scene Weighting | DONE | 动态权重解析、Benchmark/Scenario校验、Fusion/Hard Gate集成 | 新权重只通过Benchmark版本发布 |
 | P2 Assets | DONE | Sheet/Base/Wiki/本地/HTTP适配器、快照、去重、媒体校验、CLI | 真实来源映射由Asset Source Pack提供 |
 | P2.5 Existing Result Ingestion | DONE | 飞书/本地/Manifest导入、Run归一、来源追溯、Fake和CLI | 真实Case字段由Existing Results Pack提供 |
-| P3 Planning | DONE | 配方解析、模式优先级、Case后缀、组合、成本预览、首N/显式ID过滤、过滤哈希和持久化 | 新玩法通过Recipe/Profile包接入 |
+| P3 Planning | DONE | 配方解析、模式优先级、Case后缀、成本预览、可插拔组合策略、可修改重复数、Task Batch冻结 | 新玩法通过Recipe/Profile包接入；新分配法通过StrategyRegistry接入 |
+| P3.5 Task Execution | DONE | SQLite原子租约、过期回收、单任务生成→评测→飞书同步→对账、断点续跑、CLI和全Fake E2E | 真实批量执行仍需预算批准和密钥 |
 | P4 Offline Generation | DONE | 真实REST/COS、Session API边界、状态机、续跑、Fake | Session+RTC的真实RTC传输不内置，常规离线路径使用官方REST |
 | P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、互动Profile、Fake | 需Key的付费真实会话待运行时smoke |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
@@ -130,6 +131,16 @@ CLI目标：`xmax-test ingest results --config config/existing-results.json`。
 CLI目标：`xmax-test plan preview|build|show`。
 
 验收：相同输入、远端编号快照和seed产生相同case_id/case_number；默认5次且可覆盖；显式模式优先、互动默认实时、其他默认离线；每条Case冻结配方、被编辑视频、音轨来源和API绑定；后续批次从远端最大后缀继续；预算预览无外部副作用；缺失素材有明确跳过原因；计划通过Schema。
+
+### P3.5 Task Allocation and Execution
+
+阅读：`docs/test-planning.md`、`docs/task-execution.md`、`docs/stage-orchestration.md`。
+
+目标文件：`planning/strategies.py`、`tasks/service.py`、`tasks/runtime.py`、`storage/migrations/0002_test_tasks.sql`、`schemas/test-task.schema.json`。
+
+CLI目标：`xmax-test task show|claim|run`、`xmax-test worker status|run`。
+
+验收：全量、随机组合、随机总任务数和指定组合都在Plan时可复现冻结；除`random_runs`总数语义外，`repeat_count`默认5且可覆盖；Worker不重新选组合；多Worker租约不重复领取；过期可回收；已完成任务幂等；基础设施失败可续跑；单条全Fake生成、评测、飞书同步和对账通过。
 
 ### P4 Offline Generation
 

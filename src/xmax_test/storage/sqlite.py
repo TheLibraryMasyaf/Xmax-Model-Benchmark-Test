@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -274,6 +275,225 @@ class SqliteMetadataRepository:
                 "SELECT payload FROM test_cases ORDER BY case_id"
             ).fetchall()
         return [json.loads(row["payload"]) for row in rows]
+
+    # ------------------------------------------------------------------
+    # frozen test-task queue
+    # ------------------------------------------------------------------
+    def save_test_tasks(self, tasks: list[dict[str, Any]]) -> None:
+        """Idempotently persist the exact Cases selected by a Test Plan."""
+
+        now = self._clock.now()
+        with self._lock:
+            with self._conn:
+                for task in tasks:
+                    existing = self._conn.execute(
+                        "SELECT payload FROM test_tasks WHERE task_id = ?",
+                        (task.get("task_id"),),
+                    ).fetchone()
+                    payload = _json(task.get("payload", {}))
+                    if existing is not None and existing["payload"] != payload:
+                        raise DuplicateError(
+                            f"test task {task.get('task_id')} already exists with a different payload"
+                        )
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO test_tasks("
+                        "task_id, task_batch_id, plan_id, case_id, status, payload, "
+                        "lease_owner, lease_expires_at, attempt_count, result_refs, "
+                        "last_error, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, 'pending', ?, NULL, NULL, 0, '{}', NULL, ?, ?)",
+                        (
+                            task.get("task_id"),
+                            task.get("task_batch_id"),
+                            task.get("plan_id"),
+                            task.get("case_id"),
+                            payload,
+                            task.get("created_at", now),
+                            task.get("created_at", now),
+                        ),
+                    )
+
+    def get_test_task(self, task_id: str) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT * FROM test_tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"test task not found: {task_id}", entity_id=task_id)
+        return self._task_dict(row)
+
+    def list_test_tasks(
+        self,
+        *,
+        task_batch_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if task_batch_id:
+            clauses.append("task_batch_id = ?")
+            params.append(task_batch_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM test_tasks{where} ORDER BY task_id", params
+        ).fetchall()
+        return [self._task_dict(row) for row in rows]
+
+    def claim_next_test_task(
+        self,
+        task_batch_id: str,
+        lease_owner: str,
+        *,
+        lease_seconds: int = 900,
+    ) -> dict[str, Any] | None:
+        return self._claim_test_task(
+            task_batch_id=task_batch_id,
+            task_id=None,
+            lease_owner=lease_owner,
+            lease_seconds=lease_seconds,
+        )
+
+    def claim_test_task(
+        self,
+        task_id: str,
+        lease_owner: str,
+        *,
+        lease_seconds: int = 900,
+        retry_error: bool = False,
+    ) -> dict[str, Any] | None:
+        current = self.get_test_task(task_id)
+        active = {"leased", "generating", "preprocessing", "evaluating", "syncing"}
+        if (
+            current["status"] in active
+            and current.get("lease_owner") == lease_owner
+            and (current.get("lease_expires_at") or "") > self._clock.now()
+        ):
+            return current
+        if retry_error:
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE test_tasks SET status='pending', last_error=NULL, updated_at=? "
+                    "WHERE task_id=? AND status='error'",
+                    (self._clock.now(), task_id),
+                )
+        return self._claim_test_task(
+            task_batch_id=None,
+            task_id=task_id,
+            lease_owner=lease_owner,
+            lease_seconds=lease_seconds,
+        )
+
+    def _claim_test_task(
+        self,
+        *,
+        task_batch_id: str | None,
+        task_id: str | None,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> dict[str, Any] | None:
+        if not lease_owner:
+            raise ContractError("lease_owner must not be empty")
+        if lease_seconds < 1:
+            raise ContractError("lease_seconds must be at least 1")
+        now = self._clock.now()
+        expires = (
+            datetime.fromisoformat(now.replace("Z", "+00:00"))
+            + timedelta(seconds=lease_seconds)
+        ).astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "UPDATE test_tasks SET status='pending', lease_owner=NULL, "
+                    "lease_expires_at=NULL, updated_at=? "
+                    "WHERE status IN ('leased','generating','preprocessing','evaluating','syncing') "
+                    "AND lease_expires_at IS NOT NULL "
+                    "AND lease_expires_at <= ?",
+                    (now, now),
+                )
+                clauses = ["status='pending'"]
+                params: list[Any] = []
+                if task_batch_id:
+                    clauses.append("task_batch_id=?")
+                    params.append(task_batch_id)
+                if task_id:
+                    clauses.append("task_id=?")
+                    params.append(task_id)
+                row = self._conn.execute(
+                    "SELECT task_id FROM test_tasks WHERE "
+                    + " AND ".join(clauses)
+                    + " ORDER BY task_id LIMIT 1",
+                    params,
+                ).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return None
+                claimed_id = row["task_id"]
+                self._conn.execute(
+                    "UPDATE test_tasks SET status='leased', lease_owner=?, "
+                    "lease_expires_at=?, attempt_count=attempt_count+1, updated_at=? "
+                    "WHERE task_id=? AND status='pending'",
+                    (lease_owner, expires, now, claimed_id),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_test_task(claimed_id)
+
+    def update_test_task(
+        self,
+        task_id: str,
+        status: str,
+        *,
+        lease_owner: str | None = None,
+        result_refs: dict[str, Any] | None = None,
+        last_error: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        allowed = {
+            "pending", "leased", "generating", "preprocessing", "evaluating",
+            "syncing", "completed", "error", "cancelled"
+        }
+        if status not in allowed:
+            raise ContractError(f"invalid test task status: {status}")
+        current = self.get_test_task(task_id)
+        if current["status"] in {"completed", "cancelled"} and status != current["status"]:
+            raise StateError(
+                f"terminal test task {task_id} cannot transition from {current['status']} to {status}"
+            )
+        if lease_owner and current.get("lease_owner") not in {None, lease_owner}:
+            raise ConflictError(f"test task {task_id} is leased by another worker")
+        merged_refs = {**current.get("result_refs", {}), **(result_refs or {})}
+        terminal = status in {"completed", "error", "cancelled"}
+        with self._conn:
+            self._conn.execute(
+                "UPDATE test_tasks SET status=?, result_refs=?, last_error=?, "
+                "lease_owner=?, lease_expires_at=?, updated_at=? WHERE task_id=?",
+                (
+                    status,
+                    _json(merged_refs),
+                    _json(last_error) if last_error is not None else None,
+                    None if terminal else current.get("lease_owner"),
+                    None if terminal else current.get("lease_expires_at"),
+                    self._clock.now(),
+                    task_id,
+                ),
+            )
+        return self.get_test_task(task_id)
+
+    def test_task_summary(self, task_batch_id: str) -> dict[str, Any]:
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) AS count FROM test_tasks "
+            "WHERE task_batch_id=? GROUP BY status ORDER BY status",
+            (task_batch_id,),
+        ).fetchall()
+        counts = {row["status"]: int(row["count"]) for row in rows}
+        return {
+            "task_batch_id": task_batch_id,
+            "total": sum(counts.values()),
+            "counts": counts,
+        }
 
     # ------------------------------------------------------------------
     # generation runs
@@ -931,6 +1151,24 @@ class SqliteMetadataRepository:
         data["provenance"] = json.loads(row["provenance"])
         data["metrics"] = json.loads(row["metrics"])
         return data
+
+    @staticmethod
+    def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "task_id": row["task_id"],
+            "task_batch_id": row["task_batch_id"],
+            "plan_id": row["plan_id"],
+            "case_id": row["case_id"],
+            "status": row["status"],
+            "payload": json.loads(row["payload"]),
+            "lease_owner": row["lease_owner"],
+            "lease_expires_at": row["lease_expires_at"],
+            "attempt_count": int(row["attempt_count"]),
+            "result_refs": json.loads(row["result_refs"]),
+            "last_error": json.loads(row["last_error"]) if row["last_error"] else None,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     def close(self) -> None:
         self._conn.close()

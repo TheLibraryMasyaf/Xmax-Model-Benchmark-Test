@@ -84,6 +84,11 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 .venv/bin/xmax-test plan build --request config/run-request.json
 .venv/bin/xmax-test plan show --plan-id <plan_id>
 
+.venv/bin/xmax-test worker status --task-batch-id <task_batch_id>
+.venv/bin/xmax-test task show --task-id <task_id>
+.venv/bin/xmax-test task run --task-id <task_id> --lease-owner <agent-id> --budget-approved
+.venv/bin/xmax-test worker run --task-batch-id <task_batch_id> --lease-owner <agent-id> --budget-approved
+
 .venv/bin/xmax-test generate offline --plan-id <plan_id> --resume --budget-approved
 .venv/bin/xmax-test generate realtime --plan-id <plan_id> --resume --budget-approved
 
@@ -114,6 +119,8 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 ```
 
 分阶段命令用于独立交付、隔日续流和排障；完整流程优先使用统一Run命令。
+
+Plan Build会返回`task_batch_id`。需要边生成边评测并让调度器反复消费单条任务时，优先使用`worker run`。默认每条任务运行到飞书同步和对账；仅本地执行时显式传`--sync-policy none --no-reconcile`。详细合同见`docs/task-execution.md`。
 
 ## 6. 独立阶段范式
 
@@ -181,6 +188,8 @@ Canonical与Scenario结果
 系统只能要求操作者决定：付费预算批准、提供缺失外部凭据、确认删除/迁移正式数据、提供仍未确定的Benchmark或场景包。
 
 系统不会自动决定扩大阶段范围。单阶段输入缺失时，必须返回缺失的批次类型和建议命令，由操作者或上层Agent发起新请求。
+
+组合分配可用`cartesian`、`random_pairs`、`random_runs`或`explicit_pairs`，示例见`config/run-task-allocation.example.json`。`repeat_count`默认5但可修改；`random_runs.target_run_count`表示最终任务总数，不再额外乘`repeat_count`。
 
 ## 9. 模型版本更新报告
 

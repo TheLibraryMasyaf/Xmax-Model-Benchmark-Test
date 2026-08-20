@@ -23,6 +23,8 @@ from xmax_test.generation.offline.rest_adapter import FakeOfflineTaskTransport
 from xmax_test.generation.offline.rtc_adapter import FakeRtcAdapter
 from xmax_test.generation.offline.session_api import FakeSessionApiClient
 from xmax_test.storage.sqlite import SqliteMetadataRepository
+from xmax_test.tasks import TaskWorker
+from xmax_test.tasks.runtime import PipelineTaskRuntime
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -280,6 +282,27 @@ class FakeRunE2ETestBase(unittest.TestCase):
 
 
 class FullPipelineTests(FakeRunE2ETestBase):
+    def test_task_worker_runs_one_frozen_case_through_sync_and_reconcile(self) -> None:
+        self.seed_assets("task-worker")
+        plan = self.build_plan("x2.0")
+        runtime = PipelineTaskRuntime(
+            self.composition,
+            lease_owner="e2e-worker",
+            sync_policy="full",
+            reconcile=True,
+        )
+        summary = TaskWorker(self.composition.database, runtime).run_batch(
+            plan["task_batch_id"], lease_owner="e2e-worker"
+        )
+        self.assertEqual(summary["errors"], [], summary)
+        self.assertEqual(summary["counts"], {"completed": len(plan["cases"])})
+        tasks = self.composition.database.list_test_tasks(
+            task_batch_id=plan["task_batch_id"]
+        )
+        self.assertTrue(all(task["result_refs"].get("run_id") for task in tasks))
+        self.assertTrue(all(task["result_refs"].get("evaluation_id") for task in tasks))
+        self.assertEqual(len(self.fake_feishu._tables["tbl-case"]), len(plan["cases"]))
+
     def test_unified_pipeline_syncs_and_reconciles_only_current_run_batch(self) -> None:
         self.seed_assets("sync-scope")
         plan = self.build_plan("x2.0")

@@ -261,8 +261,12 @@ class PipelineOrchestrator:
         # Output refs are derived from batch manifests when the executor only
         # returned batches, keeping the executor contract small.
         output_refs = list(result.output_refs)
-        if not output_refs:
-            output_refs = [ref_for_batch(batch) for batch in result.batch_manifests]
+        existing_ref_keys = {(ref.entity_type, ref.entity_id) for ref in output_refs}
+        for batch in result.batch_manifests:
+            batch_ref = ref_for_batch(batch)
+            if (batch_ref.entity_type, batch_ref.entity_id) not in existing_ref_keys:
+                output_refs.append(batch_ref)
+                existing_ref_keys.add((batch_ref.entity_type, batch_ref.entity_id))
         if dry_run and not output_refs:
             entity_type = output_entity_type(stage)
             if entity_type:

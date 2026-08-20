@@ -25,6 +25,7 @@ SQLite启动时启用外键、WAL和busy timeout。迁移只前进，记录`sche
 | `assets` | `asset_id`，内容哈希唯一 | 内容版本不可覆盖，只更新校验状态和可重建索引 |
 | `test_plans` | `plan_id + plan_version`，`plan_hash`唯一 | 冻结后不可修改 |
 | `test_cases` | `case_id` | 同一规范化组合幂等 |
+| `test_tasks` | `task_id`，`task_batch_id + case_id`唯一 | 冻结输入不覆盖；状态、租约和结果引用只前进更新 |
 | `generation_runs` | `run_id` | 每次尝试新建，终态不可回到运行态 |
 | `run_events` | `run_id + sequence`，外部事件去重键可选 | 仅追加 |
 | `preprocess_runs` | `preprocess_id`，输入+配置+版本哈希唯一 | 可重建但历史记录保留 |

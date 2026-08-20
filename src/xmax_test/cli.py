@@ -54,6 +54,7 @@ REQUIRED_PROJECT_FILES = (
     "config/run-generate-only.example.json",
     "config/run-import-evaluate-only.example.json",
     "config/run-request.example.json",
+    "config/run-task-allocation.example.json",
     "config/run-sync-scores-only.example.json",
     "config/scenarios.json",
     "config/scenarios.example.json",
@@ -64,6 +65,7 @@ REQUIRED_PROJECT_FILES = (
     "docs/feishu-database.md",
     "docs/implementation-contract.md",
     "docs/stage-orchestration.md",
+    "docs/task-execution.md",
     "docs/operation-recipes.md",
     "docs/scene-weighting.md",
     "docs/storage.md",
@@ -84,6 +86,8 @@ REQUIRED_PROJECT_FILES = (
     "schemas/run-request.schema.json",
     "schemas/scenario-pack.schema.json",
     "schemas/stage-manifest.schema.json",
+    "schemas/test-plan.schema.json",
+    "schemas/test-task.schema.json",
 )
 
 
@@ -709,6 +713,10 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
             "generation_modes": request.get("generation_modes", ["offline"]),
             "generation_mode_overrides": request.get("generation_mode_overrides", []),
             "filters": request.get("filters", {}),
+            "seed": request.get("seed"),
+            "combination_selection": request.get(
+                "combination_selection", {"strategy": "cartesian"}
+            ),
             "generation_config": {
                 "quality": composition.project.get("xmax_offline_quality", "hd"),
                 "fps": composition.project.get("xmax_offline_fps", 24),
@@ -720,7 +728,21 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
             preview = builder.preview(plan_request)
             return StageExecutionResult(status="completed", output_refs=[], metadata={"preview": preview})
         plan = builder.build(plan_request)
-        return StageExecutionResult(status="completed", output_refs=[ref_for_plan(plan)], batch_manifests=[])
+        from .pipeline.manifests import build_batch_manifest
+
+        task_manifest = build_batch_manifest(
+            entity_type="task_batch",
+            item_entity_type="test_task",
+            item_ids=plan["task_ids"],
+            producer_stage_run_id=req.stage_run_id,
+            batch_id=plan["task_batch_id"],
+            metadata={"plan_id": plan["plan_id"], "allocation": plan["metadata"]["allocation"]},
+        )
+        return StageExecutionResult(
+            status="completed",
+            output_refs=[ref_for_plan(plan)],
+            batch_manifests=[task_manifest],
+        )
 
     return _stage_wrapper(PipelineStage.PLAN, execute)
 
@@ -1299,6 +1321,10 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
         "generation_modes": request.get("generation_modes", ["offline"]),
         "generation_mode_overrides": request.get("generation_mode_overrides", []),
         "filters": request.get("filters", {}),
+        "seed": request.get("seed"),
+        "combination_selection": request.get(
+            "combination_selection", {"strategy": "cartesian"}
+        ),
         "generation_config": {
             "quality": composition.project.get("xmax_offline_quality", "hd"),
             "fps": composition.project.get("xmax_offline_fps", 24),
@@ -1310,8 +1336,93 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
         data = builder.preview(plan_request)
     else:
         data = builder.build(plan_request)
+        from .pipeline.manifests import ManifestStore, build_batch_manifest
+
+        task_manifest = build_batch_manifest(
+            entity_type="task_batch",
+            item_entity_type="test_task",
+            item_ids=data["task_ids"],
+            producer_stage_run_id="cli-plan",
+            batch_id=data["task_batch_id"],
+            metadata={"plan_id": data["plan_id"]},
+        )
+        ManifestStore(composition.manifest_root, composition.database).save_batch_manifest(task_manifest)
     _emit(args, f"plan.{args.action}", data)
     return 0
+
+
+def cmd_task(composition: Composition, args: argparse.Namespace) -> int:
+    """Inspect, claim, or execute one frozen task."""
+
+    if args.action == "show":
+        data = composition.database.get_test_task(args.task_id)
+        _emit(args, "task.show", data)
+        return 0
+    if args.action == "claim":
+        data = composition.database.claim_next_test_task(
+            args.task_batch_id,
+            args.lease_owner,
+            lease_seconds=args.lease_seconds,
+        )
+        _emit(args, "task.claim", {"task": data})
+        return 0
+    if not args.budget_approved:
+        from .errors import ApprovalRequiredError
+
+        raise ApprovalRequiredError(
+            "task execution may call paid generation; preview the plan and pass --budget-approved"
+        )
+    from .tasks import TaskWorker
+    from .tasks.runtime import PipelineTaskRuntime
+
+    runtime = PipelineTaskRuntime(
+        composition,
+        lease_owner=args.lease_owner,
+        sync_policy=args.sync_policy,
+        reconcile=not args.no_reconcile,
+        headed=args.headed,
+    )
+    data = TaskWorker(composition.database, runtime).run_task(
+        args.task_id,
+        lease_owner=args.lease_owner,
+        lease_seconds=args.lease_seconds,
+        resume=args.resume,
+    )
+    _emit(args, "task.run", data, ok=data.get("status") == "completed")
+    return 0 if data.get("status") == "completed" else EXIT_PARTIAL
+
+
+def cmd_worker(composition: Composition, args: argparse.Namespace) -> int:
+    """Repeatedly consume frozen tasks until empty or max_tasks is reached."""
+
+    if args.action == "status":
+        data = composition.database.test_task_summary(args.task_batch_id)
+        _emit(args, "worker.status", data)
+        return 0
+    if not args.budget_approved:
+        from .errors import ApprovalRequiredError
+
+        raise ApprovalRequiredError(
+            "worker execution may call paid generation; preview the plan and pass --budget-approved"
+        )
+    from .tasks import TaskWorker
+    from .tasks.runtime import PipelineTaskRuntime
+
+    runtime = PipelineTaskRuntime(
+        composition,
+        lease_owner=args.lease_owner,
+        sync_policy=args.sync_policy,
+        reconcile=not args.no_reconcile,
+        headed=args.headed,
+    )
+    data = TaskWorker(composition.database, runtime).run_batch(
+        args.task_batch_id,
+        lease_owner=args.lease_owner,
+        lease_seconds=args.lease_seconds,
+        max_tasks=args.max_tasks,
+    )
+    _emit(args, "worker.run", data, ok=not data.get("errors"))
+    return 0 if not data.get("errors") else EXIT_PARTIAL
 
 
 def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> int:
@@ -1502,6 +1613,7 @@ def _guess_entity_type(batch_id: str) -> str:
     prefix_map = {
         "assets": "asset_batch",
         "plan": "test_plan",
+        "tasks": "task_batch",
         "runs": "run_batch",
         "prep": "preprocess_batch",
         "eval": "evaluation_batch",
@@ -1635,6 +1747,37 @@ def build_parser() -> argparse.ArgumentParser:
     realtime_parser.add_argument("--headed", action="store_true")
     realtime_parser.add_argument("--resume", action="store_true")
     realtime_parser.add_argument("--budget-approved", action="store_true")
+
+    p = subparsers.add_parser("task", help="inspect, claim, or run one frozen test task")
+    sub = p.add_subparsers(dest="action", required=True)
+    sub.add_parser("show").add_argument("--task-id", required=True)
+    claim_parser = sub.add_parser("claim")
+    claim_parser.add_argument("--task-batch-id", required=True)
+    claim_parser.add_argument("--lease-owner", required=True)
+    claim_parser.add_argument("--lease-seconds", type=int, default=900)
+    task_run = sub.add_parser("run")
+    task_run.add_argument("--task-id", required=True)
+    task_run.add_argument("--lease-owner", required=True)
+    task_run.add_argument("--lease-seconds", type=int, default=900)
+    task_run.add_argument("--sync-policy", choices=["none", "score_only", "metadata_only", "attachments_only", "full"], default="full")
+    task_run.add_argument("--no-reconcile", action="store_true")
+    task_run.add_argument("--headed", action="store_true")
+    task_run.add_argument("--resume", action="store_true")
+    task_run.add_argument("--budget-approved", action="store_true")
+
+    p = subparsers.add_parser("worker", help="consume a frozen task batch")
+    sub = p.add_subparsers(dest="action", required=True)
+    worker_status = sub.add_parser("status")
+    worker_status.add_argument("--task-batch-id", required=True)
+    worker_run = sub.add_parser("run")
+    worker_run.add_argument("--task-batch-id", required=True)
+    worker_run.add_argument("--lease-owner", required=True)
+    worker_run.add_argument("--lease-seconds", type=int, default=900)
+    worker_run.add_argument("--max-tasks", type=int)
+    worker_run.add_argument("--sync-policy", choices=["none", "score_only", "metadata_only", "attachments_only", "full"], default="full")
+    worker_run.add_argument("--no-reconcile", action="store_true")
+    worker_run.add_argument("--headed", action="store_true")
+    worker_run.add_argument("--budget-approved", action="store_true")
 
     p = subparsers.add_parser("preprocess", help="build preprocessing evidence")
     p.add_argument("--run-batch-id", required=True)
@@ -1973,6 +2116,8 @@ _HANDLERS: dict[str, Callable[[Composition, argparse.Namespace], int]] = {
     "run": cmd_run,
     "ingest": lambda c, a: cmd_ingest_assets(c, a) if a.action == "assets" else cmd_ingest_results(c, a),
     "plan": cmd_plan,
+    "task": cmd_task,
+    "worker": cmd_worker,
     "generate": lambda c, a: cmd_generate_offline(c, a) if a.action == "offline" else cmd_generate_realtime(c, a),
     "preprocess": cmd_preprocess,
     "evaluate": cmd_evaluate,

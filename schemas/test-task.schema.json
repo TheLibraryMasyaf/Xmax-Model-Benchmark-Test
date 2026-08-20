@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Frozen Test Task",
+  "type": "object",
+  "required": [
+    "task_id", "task_batch_id", "plan_id", "case_id", "status",
+    "payload", "result_refs", "created_at"
+  ],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^task-"},
+    "task_batch_id": {"type": "string", "pattern": "^tasks-"},
+    "plan_id": {"type": "string", "minLength": 1},
+    "case_id": {"type": "string", "minLength": 1},
+    "status": {
+      "enum": [
+        "pending", "leased", "generating", "preprocessing", "evaluating",
+        "syncing", "completed", "error", "cancelled"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "required": ["schema_version", "plan_hash", "allocation_index", "case"],
+      "properties": {
+        "schema_version": {"const": "1"},
+        "plan_hash": {"type": "string", "minLength": 1},
+        "allocation_index": {"type": "integer", "minimum": 1},
+        "case": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "lease_owner": {"type": ["string", "null"]},
+    "lease_expires_at": {"type": ["string", "null"]},
+    "attempt_count": {"type": "integer", "minimum": 0},
+    "result_refs": {"type": "object"},
+    "last_error": {"type": ["object", "null"]},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string"}
+  },
+  "additionalProperties": false
+}

@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `asset_id` | 一个内容确定的素材版本 | 内容变化时新建 |
 | `case_id` | Feed、Prompt、配方、模式、配置与重复序号的内部稳定ID | 组合不变则稳定 |
+| `task_id` | 某冻结计划中一个Case的可租约执行单元 | Plan Hash和Case不变则稳定 |
 | `case_number` | 飞书Case编号，如`feed002_prompt037_03` | TestPlan冻结后稳定 |
 | `run_id` | 一次实际生成尝试 | 每次执行新建 |
 | `evaluation_id` | 某组Judge对某次Run的评测 | 每次评测新建 |
@@ -34,6 +35,17 @@ Schema：`schemas/test-plan.schema.json`。TestPlan是版本化集合；TestCase
 TestCase中的`scenario_id`引用Scenario Pack；`scene_tags`固定为`{tag_name: tag_value}`对象，不是自由文本数组。标签值必须来自该Pack的`tag_definitions`。
 
 每个TestCase还必须保存：`feed_number`、`prompt_number`、`case_number`、Operation Recipe ID/版本、`edited_video_asset_id`、`expected_audio_source_asset_id`和最终API素材绑定。内部`case_id`用于稳定关联，外部`case_number`用于飞书和本地Case目录，两者不得互相替代。
+
+### 2.2.1 TestTask
+
+Schema：`schemas/test-task.schema.json`。Task内嵌冻结TestCase快照，并保存`task_batch_id`、分配顺序、租约、Attempt、状态和下游`result_refs`。Task是调度单元，Case是业务输入单元，Run是真实生成Attempt，三者不得混用。
+
+```text
+pending → leased → generating → preprocessing → evaluating → syncing → completed
+                    └─ 任意基础设施异常 → error
+```
+
+模型正常返回生成失败Run时，Task仍标记`completed`且`outcome=generation_error`，并按0%同步；`error`只表示流程基础设施未完成，可用`--resume`重试。
 
 ### 2.3 GenerationRun
 

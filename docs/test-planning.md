@@ -18,13 +18,33 @@ Operation Recipe来自`config/operation-recipes.json`，负责声明玩法默认
 2. 加载通过 Schema 校验的 Scenario Pack，根据玩法/场景规则组成 Feed与Prompt，并产出合法场景标签。
 3. 解析Operation Recipe并固化`edited_video_asset_id`、`expected_audio_source_asset_id`和API绑定。
 4. 分配 `offline`、`realtime` 或两者。
-5. 展开重复次数；默认5次，但Run Request、项目配置和单Case均可覆盖。
+5. 根据`combination_selection.strategy`选择组合，再展开重复次数。
 6. 从飞书现有最大后缀继续分配`case_number`，固定随机种子并生成稳定 `case_id`。
 7. 验证输出文件名、业务键和组合无重复。
 8. 生成预算预览，等待计费任务批准。
 9. 先生成最小 smoke 子计划，通过后再执行全量。
 
 `filters.feed_limit`和`filters.prompt_limit`表示按业务编号稳定排序后的前N项；也可用`feed_asset_ids`和`prompt_record_numbers`固定具体集合。所有过滤条件都写入Plan Hash和随机种子输入，避免小批次与全量计划互相误复用。
+
+### 2.1 组合分配策略
+
+| `strategy` | 数量语义 | `repeat_count` |
+| --- | --- | --- |
+| `cartesian` | 所有合法 Feed × Prompt 组合 | 每个组合展开，默认5，可修改 |
+| `random_pairs` | 固定seed随机选`target_pair_count`个组合 | 每个被选组合展开，可修改 |
+| `random_runs` | 固定seed抽样直到恰好`target_run_count`条任务 | 不再额外相乘；重复抽中同组合自动分配后缀 |
+| `explicit_pairs` | 只选`pairs`列出的Feed和Prompt记录对，不做交叉组合 | 每个指定组合展开，可修改 |
+
+所有随机选择只发生在Plan构建时，并连同seed、策略名、策略版本和最终Case集一起冻结。Worker不得再次抽样。扩展新形式时在`StrategyRegistry`注册新策略，不修改单条执行器。配置见`config/run-task-allocation.example.json`。
+
+```json
+{"combination_selection": {"strategy": "cartesian"}, "repeat_count": 5}
+{"combination_selection": {"strategy": "random_pairs", "target_pair_count": 10, "with_replacement": false}, "repeat_count": 3, "seed": 42}
+{"combination_selection": {"strategy": "random_runs", "target_run_count": 50, "with_replacement": true}, "seed": 42}
+{"combination_selection": {"strategy": "explicit_pairs", "pairs": [{"feed_asset_id": "asset-feed-id", "prompt_record_number": 7}]}, "repeat_count": 5}
+```
+
+`target_run_count`计算真实生成Attempt，正常生成失败也占一条并记0%；不会为“补足成功视频数”而改变已冻结样本分布。
 
 ## 3. 生成模式解析
 
@@ -71,7 +91,7 @@ TestPlan保存：
 - 被编辑视频、预期音轨来源和API素材绑定。
 - 飞书`case_number`及编号分配时读取的远端revision。
 
-同一计划重跑时创建新的GenerationRun，但TestCase ID保持不变。
+同一计划重跑时TestCase ID保持不变。Task Worker默认幂等复用已完成Task；如需新一轮真实重测，必须构建新计划/新编号快照，不覆盖旧Run。
 
 一个Case只代表一次Run。重复次数大于1时，每次Run在飞书Case表中独立写一行，编号为`feedXXX_promptYYY_01..._NN`。后续同版本、同组合重测从远端最大后缀继续；生成失败仍占用编号并以0%写入，重试不得覆盖。
 

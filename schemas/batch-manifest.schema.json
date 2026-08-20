@@ -19,6 +19,7 @@
       "enum": [
         "asset_batch",
         "test_plan",
+        "task_batch",
         "run_batch",
         "preprocess_batch",
         "evaluation_batch",
