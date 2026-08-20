@@ -40,6 +40,15 @@ STAGE_REQUIRED_INPUTS: dict[str, tuple[str, ...]] = {
     "reconcile": ("sync_batch",),
 }
 
+# Inputs a stage may consume when an upstream stage produced them, but which
+# are not mandatory for every valid invocation.  A full sync may legitimately
+# publish generated runs before evaluation, while a unified
+# generate->evaluate->sync request must bind the exact Evaluation Batch so its
+# scores and descriptions are written instead of silently leaving them blank.
+STAGE_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
+    "sync": ("evaluation_batch",),
+}
+
 # Stable topological order: dependencies before dependents.
 STAGE_ORDER: tuple[str, ...] = (
     "ingest",

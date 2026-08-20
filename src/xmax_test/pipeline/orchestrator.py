@@ -75,7 +75,13 @@ class PipelineOrchestrator:
                 )
             # Selector-provided inputs satisfy the stage contract without
             # running any upstream stage.
-            provided_view = dict(available)
+            # Copy the lists as well as the mapping.  Appending frozen stage
+            # inputs to a shallow copy used to mutate ``available`` and caused
+            # the same run_batch ref to multiply at every downstream stage.
+            provided_view = {
+                entity_type: list(refs)
+                for entity_type, refs in available.items()
+            }
             for ref in stage_input_refs:
                 provided_view.setdefault(ref.entity_type, []).append(ref)
             missing = check_stage_inputs(stage, provided_view, set(stages))
@@ -146,13 +152,26 @@ class PipelineOrchestrator:
         for entity_type, items in available.items():
             if entity_type in self._consumes(stage):
                 refs.extend(items)
-        return refs
+        # A ref may be available both from a frozen selector and an upstream
+        # stage.  Preserve order while ensuring every exact batch is consumed
+        # once, which keeps hashes and manifests deterministic.
+        unique: list[EntityRef] = []
+        seen: set[tuple[str, str, str]] = set()
+        for ref in refs:
+            key = (ref.entity_type, ref.entity_id, ref.content_hash)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(ref)
+        return unique
 
     @staticmethod
     def _consumes(stage: str) -> set[str]:
-        from .models import STAGE_REQUIRED_INPUTS
+        from .models import STAGE_OPTIONAL_INPUTS, STAGE_REQUIRED_INPUTS
 
-        return set(STAGE_REQUIRED_INPUTS.get(stage, ()))
+        return set(STAGE_REQUIRED_INPUTS.get(stage, ())) | set(
+            STAGE_OPTIONAL_INPUTS.get(stage, ())
+        )
 
     def _stage_config(
         self,

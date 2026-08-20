@@ -203,6 +203,45 @@ class DependencyTests(PipelineTestBase):
 
 
 class OrchestratorTests(PipelineTestBase):
+    def test_sync_consumes_exact_evaluation_batch_without_duplicate_refs(self) -> None:
+        stages = ["plan", "generate", "preprocess", "evaluate", "sync"]
+        asset_batch = self.seed_asset_batch()
+        seen_sync_refs: list[tuple[str, str]] = []
+
+        class CapturingSyncExecutor(RecordingExecutor):
+            def execute(self, request: StageExecutionRequest) -> StageExecutionResult:
+                seen_sync_refs.extend(
+                    (ref.entity_type, ref.entity_id) for ref in request.input_refs
+                )
+                return super().execute(request)
+
+        executors = {
+            PipelineStage(stage): RecordingExecutor(stage, self.calls)
+            for stage in stages
+        }
+        executors[PipelineStage.SYNC] = CapturingSyncExecutor("sync", self.calls)
+        orchestrator = PipelineOrchestrator(
+            self.repository, self.manifest_store, self.selectors, executors
+        )
+
+        summary = orchestrator.run(
+            self.request(
+                stages,
+                stage_inputs={
+                    "plan": [self.selector("asset_batch", [asset_batch])]
+                },
+                sync_policy="full",
+            ),
+            budget_approved=True,
+        )
+
+        self.assertTrue(summary["ok"])
+        self.assertEqual(
+            [entity_type for entity_type, _ in seen_sync_refs],
+            ["run_batch", "evaluation_batch"],
+        )
+        self.assertEqual(len(seen_sync_refs), len(set(seen_sync_refs)))
+
     def test_dry_run_publishes_placeholders_for_no_output_executors(self) -> None:
         stages = ["ingest", "plan", "generate", "preprocess", "evaluate"]
 
