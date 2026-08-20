@@ -1,0 +1,38 @@
+{
+  "$schema": "../schemas/run-request.schema.json",
+  "request_id": "feishu-first-5x5-shadow-smoke-20260820",
+  "stages": [
+    "ingest",
+    "plan",
+    "generate",
+    "preprocess",
+    "evaluate",
+    "sync",
+    "reconcile"
+  ],
+  "stage_inputs": {},
+  "dependency_policy": "explicit_only",
+  "missing_input_policy": "error",
+  "sync_policy": "full",
+  "existing_results_request_path": null,
+  "benchmark_path": "BENCHMARK.md",
+  "scenario_pack_path": "config/scenarios.json",
+  "generation_modes": ["offline", "realtime"],
+  "execution_mode": "streaming",
+  "pipeline_queue_size": 2,
+  "repeat_count": 1,
+  "generation_mode_overrides": [],
+  "dry_run": false,
+  "smoke_limit": null,
+  "filters": {
+    "feed_asset_ids": [
+      "asset_698ea6f75b110128",
+      "asset_81e1cab4923b6458",
+      "asset_f1156cc822cad47c",
+      "asset_649acf4153c192f3",
+      "asset_4d34c2078d557530"
+    ],
+    "prompt_record_numbers": ["001", "002", "006", "009", "010"]
+  },
+  "manifest_directory": "var/manifests"
+}

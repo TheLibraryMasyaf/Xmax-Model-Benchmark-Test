@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/interaction-profiles.schema.json",
+  "profile_pack_id": "xmax-default-realtime-interactions",
+  "version": "0.1.0",
+  "profiles": [
+    {
+      "profile_id": "pointer-track-30fps-v1",
+      "version": "0.1.0",
+      "event_kind": "pointer_tracks",
+      "sample_fps": 30,
+      "segments": [
+        {"start_ms": 500, "duration_ms": 1000, "from": [0.25, 0.50], "to": [0.75, 0.50], "fingers": 1},
+        {"start_ms": 2000, "duration_ms": 1000, "from": [0.50, 0.25], "to": [0.50, 0.75], "fingers": 1}
+      ]
+    },
+    {
+      "profile_id": "camera-gesture-v1",
+      "version": "0.1.0",
+      "event_kind": "input_stream_gesture",
+      "sample_fps": 30,
+      "segments": []
+    }
+  ]
+}

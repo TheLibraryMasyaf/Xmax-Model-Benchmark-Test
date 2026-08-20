@@ -1,0 +1,10 @@
+{
+  "$schema": "../schemas/human-feedback-source.schema.json",
+  "source_id": "feishu-xlive-human-feedback",
+  "kind": "feishu_bitable",
+  "app_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+  "table_id": "tblNUhtfVZ6CC1F5",
+  "comment_field": "备注",
+  "video_fields": ["旧版模型生成结果", "新版模型生成结果"],
+  "review_context": "unknown"
+}

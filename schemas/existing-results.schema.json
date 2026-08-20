@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Existing Result Import Request",
+  "type": "object",
+  "required": [
+    "import_request_id",
+    "source",
+    "selector",
+    "field_mapping",
+    "mode_resolution",
+    "download",
+    "validation",
+    "imported_run_status",
+    "write_remote"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "import_request_id": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["feishu_case_data", "local_directory", "stage_manifest"]},
+        "base_token": {"type": "string"},
+        "table_id": {"type": "string"},
+        "directory": {"type": "string"},
+        "manifest_uri": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "selector": {"$ref": "pipeline-selector.schema.json"},
+    "field_mapping": {
+      "type": "object",
+      "required": [
+        "case_number",
+        "result_attachment",
+        "model_version",
+        "feed_attachment",
+        "prompt_text",
+        "prompt_attachment"
+      ],
+      "properties": {
+        "case_number": {"type": "string"},
+        "result_attachment": {"type": "string"},
+        "model_version": {"type": "string"},
+        "feed_attachment": {"type": "string"},
+        "prompt_text": {"type": "string"},
+        "prompt_attachment": {"type": "string"},
+        "generation_mode": {"type": ["string", "null"]},
+        "operation_recipe_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "mode_resolution": {
+      "type": "object",
+      "required": ["order", "on_unresolved"],
+      "properties": {
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["explicit_field", "operation_recipe", "fixed_default"]}
+        },
+        "fixed_default": {"enum": ["offline", "realtime"]},
+        "on_unresolved": {"const": "error"}
+      },
+      "additionalProperties": false
+    },
+    "download": {
+      "type": "object",
+      "required": ["result_video", "feed_and_prompt_inputs"],
+      "properties": {
+        "result_video": {"const": true},
+        "feed_and_prompt_inputs": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "required": ["media", "content_hash", "required_case_context"],
+      "properties": {
+        "media": {"const": true},
+        "content_hash": {"const": true},
+        "required_case_context": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "imported_run_status": {"const": "completed"},
+    "write_remote": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"source": {"properties": {"kind": {"const": "feishu_case_data"}}}}},
+      "then": {"properties": {"source": {"required": ["base_token", "table_id"]}}}
+    },
+    {
+      "if": {"properties": {"source": {"properties": {"kind": {"const": "local_directory"}}}}},
+      "then": {"properties": {"source": {"required": ["directory"]}}}
+    },
+    {
+      "if": {"properties": {"source": {"properties": {"kind": {"const": "stage_manifest"}}}}},
+      "then": {"properties": {"source": {"required": ["manifest_uri"]}}}
+    }
+  ],
+  "additionalProperties": false
+}

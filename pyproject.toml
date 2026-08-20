@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xmax-test"
+version = "0.1.0"
+description = "XMAX offline/realtime generation benchmark orchestration scaffold"
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema>=4.23,<5"
+]
+
+[project.optional-dependencies]
+production = [
+  "cos-python-sdk-v5>=1.9.35,<2",
+  "static-ffmpeg==3.0"
+]
+
+[project.scripts]
+xmax-test = "xmax_test.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

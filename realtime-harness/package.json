@@ -1,0 +1,23 @@
+{
+  "name": "xmax-realtime-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser harness for XMAX realtime SDK: session control, recording, event scripts and RTC logs",
+  "type": "module",
+  "scripts": {
+    "harness": "node src/harness.js",
+    "build:sdk": "node scripts/build-sdk.js",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xmaxai/sdk": "1.1.6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright": "^1.44.0",
+    "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "fast-xml-parser": "4.5.5"
+  }
+}

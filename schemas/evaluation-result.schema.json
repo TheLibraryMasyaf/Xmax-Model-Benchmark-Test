@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Evaluation Result",
+  "type": "object",
+  "required": [
+    "evaluation_id",
+    "evaluation_batch_id",
+    "run_id",
+    "benchmark_version",
+    "scenario_pack_version",
+    "score_schema_version",
+    "dimension_results",
+    "weight_resolution",
+    "case_score_percent"
+  ],
+  "properties": {
+    "evaluation_id": {"type": "string"},
+    "evaluation_batch_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string"},
+    "benchmark_version": {"type": "string"},
+    "scenario_pack_version": {"type": "string"},
+    "score_schema_version": {"type": "string"},
+    "dimension_results": {"type": "array", "items": {"type": "object"}},
+    "canonical_score": {"type": ["number", "null"]},
+    "scenario_score": {"type": ["number", "null"]},
+    "case_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "score_display_format": {"const": "percentage"},
+    "weight_resolution": {
+      "type": "object",
+      "required": [
+        "base_profile_id",
+        "base_profile_version",
+        "matched_rule_ids",
+        "matched_rule_versions",
+        "scene_tags_hash",
+        "effective_weights",
+        "excluded_dimensions",
+        "rule_excluded_dimensions"
+      ],
+      "properties": {
+        "base_profile_id": {"type": "string"},
+        "base_profile_version": {"type": "string"},
+        "matched_rule_ids": {"type": "array", "items": {"type": "string"}},
+        "matched_rule_versions": {"type": "array", "items": {"type": "string"}},
+        "scene_tags_hash": {"type": "string"},
+        "effective_weights": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "excluded_dimensions": {"type": "array", "items": {"type": "string"}},
+        "rule_excluded_dimensions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "applied_gate_ids": {"type": "array", "items": {"type": "string"}},
+    "final_verdict": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

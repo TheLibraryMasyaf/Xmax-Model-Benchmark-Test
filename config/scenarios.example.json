@@ -1,0 +1,867 @@
+{
+  "$schema": "../schemas/scenario-pack.schema.json",
+  "scenario_pack_id": "xmax-scenes",
+  "version": "0.1.0-draft",
+  "status": "shadow",
+  "provisional": true,
+  "review_after": "first_round_evaluation",
+  "tag_definitions": {
+    "input_dimension": {
+      "description": "对模型难度和用户需求影响最大的输入视频标签。",
+      "values": [
+        "他拍",
+        "光照快速变化",
+        "固定镜头",
+        "多主体",
+        "快速运动",
+        "短时输入",
+        "缓慢移动镜头",
+        "自拍",
+        "长时连续输入"
+      ]
+    },
+    "instruction_dimension": {
+      "description": "对模型难度和用户需求影响最大的输入指令标签。",
+      "values": [
+        "修改主体",
+        "修改环境或风格",
+        "动作控制",
+        "单一事件",
+        "单次互动",
+        "多阶段事件",
+        "新增主体",
+        "新增物体或触发特效",
+        "连续或多对象互动"
+      ]
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "core-selfie-appearance",
+      "name": "日常自拍视频换装或换角色",
+      "description": "用户在卧室、客厅或办公室等日常环境打开前置摄像头，想实时预览或拍后把自己换成指定服装、真实人物或虚拟角色，同时保留原本的脸部身份、基本动作和背景。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "自拍",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline",
+        "realtime"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "自拍输入会放大脸部、发丝、领口、手部和上半身边缘，修改主体要求目标外观准确出现且非目标内容不被误改。单主体、缓慢运动、稳定光照、外观控制和实时或离线生成是主要附加标签。",
+      "source_weight_rationale": "自拍近景最容易暴露脸部身份、发丝、领口和服装贴合问题，因此提高 C3、C4、C7 的占比；实时模式进一步强调对象绑定和启动体验，离线模式进一步强调编辑边界与源视频保持。"
+    },
+    {
+      "scenario_id": "core-selfie-action-expression",
+      "name": "日常自拍视频动作与表情替换",
+      "description": "用户用前置摄像头录制日常自拍，想让画面中的自己改成指定姿态、手势、口型、表情或情绪表现，同时尽量保持本人外观、背景和拍摄构图。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "自拍",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline",
+        "realtime"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "自拍近景使五官、嘴部和手部错误非常显眼，修改主体中的动作与表情替换要求目标表现完整生效，又不能让人物身份和身体结构随之漂移。单主体、固定或轻微移动镜头、短时输入和动作与表情控制是主要附加标签。",
+      "source_weight_rationale": "近景动作与表情替换首先要保证目标表现、身份和面部手部结构，因此 C5、C4、C7 权重最高；实时模式额外提高响应和跟手权重，离线模式额外检查时序、编辑边界和成片同步。"
+    },
+    {
+      "scenario_id": "core-dance-fixed-camera-appearance",
+      "name": "固定机位舞蹈短视频替换角色或服装",
+      "description": "用户在家中、舞蹈室或户外固定手机机位拍摄单人舞蹈，为了制作换装、换人或换角色短视频，希望完整保留原舞蹈动作和节奏，同时让替换后的角色或服装全程稳定。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "快速运动",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "快速运动会放大肢体结构、转身遮挡和运动边缘问题，修改主体要求人物或服装在高速动作中持续正确绑定。他拍全身、固定镜头、单主体、短时输入和离线成片是主要附加标签。",
+      "source_weight_rationale": "固定机位降低了镜头空间难度，但快速全身舞会集中放大动作丢失、肢体错误、身份漂移和运动伪影，因此 C5、C7、C3、C4 占主要权重。"
+    },
+    {
+      "scenario_id": "core-dance-moving-camera-appearance",
+      "name": "移动镜头热门舞蹈主体替换角色或服装",
+      "description": "用户找到一段带有推拉、环绕、跟拍或机位切换的热门舞蹈视频，想在离线二创中把原舞者替换成自己、朋友或指定虚拟角色，或者换上指定服装，同时保留原舞蹈动作、节奏和运镜。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "快速运动",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "快速运动会放大肢体结构和外观稳定问题，修改主体要求角色或服装持续绑定原舞者；移动镜头还会不断改变人物尺度、透视、背景和遮挡关系。单主体、短时输入、参考内容还原和离线二创是主要附加标签。",
+      "source_weight_rationale": "除快速舞蹈本身外，推拉、环绕和跟拍会持续改变尺度、透视、遮挡和背景，因此在保持 C5、C7 高权重的同时显著提高 C6。"
+    },
+    {
+      "scenario_id": "core-live-long-appearance",
+      "name": "单人直播虚拟形象或换装",
+      "description": "主播在固定直播位长时间出镜，想把真人持续替换成给定虚拟形象，或实时换上指定服装、发型和身材效果，并在讲话、做表情、轻度动作、遮挡或暂时离镜后仍保持同一形象。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "长时连续输入",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "长时连续输入会持续放大人物、角色、服装和画风的累计漂移，修改主体要求虚拟形象或服装长期稳定绑定本人。单主体、固定镜头、稳定光照、实时生成和外观控制是主要附加标签。",
+      "source_weight_rationale": "直播需要虚拟身份长期稳定绑定主播，因此 C4、C3、C2 与 R6 为核心；遮挡恢复、动作跟随、实时流畅度和启动体验共同决定是否可以持续使用。"
+    },
+    {
+      "scenario_id": "core-vlog-moving-camera-style",
+      "name": "自拍旅行 Vlog 风格化",
+      "description": "用户边走边用前置摄像头记录旅行、通勤或逛街片段，想在拍后把环境转换为指定画风或氛围，同时保留本人、原始运镜和地点结构。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "修改环境或风格"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "缓慢移动镜头会持续改变背景结构、透视和人物边缘，修改环境或风格要求整段画面保持统一效果且不破坏原始空间关系。自拍、复杂场景、自然光变化、短时输入和离线生成是主要附加标签。",
+      "source_weight_rationale": "旅行 Vlog 的关键是移动镜头下的背景结构、人物边缘和整体风格持续统一，因此 C6、C2、C3、C9 权重较高，并用 O1、O2 检查原运镜、人物和地点关系是否被破坏。"
+    },
+    {
+      "scenario_id": "core-real-scene-effects",
+      "name": "他拍实景视频特效增强",
+      "description": "用户用手机他拍一栋建筑、街道或人物动作片段，想在拍后让大楼出现持续燃烧、烟雾或爆炸效果，或者让人物出拳、挥手等动作带出火焰、能量或冲击特效，同时保留原场景、人物动作和镜头运动。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "修改环境或风格"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "缓慢移动镜头会持续改变环境结构、人物位置和特效透视，修改环境或风格要求特效稳定附着在已有建筑、空间或动作上，而不是漂浮、错位或变成独立对象。他拍、真实场景、复杂背景、动作触发、短时输入和离线制作是主要附加标签。",
+      "source_weight_rationale": "建筑燃烧、拳头火焰等效果依赖正确的目标、空间位置、触发过程、遮挡和光影，因此 C8 权重最高，C2、C6、C9 共同保证特效既做对又融入原画面。"
+    },
+    {
+      "scenario_id": "core-moving-camera-added-subject",
+      "name": "移动镜头下新增虚拟主体并持续互动",
+      "description": "用户用手机缓慢拍摄桌面、房间或身边环境，想加入一个虚拟人物、角色或宠物，并继续通过靠近、跟随、挥手、触碰或多次动作让它持续回应；移动镜头后，新主体仍应保持正确位置、尺度、透视和遮挡。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "新增主体"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "缓慢移动镜头要求新增主体随视角变化稳定锚定，新增主体又要求形象、接地和空间关系可信。无主体或单主体输入、简单场景、连续或多次互动、短时或长时实时生成是主要附加标签。",
+      "source_weight_rationale": "新增主体既要在移动镜头下稳定存在，又要对多次动作及时、准确地回应，因此 C6、C8、C2 与 R2、R3、R4 共同占据主要权重。"
+    },
+    {
+      "scenario_id": "core-multi-subject-appearance",
+      "name": "多人合拍换装或换角色",
+      "description": "朋友、情侣或家人在固定机位前共同拍摄短视频、直播或视频通话，想让每个人分别换上指定服装或替换成不同角色，同时保持各自身份、站位、原动作和背景，并在遮挡或换位后仍绑定正确。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "多主体",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline",
+        "realtime"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "多主体输入会增加人物区分和遮挡恢复难度，修改主体要求服装或角色与对应人物一一绑定。固定镜头、缓慢或快速运动、稳定光照、外观控制以及实时或离线生成是主要附加标签。",
+      "source_weight_rationale": "多人换装或换角色最怕对象选错、身份串联和遮挡后错绑，因此 C2、C3、C4、C7 权重最高；实时模式强化 R3、R5，离线模式强化 O1、O2。"
+    },
+    {
+      "scenario_id": "core-multi-subject-action-expression",
+      "name": "多人合拍换动作或表情",
+      "description": "多名用户在固定机位前共同出镜，想让其中一人或多人改成指定舞蹈、手势、姿态、口型或表情，同时保持每个人的外观身份、站位和动作归属，不让不同人物的动作或表情相互串联。",
+      "tier": "core",
+      "tags": {
+        "input_dimension": "多主体",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline",
+        "realtime"
+      ],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "多主体输入要求模型持续区分每个人，修改主体中的动作或表情替换要求目标表现只作用于指定人物。固定镜头、单人或多人同时修改、短时或长时输入以及实时或离线生成是主要附加标签。",
+      "source_weight_rationale": "该场景需要把动作、表情和时序准确分配给指定人物，因此 C5、C2、C4、C7 为核心；实时模式提高响应与触发准确性，离线模式提高源视频保持和成片完整性。"
+    },
+    {
+      "scenario_id": "supp-selfie-lip-sync",
+      "name": "自拍对口型短视频",
+      "description": "用户录制歌曲、台词或网络热梗，希望生成的人物、角色或表情效果与原音频的嘴型、停顿和情绪同步",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "自拍",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、近景、短时输入、表情控制、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C7",
+        "C9",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-sequential-transformation",
+      "name": "单人连续变身短视频",
+      "description": "用户通过多个动作节点依次切换服装、人物或角色，并保持各阶段顺序、衔接和人物位置稳定",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "短时输入",
+        "instruction_dimension": "多阶段事件"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、固定镜头、修改主体、稳定光照、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C9",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-full-body-outfit",
+      "name": "日常他拍全身换装",
+      "description": "朋友在室内或街边拍摄全身视频，用户希望实时或拍后替换服装，并在走动、转身时保持身体比例和服装贴合",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "他拍",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline",
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、缓慢运动、稳定光照、固定镜头、外观控制",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C6",
+        "C7",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R7",
+        "O1",
+        "O2",
+        "O3",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-realtime-gesture-effect",
+      "name": "实时手势与动作特效",
+      "description": "用户挥手、比心或做快速手势，希望虚拟效果立即在正确位置出现并完成一次反馈",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "快速运动",
+        "instruction_dimension": "单次互动"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "自拍、固定镜头、单主体、新增物体或触发特效、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C5",
+        "C7",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R6",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-stage-role-replacement",
+      "name": "舞台表演拍后换角色",
+      "description": "在舞台灯光和快速动作中把主要表演者替换为指定人物或虚拟角色，同时保留构图和舞台氛围",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "光照快速变化",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "他拍、快速运动、复杂场景、短时输入、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C9",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-night-live-avatar",
+      "name": "夜间动态灯光直播",
+      "description": "主播在夜间或动态灯效环境中实时保持指定虚拟形象或服装，并持续跟随动作",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "光照快速变化",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "快速运动、复杂场景、长时连续输入、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C7",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R5",
+        "R6",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-realtime-meme-preview",
+      "name": "实时表情与梗效果预览",
+      "description": "用户在聊天、视频通话或拍摄前做表情，实时预览对应的夸张表情、角色表情或梗效果",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "自拍",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、近景、表情控制、连续触发、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C4",
+        "C5",
+        "C7",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-avatar-dubbing",
+      "name": "虚拟角色台词配音短视频",
+      "description": "用户录制面部表演和台词，再替换为指定虚拟角色，使角色复现口型、停顿和情绪",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "自拍",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、短时输入、目标虚拟角色、表情控制、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C7",
+        "C9",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-dance-live",
+      "name": "单人舞蹈直播",
+      "description": "主播持续跳舞并实时驱动角色、服装或身体效果，在长时间表演中保持动作和角色稳定",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "长时连续输入",
+        "instruction_dimension": "动作控制"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "快速运动、他拍全身、固定镜头、修改主体、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R6",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-hand-dance-tutorial",
+      "name": "单人手势舞表演/教程",
+      "description": "用户持续完成复杂手部动作，希望手部清晰、无穿模、多手或其他肢体结构错误",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "长时连续输入",
+        "instruction_dimension": "动作控制"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "快速运动、单主体、固定镜头、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R6",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-location-style-replacement",
+      "name": "他拍探店或街拍环境替换",
+      "description": "朋友跟拍用户在商场、餐厅或街道行走，拍后替换地点或风格并保留人物和商品关系",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "修改环境或风格"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "他拍、复杂场景、真人主体、短时输入、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C4",
+        "C6",
+        "C7",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-realtime-walk-style-preview",
+      "name": "实时边走边拍风格预览",
+      "description": "用户在街道、商场或景区边走边拍，实时查看动漫化、电影感或其他整体风格",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "修改环境或风格"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "复杂场景、光照变化、自拍或他拍、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C4",
+        "C6",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R4",
+        "R5",
+        "R6",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-indoor-virtual-pet",
+      "name": "拍后加入室内虚拟宠物",
+      "description": "用户先拍摄室内视频，再加入指定虚拟宠物，并使其在镜头移动时保持位置、比例和接地关系",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "新增主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "简单场景、无主体或单主体、短时输入、无互动、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C6",
+        "C7",
+        "C8",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-handheld-virtual-object",
+      "name": "实时手持虚拟物体展示",
+      "description": "用户伸出手掌实时托住或展示虚拟道具、商品或小型角色，并保持手部接触关系",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "缓慢移动镜头",
+        "instruction_dimension": "新增物体或触发特效"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "自拍、简单场景、单次互动、手部遮挡、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C6",
+        "C7",
+        "C8",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-human-virtual-coacting",
+      "name": "拍后制作真人与虚拟角色合演",
+      "description": "用户先拍摄击掌、接物或并肩走动片段，再加入虚拟角色完成一次可信互动",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "固定镜头",
+        "instruction_dimension": "新增主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、他拍、简单场景、单次互动、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C7",
+        "C8",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-family-pet-interaction",
+      "name": "家庭成员与宠物互动短视频",
+      "description": "家人或朋友与宠物玩耍、追逐、喂食或接触，要求人物、宠物和动作持续正确对应",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "多主体",
+        "instruction_dimension": "连续或多对象互动"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "快速运动、复杂场景、频繁遮挡、短时输入、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8",
+        "C9",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-multi-user-virtual-control",
+      "name": "多人实时操控虚拟物体",
+      "description": "多名用户通过动作持续控制多个虚拟物体或角色，并让每个效果绑定正确的人",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "多主体",
+        "instruction_dimension": "连续或多对象互动"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "快速运动、固定镜头、长时连续输入、新增物体或触发特效、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C4",
+        "C5",
+        "C7",
+        "C8"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R6",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-multi-subject-style",
+      "name": "多人合拍统一风格化",
+      "description": "多人合拍后统一转换成动漫、游戏或电影风格，同时保留个体差异和站位",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "多主体",
+        "instruction_dimension": "修改主体"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "他拍、固定镜头、短时输入、外观控制、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C6",
+        "C7",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-one-shot-character-prop",
+      "name": "拍后加入一次性角色或道具",
+      "description": "在日常视频中加入一个指定角色、宠物或道具，使其出现、停留或完成一次简单动作",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "短时输入",
+        "instruction_dimension": "单一事件"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "固定镜头、简单场景、无主体或单主体、新增主体或物体、无互动、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C5",
+        "C6",
+        "C8",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-realtime-one-shot-effect",
+      "name": "实时触发一次性特效",
+      "description": "用户挥手、打响指、触碰或做表情，实时触发火焰、变色、破碎或角色出现等效果",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "短时输入",
+        "instruction_dimension": "单一事件"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "自拍、固定镜头、快速运动、单次互动、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C5",
+        "C6",
+        "C7",
+        "C8",
+        "C9"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R7"
+      ]
+    },
+    {
+      "scenario_id": "supp-multi-character-story",
+      "name": "多人角色扮演剧情短视频",
+      "description": "多人剧情片段中把不同人物分别替换为指定角色，并保持角色归属、事件顺序和互动结果",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "多主体",
+        "instruction_dimension": "多阶段事件"
+      },
+      "supported_modes": [
+        "offline"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "固定镜头、修改主体、角色互动、短时输入、离线",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "O1",
+        "O2",
+        "O3",
+        "O4",
+        "O6"
+      ]
+    },
+    {
+      "scenario_id": "supp-live-sequential-transformation",
+      "name": "实时连续换装或换角色表演",
+      "description": "主播或普通用户通过多个动作节点连续切换服装、人物或角色，并保持整段表演连贯",
+      "tier": "supplementary",
+      "tags": {
+        "input_dimension": "长时连续输入",
+        "instruction_dimension": "多阶段事件"
+      },
+      "supported_modes": [
+        "realtime"
+      ],
+      "weight_policy": "generic_profile",
+      "source_additional_labels": "单主体、固定镜头、修改主体、连续触发、实时",
+      "recommended_common_dimensions": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C10"
+      ],
+      "recommended_mode_dimensions": [
+        "R1",
+        "R2",
+        "R3",
+        "R5",
+        "R6",
+        "R7"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/run-request.schema.json",
+  "request_id": "replace-sync-scores-only",
+  "stages": ["sync"],
+  "stage_inputs": {
+    "sync": [
+      {
+        "selector_id": "replace-evaluation-selector",
+        "state": "request",
+        "entity_type": "evaluation_batch",
+        "match": {"ids": ["replace-evaluation-batch-id"]}
+      }
+    ]
+  },
+  "dependency_policy": "explicit_only",
+  "missing_input_policy": "error",
+  "sync_policy": "score_only",
+  "existing_results_request_path": null,
+  "benchmark_path": "BENCHMARK.md",
+  "scenario_pack_path": "config/scenarios.json",
+  "dry_run": true,
+  "smoke_limit": null,
+  "manifest_directory": "var/manifests"
+}

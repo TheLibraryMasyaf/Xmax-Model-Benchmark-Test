@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/existing-results.schema.json",
+  "import_request_id": "replace-existing-results-import",
+  "source": {
+    "kind": "feishu_case_data",
+    "base_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+    "table_id": "tblohc666GKQCi1A"
+  },
+  "selector": {
+    "selector_id": "replace-case-selector",
+    "state": "request",
+    "entity_type": "source_record",
+    "match": {
+      "filters": {
+        "model_versions": ["replace-model-version"],
+        "case_numbers": []
+      }
+    }
+  },
+  "field_mapping": {
+    "case_number": "case编号",
+    "result_attachment": "case文件",
+    "model_version": "Xmax模型版本",
+    "feed_attachment": "feed文件",
+    "prompt_text": "prompt文字",
+    "prompt_attachment": "prompt素材",
+    "generation_mode": null,
+    "operation_recipe_id": null
+  },
+  "mode_resolution": {
+    "order": ["explicit_field", "operation_recipe"],
+    "on_unresolved": "error"
+  },
+  "download": {
+    "result_video": true,
+    "feed_and_prompt_inputs": true
+  },
+  "validation": {
+    "media": true,
+    "content_hash": true,
+    "required_case_context": true
+  },
+  "imported_run_status": "completed",
+  "write_remote": false
+}

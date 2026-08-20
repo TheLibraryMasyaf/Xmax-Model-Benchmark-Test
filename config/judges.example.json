@@ -1,0 +1,83 @@
+{
+  "$schema": "../schemas/judge-registry.schema.json",
+  "registry_version": "1.0",
+  "judges": [
+    {
+      "judge_id": "codex-mlmm",
+      "version": "draft",
+      "kind": "mlmm",
+      "enabled": false,
+      "entrypoint": "xmax_test.judges.mlmm.judge:MlmmJudge",
+      "batch_dimensions": true,
+      "max_retries": 2,
+      "provider": {
+        "type": "openai_compatible",
+        "credential_csv": "../QWEN_API.csv",
+        "api_key_csv_field": "apiKey",
+        "endpoint_csv_field": "openAiCompatible",
+        "models": ["qwen3-vl-plus", "qwen3-vl-flash"],
+        "response_format_type": "json_object",
+        "direct_media": true,
+        "video_options": {
+          "fps": 2.0,
+          "min_pixels": 65536,
+          "max_pixels": 655360,
+          "total_pixels": 134217728
+        },
+        "image_options": {
+          "min_pixels": 65536,
+          "max_pixels": 1310720
+        },
+        "max_base64_bytes": 10000000,
+        "request_options": {"enable_thinking": false},
+        "timeout_seconds": 300
+      },
+      "calibration": {
+        "path": "var/feedback/learning.train.jsonl",
+        "max_examples_per_dimension": 2
+      },
+      "supported_dimensions": [
+        "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10",
+        "O1", "O2", "O3", "O4", "O6", "R3", "R4", "R5"
+      ],
+      "supported_modes": ["offline", "realtime"],
+      "required_inputs": ["feed_evidence", "prompt", "result_evidence"],
+      "timeout_seconds": 300
+    },
+    {
+      "judge_id": "video-quality-cv",
+      "version": "0.2.0-shadow",
+      "kind": "cv",
+      "enabled": false,
+      "entrypoint": "xmax_test.judges.plugins.video_quality:VideoQualityJudge",
+      "supported_dimensions": ["C9", "O6"],
+      "supported_modes": ["offline", "realtime"],
+      "required_inputs": ["result_video"],
+      "timeout_seconds": 300
+    },
+    {
+      "judge_id": "run-metrics",
+      "version": "0.1.0-shadow",
+      "kind": "metric",
+      "enabled": false,
+      "entrypoint": "xmax_test.judges.plugins.run_metrics:RunMetricsJudge",
+      "supported_dimensions": [
+        "C1", "O3", "O4", "O5", "R1", "R2", "R3", "R5", "R6", "R7"
+      ],
+      "supported_modes": ["offline", "realtime"],
+      "required_inputs": ["generation_run"],
+      "timeout_seconds": 30
+    },
+    {
+      "judge_id": "audio-integrity-metric",
+      "version": "0.1.0",
+      "kind": "metric",
+      "enabled": false,
+      "entrypoint": "xmax_test.judges.plugins.audio_integrity:AudioIntegrityJudge",
+      "supported_dimensions": ["O6", "R7"],
+      "supported_modes": ["offline", "realtime"],
+      "required_inputs": ["result_video", "expected_audio_source"],
+      "timeout_seconds": 300
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xmax.local/schemas/benchmark.schema.json",
+  "title": "XMAX Benchmark Contract",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "benchmark_version",
+    "status",
+    "dimensions",
+    "weight_profiles",
+    "scene_weight_rules",
+    "hard_gates",
+    "score_schemas",
+    "change_log"
+  ],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "benchmark_version": {"type": "string"},
+    "status": {
+      "enum": ["discussion", "draft", "shadow", "active", "deprecated", "archived"]
+    },
+    "dimensions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/dimension"}
+    },
+    "weight_profiles": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/weightProfile"}
+    },
+    "scene_weight_rules": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/sceneWeightRule"}
+    },
+    "hard_gates": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/hardGate"}
+    },
+    "score_schemas": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/scoreSchema"}
+    },
+    "change_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["version", "date", "summary"],
+        "properties": {
+          "version": {"type": "string"},
+          "date": {"type": "string"},
+          "summary": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "required": [
+        "dimension_id",
+        "version",
+        "name",
+        "status",
+        "definition",
+        "applicable_modes",
+        "score_type"
+      ],
+      "properties": {
+        "dimension_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "parent_dimension": {"type": ["string", "null"]},
+        "status": {
+          "enum": ["proposed", "draft", "shadow", "active", "deprecated", "archived"]
+        },
+        "definition": {"type": "string"},
+        "applicable_modes": {
+          "type": "array",
+          "items": {"enum": ["offline", "realtime", "both"]},
+          "minItems": 1
+        },
+        "score_type": {"type": "string"},
+        "anchors": {"type": "object"},
+        "required_evidence": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "judge_routing": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "scoreSchema": {
+      "type": "object",
+      "required": ["score_schema_id", "version", "status", "dimensions", "weight_profile_by_mode"],
+      "properties": {
+        "score_schema_id": {"type": "string"},
+        "version": {"type": "string"},
+        "status": {"enum": ["draft", "shadow", "active", "deprecated"]},
+        "dimensions": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "weight_profile_by_mode": {
+          "type": "object",
+          "properties": {
+            "offline": {"type": "string"},
+            "realtime": {"type": "string"}
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "case_score_output": {"enum": ["canonical_score", "scenario_score"]},
+        "comparison_policy": {
+          "type": "object",
+          "required": [
+            "improvement_min_delta",
+            "tie_abs_delta_max",
+            "regression_min_delta",
+            "minimum_comparable_pairs"
+          ],
+          "properties": {
+            "improvement_min_delta": {"type": "number", "minimum": 0},
+            "tie_abs_delta_max": {"type": "number", "minimum": 0},
+            "regression_min_delta": {"type": "number", "minimum": 0},
+            "minimum_comparable_pairs": {"type": "integer", "minimum": 1},
+            "confidence_level": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "weightProfile": {
+      "type": "object",
+      "required": ["profile_id", "version", "status", "applicable_modes", "weights"],
+      "properties": {
+        "profile_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "status": {"enum": ["draft", "shadow", "active", "deprecated"]},
+        "applicable_modes": {
+          "type": "array",
+          "items": {"enum": ["offline", "realtime"]},
+          "minItems": 1
+        },
+        "weights": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "maximum_rule_multiplier": {"type": "number", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "sceneWeightRule": {
+      "type": "object",
+      "required": ["rule_id", "version", "status", "priority", "applicable_profile_ids", "when"],
+      "properties": {
+        "rule_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "status": {"enum": ["draft", "shadow", "active", "deprecated"]},
+        "priority": {"type": "integer"},
+        "applicable_profile_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "when": {"type": "object"},
+        "weight_multipliers": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "weight_overrides": {
+          "type": "object",
+          "additionalProperties": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "exclude_dimensions": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "hardGate": {
+      "type": "object",
+      "required": ["gate_id", "version", "status", "condition", "action"],
+      "properties": {
+        "gate_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "status": {"enum": ["draft", "shadow", "active", "deprecated"]},
+        "condition": {"type": "object"},
+        "action": {"type": "object"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

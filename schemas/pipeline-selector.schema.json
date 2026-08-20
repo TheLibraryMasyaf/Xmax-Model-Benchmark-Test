@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Pipeline Input Selector",
+  "type": "object",
+  "required": ["selector_id", "state", "entity_type", "match"],
+  "properties": {
+    "selector_id": {"type": "string", "minLength": 1},
+    "state": {"enum": ["request", "frozen"]},
+    "entity_type": {
+      "enum": [
+        "asset_batch",
+        "test_plan",
+        "run_batch",
+        "preprocess_batch",
+        "evaluation_batch",
+        "human_signal_batch",
+        "report_bundle",
+        "sync_batch",
+        "source_record"
+      ]
+    },
+    "match": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ids"],
+          "properties": {
+            "ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["filters"],
+          "properties": {
+            "filters": {"type": "object", "minProperties": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["manifest_uri"],
+          "properties": {
+            "manifest_uri": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "resolved_entity_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "snapshot_at": {"type": ["string", "null"]},
+    "snapshot_hash": {"type": ["string", "null"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "frozen"}}, "required": ["state"]},
+      "then": {"required": ["resolved_entity_ids", "snapshot_at", "snapshot_hash"]}
+    }
+  ],
+  "additionalProperties": false
+}

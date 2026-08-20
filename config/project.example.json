@@ -1,0 +1,23 @@
+{
+  "$schema": "../schemas/project-config.schema.json",
+  "project_id": "xmax-test-local",
+  "benchmark_path": "BENCHMARK.md",
+  "scenario_pack_path": "config/scenarios.json",
+  "operation_recipe_path": "config/operation-recipes.json",
+  "artifact_root": "var/artifacts",
+  "manifest_root": "var/manifests",
+  "database_path": "var/xmax-test.sqlite3",
+  "default_model": "x2.0",
+  "default_repeats": 5,
+  "xmax_api_base_url": "https://api.xmaxai.com/open/api/v1",
+  "xmax_api_key_file": "../API_KEY.txt",
+  "xmax_offline_quality": "hd",
+  "xmax_offline_fps": 24,
+  "generation_modes": ["offline", "realtime"],
+  "paid_run_requires_approval": true,
+  "codex": {
+    "binary": "/Applications/ChatGPT.app/Contents/Resources/codex",
+    "timeout_seconds": 300,
+    "max_retries": 2
+  }
+}

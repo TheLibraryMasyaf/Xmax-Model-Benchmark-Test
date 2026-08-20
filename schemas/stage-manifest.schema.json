@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Pipeline Stage Manifest",
+  "type": "object",
+  "required": [
+    "stage_run_id",
+    "stage",
+    "status",
+    "input_refs",
+    "output_refs",
+    "input_hash",
+    "config_hash",
+    "producer_version",
+    "started_at",
+    "attempt_count"
+  ],
+  "properties": {
+    "stage_run_id": {"type": "string", "minLength": 1},
+    "stage": {
+      "enum": [
+        "ingest",
+        "plan",
+        "generate",
+        "preprocess",
+        "evaluate",
+        "feedback",
+        "report",
+        "sync",
+        "reconcile"
+      ]
+    },
+    "status": {
+      "enum": ["planned", "running", "completed", "partial", "error", "cancelled"]
+    },
+    "input_refs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/entity_ref"}
+    },
+    "output_refs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/entity_ref"}
+    },
+    "input_hash": {"type": "string", "minLength": 1},
+    "config_hash": {"type": "string", "minLength": 1},
+    "producer_version": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "minLength": 1},
+    "completed_at": {"type": ["string", "null"]},
+    "attempt_count": {"type": "integer", "minimum": 1},
+    "resumed_from_stage_run_id": {"type": ["string", "null"]},
+    "errors": {"type": "array", "items": {"type": "object"}},
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "entity_ref": {
+      "type": "object",
+      "required": ["entity_type", "entity_id", "content_hash"],
+      "properties": {
+        "entity_type": {
+          "enum": [
+            "asset_batch",
+            "test_plan",
+            "run_batch",
+            "preprocess_batch",
+            "evaluation_batch",
+            "human_signal_batch",
+            "report_bundle",
+            "sync_batch",
+            "source_snapshot"
+          ]
+        },
+        "entity_id": {"type": "string", "minLength": 1},
+        "content_hash": {"type": "string", "minLength": 1},
+        "manifest_uri": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

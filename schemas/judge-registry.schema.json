@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Judge Registry Config",
+  "type": "object",
+  "required": ["registry_version", "judges"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "registry_version": {"type": "string"},
+    "judges": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {"$ref": "judge-manifest.schema.json"},
+          {
+            "type": "object",
+            "required": ["enabled"],
+            "properties": {"enabled": {"type": "boolean"}}
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

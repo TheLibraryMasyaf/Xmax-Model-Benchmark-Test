@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Run Request",
+  "type": "object",
+  "required": [
+    "request_id",
+    "stages",
+    "stage_inputs",
+    "dependency_policy",
+    "missing_input_policy",
+    "sync_policy",
+    "benchmark_path",
+    "scenario_pack_path"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "request_id": {"type": "string", "minLength": 1},
+    "stages": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "ingest",
+          "plan",
+          "generate",
+          "preprocess",
+          "evaluate",
+          "feedback",
+          "report",
+          "sync",
+          "reconcile"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "stage_inputs": {
+      "type": "object",
+      "properties": {
+        "ingest": {"$ref": "#/$defs/selectors"},
+        "plan": {"$ref": "#/$defs/selectors"},
+        "generate": {"$ref": "#/$defs/selectors"},
+        "preprocess": {"$ref": "#/$defs/selectors"},
+        "evaluate": {"$ref": "#/$defs/selectors"},
+        "feedback": {"$ref": "#/$defs/selectors"},
+        "report": {"$ref": "#/$defs/selectors"},
+        "sync": {"$ref": "#/$defs/selectors"},
+        "reconcile": {"$ref": "#/$defs/selectors"}
+      },
+      "additionalProperties": false
+    },
+    "dependency_policy": {"const": "explicit_only"},
+    "missing_input_policy": {"const": "error"},
+    "sync_policy": {
+      "enum": ["none", "score_only", "metadata_only", "attachments_only", "full"]
+    },
+    "existing_results_request_path": {"type": ["string", "null"]},
+    "benchmark_path": {"type": "string", "minLength": 1},
+    "scenario_pack_path": {"type": "string", "minLength": 1},
+    "generation_modes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["offline", "realtime"]}
+    },
+    "execution_mode": {
+      "enum": ["streaming", "batch"],
+      "default": "streaming"
+    },
+    "pipeline_queue_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64,
+      "default": 4
+    },
+    "repeat_count": {"type": "integer", "minimum": 1, "default": 5},
+    "generation_mode_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["play_name", "mode"],
+        "properties": {
+          "play_name": {"type": "string", "minLength": 1},
+          "mode": {"enum": ["offline", "realtime"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "dry_run": {"type": "boolean"},
+    "smoke_limit": {"type": ["integer", "null"], "minimum": 1},
+    "filters": {
+      "type": "object",
+      "properties": {
+        "feed_asset_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "feed_limit": {"type": "integer", "minimum": 1},
+        "prompt_record_numbers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": ["string", "integer"]}
+        },
+        "prompt_limit": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "manifest_directory": {"type": "string", "minLength": 1},
+    "comparison": {
+      "type": "object",
+      "required": [
+        "comparison_id",
+        "baseline_model_version",
+        "candidate_model_version",
+        "requested_scene_ids",
+        "report_template_path",
+        "report_output_directory"
+      ],
+      "properties": {
+        "comparison_id": {"type": "string", "minLength": 1},
+        "baseline_model_version": {"type": "string", "minLength": 1},
+        "candidate_model_version": {"type": "string", "minLength": 1},
+        "requested_scene_ids": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "report_template_path": {"type": "string", "minLength": 1},
+        "report_output_directory": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "selectors": {
+      "type": "array",
+      "items": {"$ref": "pipeline-selector.schema.json"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"stages": {"contains": {"const": "report"}}},
+        "required": ["stages"]
+      },
+      "then": {"required": ["comparison"]}
+    },
+    {
+      "if": {
+        "properties": {"stages": {"contains": {"const": "sync"}}},
+        "required": ["stages"]
+      },
+      "then": {"properties": {"sync_policy": {"not": {"const": "none"}}}}
+    },
+    {
+      "if": {
+        "properties": {"stages": {"not": {"contains": {"const": "sync"}}}},
+        "required": ["stages"]
+      },
+      "then": {"properties": {"sync_policy": {"const": "none"}}}
+    },
+    {
+      "if": {
+        "properties": {"existing_results_request_path": {"type": "string"}},
+        "required": ["existing_results_request_path"]
+      },
+      "then": {"properties": {"stages": {"contains": {"const": "ingest"}}}}
+    }
+  ],
+  "additionalProperties": false
+}

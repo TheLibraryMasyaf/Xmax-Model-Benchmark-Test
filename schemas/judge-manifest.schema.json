@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Judge Manifest",
+  "type": "object",
+  "required": [
+    "judge_id",
+    "version",
+    "kind",
+    "supported_dimensions",
+    "supported_modes",
+    "required_inputs"
+  ],
+  "properties": {
+    "judge_id": {"type": "string"},
+    "version": {"type": "string"},
+    "kind": {"enum": ["cv", "python_plugin", "mlmm", "mlmm_cli", "metric", "fusion"]},
+    "status": {"enum": ["registered", "shadow", "champion", "deprecated"]},
+    "supported_dimensions": {"type": "array", "items": {"type": "string"}},
+    "supported_modes": {
+      "type": "array",
+      "items": {"enum": ["offline", "realtime"]}
+    },
+    "required_inputs": {"type": "array", "items": {"type": "string"}},
+    "optional_inputs": {"type": "array", "items": {"type": "string"}},
+    "entrypoint": {"type": "string"},
+    "resource": {"type": "object"},
+    "timeout_seconds": {"type": "integer", "minimum": 1},
+    "max_retries": {"type": "integer", "minimum": 0},
+    "batch_dimensions": {"type": "boolean"},
+    "provider": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["codex_cli", "openai_compatible", "python_plugin"]},
+        "binary": {"type": "string"},
+        "endpoint": {"type": "string"},
+        "model": {"type": "string"},
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "api_key_env": {"type": "string"},
+        "credential_csv": {"type": "string"},
+        "api_key_csv_field": {"type": "string"},
+        "endpoint_csv_field": {"type": "string"},
+        "response_format_type": {"enum": ["json_schema", "json_object"]},
+        "request_options": {"type": "object"},
+        "direct_media": {"type": "boolean"},
+        "video_options": {"type": "object"},
+        "image_options": {"type": "object"},
+        "max_base64_bytes": {"type": "integer", "minimum": 1},
+        "timeout_seconds": {"type": "integer", "minimum": 1},
+        "sandbox": {"type": "string"},
+        "entrypoint": {"type": "string"},
+        "kwargs": {"type": "object"},
+        "extra_headers": {"type": "object", "additionalProperties": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "calibration": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {"type": "string"},
+        "max_examples_per_dimension": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

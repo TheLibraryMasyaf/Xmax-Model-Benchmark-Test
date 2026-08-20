@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Scenario Pack",
+  "type": "object",
+  "required": ["scenario_pack_id", "version", "tag_definitions", "scenarios"],
+  "properties": {
+    "scenario_pack_id": {"type": "string"},
+    "version": {"type": "string"},
+    "tag_definitions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+          "description": {"type": "string"},
+          "values": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true}
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "name", "tags"],
+        "properties": {
+          "scenario_id": {"type": "string"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "tags": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

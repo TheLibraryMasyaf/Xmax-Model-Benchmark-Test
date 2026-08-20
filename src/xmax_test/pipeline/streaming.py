@@ -1,0 +1,191 @@
+"""Bounded per-run handoff for generate -> preprocess -> evaluate."""
+
+from __future__ import annotations
+
+import queue
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Iterable
+
+
+StageCallable = Callable[..., dict[str, Any]]
+
+
+@dataclass
+class StreamingOutcome:
+    runs: list[dict[str, Any]] = field(default_factory=list)
+    preprocess: list[dict[str, Any]] = field(default_factory=list)
+    evaluations: list[dict[str, Any]] = field(default_factory=list)
+    errors: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: {"generate": [], "preprocess": [], "evaluate": []}
+    )
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class StreamingPipelineCoordinator:
+    """Schedule independent stage services with bounded per-run queues."""
+
+    def __init__(
+        self,
+        *,
+        generate_case: StageCallable,
+        preprocess_run: StageCallable | None = None,
+        evaluate_run: StageCallable | None = None,
+        on_generated: Callable[[dict[str, Any]], None] | None = None,
+        queue_size: int = 4,
+    ) -> None:
+        if queue_size < 1:
+            raise ValueError("streaming queue_size must be at least 1")
+        if evaluate_run is not None and preprocess_run is None:
+            raise ValueError("streaming evaluation requires preprocessing")
+        self._generate = generate_case
+        self._preprocess = preprocess_run
+        self._evaluate = evaluate_run
+        self._on_generated = on_generated
+        self._queue_size = queue_size
+
+    def run(self, cases: Iterable[dict[str, Any]]) -> StreamingOutcome:
+        outcome = StreamingOutcome()
+        lock = threading.Lock()
+        generated_queue: queue.Queue[Any] = queue.Queue(maxsize=self._queue_size)
+        preprocessed_queue: queue.Queue[Any] = queue.Queue(maxsize=self._queue_size)
+        sentinel = object()
+        timings: dict[str, dict[str, float]] = {
+            stage: {} for stage in ("generate", "preprocess", "evaluate")
+        }
+
+        def mark(stage: str, key: str) -> None:
+            with lock:
+                timings[stage].setdefault(key, time.monotonic())
+
+        def add_error(stage: str, entity_id: str | None, exc: Any) -> None:
+            with lock:
+                outcome.errors[stage].append(
+                    {
+                        "code": "xmax.streaming_stage_error",
+                        "message": str(exc),
+                        "stage": stage,
+                        "retryable": False,
+                        "entity_id": entity_id,
+                    }
+                )
+
+        def preprocess_worker() -> None:
+            while True:
+                run = generated_queue.get()
+                try:
+                    if run is sentinel:
+                        if self._evaluate is not None:
+                            preprocessed_queue.put(sentinel)
+                        return
+                    mark("preprocess", "first_item_started")
+                    try:
+                        result = self._preprocess(run)  # type: ignore[misc]
+                    except Exception as exc:
+                        add_error("preprocess", run.get("run_id"), exc)
+                        continue
+                    with lock:
+                        outcome.preprocess.append(result)
+                    if self._evaluate is not None:
+                        preprocessed_queue.put((run, result))
+                finally:
+                    generated_queue.task_done()
+
+        def evaluate_worker() -> None:
+            while True:
+                item = preprocessed_queue.get()
+                try:
+                    if item is sentinel:
+                        return
+                    run, preprocess = item
+                    mark("evaluate", "first_item_started")
+                    try:
+                        result = self._evaluate(run, preprocess)  # type: ignore[misc]
+                    except Exception as exc:
+                        add_error("evaluate", run.get("run_id"), exc)
+                        continue
+                    with lock:
+                        outcome.evaluations.append(result)
+                finally:
+                    preprocessed_queue.task_done()
+
+        workers: list[threading.Thread] = []
+        if self._preprocess is not None:
+            workers.append(
+                threading.Thread(
+                    target=preprocess_worker,
+                    name="xmax-preprocess-worker",
+                    daemon=True,
+                )
+            )
+        if self._evaluate is not None:
+            workers.append(
+                threading.Thread(
+                    target=evaluate_worker,
+                    name="xmax-evaluate-worker",
+                    daemon=True,
+                )
+            )
+        for worker in workers:
+            worker.start()
+
+        for case in cases:
+            mark("generate", "first_item_started")
+            try:
+                run = self._generate(case)
+                if self._on_generated is not None:
+                    self._on_generated(run)
+                with lock:
+                    outcome.runs.append(run)
+                if run.get("status") != "completed":
+                    add_error(
+                        "generate",
+                        run.get("run_id"),
+                        f"generation finished with status {run.get('status')}",
+                    )
+                    continue
+                if self._preprocess is not None:
+                    generated_queue.put(run)
+            except Exception as exc:
+                add_error("generate", case.get("case_id"), exc)
+        mark("generate", "all_items_submitted")
+
+        if self._preprocess is not None:
+            generated_queue.put(sentinel)
+            generated_queue.join()
+        if self._evaluate is not None:
+            preprocessed_queue.join()
+        for worker in workers:
+            worker.join()
+
+        generation_finished = timings["generate"].get("all_items_submitted")
+        preprocess_started = timings["preprocess"].get("first_item_started")
+        evaluation_started = timings["evaluate"].get("first_item_started")
+        outcome.metadata = {
+            "execution_mode": "streaming",
+            "queue_size": self._queue_size,
+            "counts": {
+                "generated": len(outcome.runs),
+                "generation_reused": sum(
+                    1 for run in outcome.runs if run.get("stream_reused")
+                ),
+                "preprocessed": len(outcome.preprocess),
+                "evaluated": len(outcome.evaluations),
+            },
+            "overlap_observed": {
+                "preprocess_before_generation_finished": bool(
+                    len(outcome.runs) > 1
+                    and preprocess_started
+                    and generation_finished
+                    and preprocess_started < generation_finished
+                ),
+                "evaluate_before_generation_finished": bool(
+                    len(outcome.runs) > 1
+                    and evaluation_started
+                    and generation_finished
+                    and evaluation_started < generation_finished
+                ),
+            },
+        }
+        return outcome

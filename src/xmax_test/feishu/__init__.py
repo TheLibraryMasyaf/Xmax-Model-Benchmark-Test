@@ -1,0 +1,2 @@
+"""Feishu database synchronization boundary."""
+

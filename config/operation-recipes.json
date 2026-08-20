@@ -1,0 +1,110 @@
+{
+  "$schema": "../schemas/operation-recipes.schema.json",
+  "recipe_pack_id": "xmax-default-operation-recipes",
+  "version": "0.1.0",
+  "recipes": [
+    {
+      "recipe_id": "offline-image-reference",
+      "version": "0.1.0",
+      "play_names": ["换装", "更换服装", "换身材", "换人", "换舞资", "换舞姿", "换角色", "更换角色", "角色替换", "宠物替换", "换风格"],
+      "default_generation_mode": "offline",
+      "allowed_generation_modes": ["offline", "realtime"],
+      "prompt_template": "按照玩法要求，将被编辑视频中的目标主体替换或调整为参考图指定的内容",
+      "edited_video_role": "feed_video",
+      "expected_audio_source_role": "feed_video",
+      "evaluation_contract": {
+        "operation_summary": "以Feed视频作为被编辑的时间线和场景，使用Prompt图片指定要替换或调整的外观、身份、服装、身材、角色或风格。",
+        "result_expectation": "结果应保留Feed视频的动作、时序、镜头、背景及未要求修改的内容，同时让Prompt图片指定的目标变化稳定作用于正确主体。",
+        "role_semantics": {
+          "feed": "待编辑的原视频，也是动作、时序、镜头和场景基准。",
+          "prompt_text": "说明具体要修改的对象和目标。",
+          "prompt_reference": "提供目标外观、身份、服装、身材、角色或风格参考。",
+          "result_video": "应当是Feed视频按Prompt目标完成修改后的结果。"
+        },
+        "must_preserve": ["Feed动作与时序", "Feed镜头与背景", "未被Prompt要求修改的内容", "Feed原音轨"],
+        "must_change": ["Prompt文字指定的目标属性", "Prompt参考图明确指定的视觉特征"]
+      },
+      "bindings": {
+        "offline": {"refVideoPath": "feed_video", "refImagePath": "prompt_image"},
+        "realtime": {"input_method": "connectMedia", "ref_image_role": "prompt_image", "interaction_profile_id": null}
+      }
+    },
+    {
+      "recipe_id": "offline-video-reference-with-feed-capture",
+      "version": "0.1.0",
+      "play_names": ["运镜", "对口型", "手势舞", "舞蹈（全身）", "舞蹈", "换动作", "搞怪", "摇舞"],
+      "default_generation_mode": "offline",
+      "allowed_generation_modes": ["offline"],
+      "prompt_template": "让视频内容按照参考视频指定的动作、口型、节奏或运镜方式变化",
+      "edited_video_role": "prompt_video",
+      "expected_audio_source_role": "prompt_video",
+      "evaluation_contract": {
+        "operation_summary": "先从Feed视频取得主体截图作为目标人物或外观参考，再把该Feed主体替换到Prompt视频的主体位置；Prompt视频是被编辑的时间线。",
+        "result_expectation": "结果应让Feed截图中的主体身份或外观出现在Prompt视频中，并跟随Prompt视频原有的舞蹈、动作、口型、节奏和运镜，而不是让Feed原视频去模仿Prompt视频。",
+        "role_semantics": {
+          "feed": "只用于提取目标主体截图或身份外观，不提供结果动作时间线。",
+          "feed_capture": "从Feed提取并实际传入refImagePath的主体参考图。",
+          "prompt_text": "说明要复现的动作、舞蹈、口型、节奏、搞怪或运镜玩法。",
+          "prompt_reference": "Prompt视频，同时也是被编辑的基础视频和动作、节奏、镜头、背景基准。",
+          "result_video": "应当是Prompt视频中的原主体被Feed截图主体替换后的结果。"
+        },
+        "must_preserve": ["Prompt视频的动作与动作顺序", "Prompt视频的节奏与时序", "Prompt视频的运镜和背景", "Prompt视频原音轨"],
+        "must_change": ["Prompt视频中的目标主体身份或外观应替换为Feed截图主体"]
+      },
+      "bindings": {
+        "offline": {"refVideoPath": "prompt_video", "refImagePath": "feed_capture"}
+      }
+    },
+    {
+      "recipe_id": "realtime-track-interaction",
+      "version": "0.1.0",
+      "play_names": ["触控", "滑动", "拖动", "MoX", "触控特效", "魔法动图", "跟随轨迹"],
+      "default_generation_mode": "realtime",
+      "allowed_generation_modes": ["realtime"],
+      "prompt_template": "让画面主体按照实时指针轨迹自然移动或互动",
+      "edited_video_role": "realtime_input_stream",
+      "expected_audio_source_role": "realtime_input_stream",
+      "evaluation_contract": {
+        "operation_summary": "以实时Feed流为基础，通过版本化指针轨迹触发主体移动、跟随或互动。",
+        "result_expectation": "结果中的主体或特效应按实际发送的指针轨迹及时、准确、连续地响应，同时保持未被操作区域稳定。",
+        "role_semantics": {
+          "feed": "实时输入流和场景基准。",
+          "prompt_text": "说明轨迹应触发的移动或互动效果。",
+          "interaction_events": "实际发送给SDK的逐帧单指或多指轨迹。",
+          "result_video": "包含实时轨迹响应的录制结果。"
+        },
+        "must_preserve": ["未被操作的主体属性与场景", "实时输入流原音轨"],
+        "must_change": ["轨迹指定位置上的主体状态或互动效果"]
+      },
+      "bindings": {
+        "realtime": {"input_method": "connectMedia", "ref_image_role": "none", "interaction_profile_id": "pointer-track-30fps-v1"}
+      }
+    },
+    {
+      "recipe_id": "realtime-scene-interaction",
+      "version": "0.1.0",
+      "play_names": ["召唤", "实时手势互动", "DimX", "虚拟召唤", "魔法特效", "身体特效", "动物控制", "emoji if", "表情特效", "角色变形", "动作互动"],
+      "default_generation_mode": "realtime",
+      "allowed_generation_modes": ["realtime"],
+      "prompt_template": "让指定角色进入当前场景并按照用户动作或手势进行互动",
+      "edited_video_role": "realtime_input_stream",
+      "expected_audio_source_role": "realtime_input_stream",
+      "evaluation_contract": {
+        "operation_summary": "以实时Feed流为场景和动作输入，通过人物手势、身体动作及必要轨迹触发角色、物体或特效互动。",
+        "result_expectation": "新增角色、物体或特效应在正确触发时刻出现，并持续响应Feed中的受控动作或手势；如有Prompt图片，其视觉身份应作为目标参考。",
+        "role_semantics": {
+          "feed": "实时场景、人物动作和手势输入。",
+          "prompt_text": "说明要召唤或触发的角色、物体、变形或特效。",
+          "prompt_reference": "可选的目标角色或视觉参考图。",
+          "interaction_events": "实际记录的人物动作、手势或指针事件。",
+          "result_video": "包含实时互动响应的录制结果。"
+        },
+        "must_preserve": ["Feed中未要求修改的场景与主体内容", "实时输入流原音轨"],
+        "must_change": ["Prompt指定的角色、物体、变形或特效状态", "互动事件触发后的可见响应"]
+      },
+      "bindings": {
+        "realtime": {"input_method": "connectMedia", "ref_image_role": "prompt_image", "interaction_profile_id": "camera-gesture-v1"}
+      }
+    }
+  ]
+}

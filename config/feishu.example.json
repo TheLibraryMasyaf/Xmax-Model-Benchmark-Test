@@ -1,0 +1,40 @@
+{
+  "$schema": "../schemas/feishu-config.schema.json",
+  "connection": {
+    "provider": "lark-cli",
+    "identity": "user"
+  },
+  "base": {
+    "url": "https://zcn0qf3aul03.feishu.cn/base/NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+    "app_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg"
+  },
+  "tables": {
+    "feed_data": "tblE5VK7UH4aRHtU",
+    "prompt_data": "tblfeF0q2vqMn2S8",
+    "case_data": "tblohc666GKQCi1A"
+  },
+  "field_projection": {
+    "case_data": {
+      "case_number": "case编号",
+      "result_attachment": "case文件",
+      "score_percent": "case评分",
+      "description": "case说明",
+      "feed_attachments": "feed文件",
+      "prompt_text": "prompt文字",
+      "prompt_attachments": "prompt素材",
+      "model_version": "Xmax模型版本"
+    }
+  },
+  "case_score": {
+    "source": "scenario_score",
+    "display": "percentage",
+    "internal_range": [0, 100],
+    "feishu_storage_range": [0, 1],
+    "write_transform": "divide_by_100",
+    "read_transform": "multiply_by_100",
+    "unscored_value": null,
+    "failed_run_value": 0
+  },
+  "write_mode": "upsert",
+  "dry_run": true
+}

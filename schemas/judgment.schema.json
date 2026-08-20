@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Judgment",
+  "type": "object",
+  "required": [
+    "evaluation_id",
+    "run_id",
+    "benchmark_version",
+    "dimension_id",
+    "dimension_version",
+    "judge_id",
+    "judge_version",
+    "verdict",
+    "evidence"
+  ],
+  "properties": {
+    "evaluation_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "benchmark_version": {"type": "string"},
+    "dimension_id": {"type": "string"},
+    "dimension_version": {"type": "string"},
+    "judge_id": {"type": "string"},
+    "judge_version": {"type": "string"},
+    "verdict": {"type": "string"},
+    "score": {"type": ["number", "null"]},
+    "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "assessable": {"type": "boolean"},
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start_s": {"type": "number"},
+          "end_s": {"type": "number"},
+          "region": {"type": ["string", "object", "null"]},
+          "description": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "raw_metrics": {"type": "object"},
+    "raw_output_uri": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}
+

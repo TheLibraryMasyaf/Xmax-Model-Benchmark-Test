@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Model Version Update Report",
+  "type": "object",
+  "required": [
+    "comparison_id",
+    "status",
+    "baseline_model_version",
+    "candidate_model_version",
+    "benchmark_version",
+    "score_schema_version",
+    "scenario_pack_version",
+    "requested_scene_ids",
+    "comparability",
+    "score_summary",
+    "p0_improvements",
+    "p1_ties",
+    "p2_regressions",
+    "scene_results",
+    "audit"
+  ],
+  "properties": {
+    "comparison_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["complete", "partial", "not_comparable"]},
+    "baseline_model_version": {"type": "string"},
+    "candidate_model_version": {"type": "string"},
+    "benchmark_version": {"type": "string"},
+    "score_schema_version": {"type": "string"},
+    "scenario_pack_version": {"type": "string"},
+    "requested_scene_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "comparability": {
+      "type": "object",
+      "required": ["comparable", "differences"],
+      "properties": {
+        "comparable": {"type": "boolean"},
+        "differences": {"type": "array", "items": {"type": "object"}},
+        "excluded_case_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "score_summary": {
+      "type": "object",
+      "required": ["canonical", "scenario"],
+      "properties": {
+        "canonical": {"$ref": "#/$defs/scoreDelta"},
+        "scenario": {"$ref": "#/$defs/scoreDelta"}
+      },
+      "additionalProperties": false
+    },
+    "p0_improvements": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
+    "p1_ties": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
+    "p2_regressions": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
+    "scene_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "mode", "score_summary", "items", "evidence_ids"],
+        "properties": {
+          "scenario_id": {"type": "string"},
+          "mode": {"enum": ["offline", "realtime"]},
+          "score_summary": {"$ref": "#/$defs/scoreDelta"},
+          "items": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "human_signal_summary": {"type": "object"},
+    "release_recommendation": {"enum": ["promote", "shadow", "block", "retest"]},
+    "audit": {
+      "type": "object",
+      "required": ["template_path", "template_hash", "reporter_version", "artifact_uris"],
+      "properties": {
+        "template_path": {"type": "string"},
+        "template_hash": {"type": "string"},
+        "reporter_version": {"type": "string"},
+        "artifact_uris": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "scoreDelta": {
+      "type": "object",
+      "required": ["baseline", "candidate", "delta_points", "classification"],
+      "properties": {
+        "baseline": {"type": ["number", "null"]},
+        "candidate": {"type": ["number", "null"]},
+        "delta_points": {"type": ["number", "null"]},
+        "delta_percent": {"type": ["number", "null"]},
+        "classification": {"enum": ["p0", "p1", "p2", "unclassified", "not_comparable"]}
+      },
+      "additionalProperties": true
+    },
+    "comparisonItem": {
+      "type": "object",
+      "required": ["scope", "item_id", "baseline", "candidate", "delta_points", "evidence_ids"],
+      "properties": {
+        "scope": {"enum": ["overall", "scene", "dimension", "runtime", "gate"]},
+        "item_id": {"type": "string"},
+        "scenario_id": {"type": ["string", "null"]},
+        "baseline": {"type": ["number", "string", "null"]},
+        "candidate": {"type": ["number", "string", "null"]},
+        "delta_points": {"type": ["number", "null"]},
+        "severity": {"enum": ["blocker", "high", "medium", "low", "none"]},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

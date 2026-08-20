@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/asset-sources.schema.json",
+  "sources": [
+    {
+      "source_id": "local-feed-library",
+      "kind": "local_directory",
+      "enabled": false,
+      "path": "REPLACE_ME",
+      "asset_kind": "feed_video",
+      "include": ["*.mp4"]
+    },
+    {
+      "source_id": "feishu-base-prompts",
+      "kind": "feishu_bitable",
+      "enabled": false,
+      "url": "https://zcn0qf3aul03.feishu.cn/base/NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+      "app_token": "REPLACE_ME",
+      "table_id": "REPLACE_ME",
+      "asset_kind": "prompt_text",
+      "field_mapping": {}
+    },
+    {
+      "source_id": "feishu-sheet-prompt-videos",
+      "kind": "feishu_sheet",
+      "enabled": false,
+      "url": "REPLACE_ME",
+      "spreadsheet_token": "REPLACE_ME",
+      "sheet_id": "REPLACE_ME",
+      "range": "A1:Z",
+      "asset_kind": "prompt_video",
+      "field_mapping": {}
+    }
+  ]
+}

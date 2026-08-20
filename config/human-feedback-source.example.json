@@ -1,0 +1,10 @@
+{
+  "$schema": "../schemas/human-feedback-source.schema.json",
+  "source_id": "feishu-human-feedback",
+  "kind": "feishu_bitable",
+  "app_token": "replace-with-base-token",
+  "table_id": "replace-with-table-id",
+  "comment_field": "备注",
+  "video_fields": ["生成结果"],
+  "review_context": "unknown"
+}

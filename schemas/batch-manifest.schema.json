@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Pipeline Batch Manifest",
+  "type": "object",
+  "required": [
+    "manifest_version",
+    "batch_id",
+    "entity_type",
+    "item_entity_type",
+    "item_ids",
+    "content_hash",
+    "producer_stage_run_id",
+    "created_at"
+  ],
+  "properties": {
+    "manifest_version": {"type": "string", "minLength": 1},
+    "batch_id": {"type": "string", "minLength": 1},
+    "entity_type": {
+      "enum": [
+        "asset_batch",
+        "test_plan",
+        "run_batch",
+        "preprocess_batch",
+        "evaluation_batch",
+        "human_signal_batch",
+        "report_bundle",
+        "sync_batch"
+      ]
+    },
+    "item_entity_type": {"type": "string", "minLength": 1},
+    "item_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "content_hash": {"type": "string", "minLength": 1},
+    "producer_stage_run_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "source_batch_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entity_type", "batch_id", "content_hash"],
+        "properties": {
+          "entity_type": {"type": "string", "minLength": 1},
+          "batch_id": {"type": "string", "minLength": 1},
+          "content_hash": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": false
+}

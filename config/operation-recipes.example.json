@@ -1,0 +1,88 @@
+{
+  "$schema": "../schemas/operation-recipes.schema.json",
+  "recipe_pack_id": "xmax-default-operation-recipes",
+  "version": "0.1.0",
+  "recipes": [
+    {
+      "recipe_id": "offline-image-reference",
+      "version": "0.1.0",
+      "play_names": ["换装", "更换服装", "换身材", "换人", "换舞资", "换舞姿", "换角色", "更换角色", "角色替换", "宠物替换", "换风格"],
+      "default_generation_mode": "offline",
+      "allowed_generation_modes": ["offline", "realtime"],
+      "prompt_template": "按照玩法要求，将被编辑视频中的目标主体替换或调整为参考图指定的内容",
+      "edited_video_role": "feed_video",
+      "expected_audio_source_role": "feed_video",
+      "evaluation_contract": {
+        "operation_summary": "以Feed视频作为被编辑时间线，Prompt图片提供目标视觉参考。",
+        "result_expectation": "保留Feed动作、时序和背景，只修改Prompt指定属性。",
+        "role_semantics": {"feed": "被编辑原视频", "prompt_reference": "目标视觉参考", "result_video": "编辑结果"},
+        "must_preserve": ["Feed动作与时序", "Feed背景与音轨"],
+        "must_change": ["Prompt指定目标属性"]
+      },
+      "bindings": {
+        "offline": {"refVideoPath": "feed_video", "refImagePath": "prompt_image"},
+        "realtime": {"input_method": "connectMedia", "ref_image_role": "prompt_image", "interaction_profile_id": null}
+      }
+    },
+    {
+      "recipe_id": "offline-video-reference-with-feed-capture",
+      "version": "0.1.0",
+      "play_names": ["运镜", "对口型", "手势舞", "舞蹈（全身）", "舞蹈", "换动作", "搞怪", "摇舞"],
+      "default_generation_mode": "offline",
+      "allowed_generation_modes": ["offline"],
+      "prompt_template": "让视频内容按照参考视频指定的动作、口型、节奏或运镜方式变化",
+      "edited_video_role": "prompt_video",
+      "expected_audio_source_role": "prompt_video",
+      "evaluation_contract": {
+        "operation_summary": "从Feed取得主体截图，并把该主体替换到Prompt视频中；Prompt视频是被编辑时间线。",
+        "result_expectation": "结果保留Prompt视频的舞蹈、动作、节奏和运镜，同时把其主体替换为Feed截图主体。",
+        "role_semantics": {"feed": "目标主体来源", "feed_capture": "实际身份参考图", "prompt_reference": "被编辑的Prompt视频", "result_video": "主体替换结果"},
+        "must_preserve": ["Prompt视频动作、节奏、运镜和音轨"],
+        "must_change": ["Prompt视频主体替换为Feed截图主体"]
+      },
+      "bindings": {
+        "offline": {"refVideoPath": "prompt_video", "refImagePath": "feed_capture"}
+      }
+    },
+    {
+      "recipe_id": "realtime-track-interaction",
+      "version": "0.1.0",
+      "play_names": ["触控", "滑动", "拖动", "MoX", "触控特效", "魔法动图", "跟随轨迹"],
+      "default_generation_mode": "realtime",
+      "allowed_generation_modes": ["realtime"],
+      "prompt_template": "让画面主体按照实时指针轨迹自然移动或互动",
+      "edited_video_role": "realtime_input_stream",
+      "expected_audio_source_role": "realtime_input_stream",
+      "evaluation_contract": {
+        "operation_summary": "以实时输入流为基础执行指针轨迹互动。",
+        "result_expectation": "结果应及时、准确地跟随实际发送轨迹。",
+        "role_semantics": {"feed": "实时输入", "interaction_events": "实际轨迹", "result_video": "互动结果"},
+        "must_preserve": ["未操作区域"],
+        "must_change": ["轨迹触发区域"]
+      },
+      "bindings": {
+        "realtime": {"input_method": "connectMedia", "ref_image_role": "none", "interaction_profile_id": "pointer-track-30fps-v1"}
+      }
+    },
+    {
+      "recipe_id": "realtime-scene-interaction",
+      "version": "0.1.0",
+      "play_names": ["召唤", "实时手势互动", "DimX", "虚拟召唤", "魔法特效", "身体特效", "动物控制", "emoji if", "表情特效", "角色变形", "动作互动"],
+      "default_generation_mode": "realtime",
+      "allowed_generation_modes": ["realtime"],
+      "prompt_template": "让指定角色进入当前场景并按照用户动作或手势进行互动",
+      "edited_video_role": "realtime_input_stream",
+      "expected_audio_source_role": "realtime_input_stream",
+      "evaluation_contract": {
+        "operation_summary": "以实时输入流中的动作和手势触发角色或特效互动。",
+        "result_expectation": "结果应在正确时刻触发并维持目标互动效果。",
+        "role_semantics": {"feed": "场景和动作输入", "prompt_reference": "可选视觉参考", "interaction_events": "触发事件", "result_video": "互动结果"},
+        "must_preserve": ["未要求修改的Feed内容"],
+        "must_change": ["Prompt指定的互动状态"]
+      },
+      "bindings": {
+        "realtime": {"input_method": "connectMedia", "ref_image_role": "prompt_image", "interaction_profile_id": "camera-gesture-v1"}
+      }
+    }
+  ]
+}

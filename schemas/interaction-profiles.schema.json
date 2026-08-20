@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Realtime Interaction Profiles",
+  "type": "object",
+  "required": ["profile_pack_id", "version", "profiles"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "profile_pack_id": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["profile_id", "version", "event_kind", "sample_fps", "segments"],
+        "properties": {
+          "profile_id": {"type": "string", "minLength": 1},
+          "version": {"type": "string", "minLength": 1},
+          "event_kind": {"enum": ["pointer_tracks", "input_stream_gesture", "none"]},
+          "sample_fps": {"type": "number", "exclusiveMinimum": 0, "maximum": 60},
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["start_ms", "duration_ms", "from", "to"],
+              "properties": {
+                "start_ms": {"type": "number", "minimum": 0},
+                "duration_ms": {"type": "number", "exclusiveMinimum": 0},
+                "from": {"$ref": "#/$defs/point"},
+                "to": {"$ref": "#/$defs/point"},
+                "fingers": {"type": "integer", "minimum": 1, "maximum": 5}
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"type": "number", "minimum": 0, "maximum": 1}
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    }
+  },
+  "additionalProperties": false
+}

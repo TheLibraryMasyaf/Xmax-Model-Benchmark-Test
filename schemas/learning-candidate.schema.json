@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Judge Learning Candidate",
+  "type": "object",
+  "required": [
+    "packet_version",
+    "signal_id",
+    "dimension_id",
+    "route_kind",
+    "data_partition",
+    "training_eligible",
+    "supervision",
+    "evidence_refs",
+    "normalizer"
+  ],
+  "properties": {
+    "packet_version": {"const": "1.0"},
+    "signal_id": {"type": "string"},
+    "sample_id": {"type": ["string", "null"]},
+    "evaluation_id": {"type": ["string", "null"]},
+    "dimension_id": {"type": "string"},
+    "route_kind": {"enum": ["cv", "mlmm", "fusion"]},
+    "data_partition": {"enum": ["train", "calibration", "holdout", "unassigned"]},
+    "training_eligible": {"type": "boolean"},
+    "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "supervision": {
+      "type": "object",
+      "required": ["source_type", "review_context", "raw_text", "label", "annotations"],
+      "properties": {
+        "source_type": {"type": ["string", "null"]},
+        "review_context": {"type": ["string", "null"]},
+        "raw_text": {"type": ["string", "null"]},
+        "label": {"type": "object"},
+        "annotations": {"type": "object"},
+        "human_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "human_verdict": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "evidence_refs": {"type": "object"},
+    "normalizer": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": {"type": ["string", "null"]},
+        "version": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"data_partition": {"const": "holdout"}}},
+      "then": {"properties": {"training_eligible": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"training_eligible": {"const": true}}},
+      "then": {"properties": {"data_partition": {"const": "train"}}}
+    }
+  ],
+  "additionalProperties": false
+}

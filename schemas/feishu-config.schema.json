@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Feishu Config",
+  "type": "object",
+  "required": ["connection", "base", "tables", "field_projection", "case_score", "write_mode", "dry_run"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "connection": {
+      "type": "object",
+      "required": ["provider", "identity"],
+      "properties": {
+        "provider": {"enum": ["lark-cli", "open-api", "fake"]},
+        "identity": {"enum": ["user", "tenant-app", "fake"]}
+      },
+      "additionalProperties": false
+    },
+    "base": {
+      "type": "object",
+      "required": ["app_token"],
+      "properties": {
+        "url": {"type": "string"},
+        "app_token": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "tables": {
+      "type": "object",
+      "required": ["feed_data", "prompt_data", "case_data"],
+      "properties": {
+        "feed_data": {"type": "string"},
+        "prompt_data": {"type": "string"},
+        "case_data": {"type": "string"}
+      },
+      "additionalProperties": {"type": "string"}
+    },
+    "field_projection": {
+      "type": "object",
+      "description": "entity field to Feishu field mapping",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {"type": "string"}
+      }
+    },
+    "case_score": {
+      "type": "object",
+      "required": [
+        "source",
+        "display",
+        "internal_range",
+        "feishu_storage_range",
+        "write_transform",
+        "read_transform",
+        "unscored_value",
+        "failed_run_value"
+      ],
+      "properties": {
+        "source": {"enum": ["canonical_score", "scenario_score"]},
+        "display": {"const": "percentage"},
+        "internal_range": {"const": [0, 100]},
+        "feishu_storage_range": {"const": [0, 1]},
+        "write_transform": {"const": "divide_by_100"},
+        "read_transform": {"const": "multiply_by_100"},
+        "unscored_value": {"type": "null"},
+        "failed_run_value": {"const": 0}
+      },
+      "additionalProperties": false
+    },
+    "write_mode": {"const": "upsert"},
+    "dry_run": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

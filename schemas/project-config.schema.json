@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Project Config",
+  "type": "object",
+  "required": [
+    "project_id",
+    "benchmark_path",
+    "scenario_pack_path",
+    "operation_recipe_path",
+    "artifact_root",
+    "manifest_root",
+    "database_path",
+    "generation_modes",
+    "paid_run_requires_approval"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "project_id": {"type": "string", "minLength": 1},
+    "benchmark_path": {"type": "string", "minLength": 1},
+    "scenario_pack_path": {"type": "string", "minLength": 1},
+    "operation_recipe_path": {"type": "string", "minLength": 1},
+    "artifact_root": {"type": "string", "minLength": 1},
+    "manifest_root": {"type": "string", "minLength": 1},
+    "database_path": {"type": "string", "minLength": 1},
+    "default_model": {"type": "string"},
+    "default_repeats": {"type": "integer", "minimum": 1},
+    "xmax_api_base_url": {"type": "string", "format": "uri"},
+    "xmax_api_key_file": {"type": "string", "minLength": 1},
+    "xmax_offline_quality": {"enum": ["sd", "hd"]},
+    "xmax_offline_fps": {"type": ["integer", "null"], "minimum": 8},
+    "generation_modes": {
+      "type": "array",
+      "items": {"enum": ["offline", "realtime"]},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "paid_run_requires_approval": {"const": true},
+    "codex": {
+      "type": "object",
+      "required": ["binary", "timeout_seconds", "max_retries"],
+      "properties": {
+        "binary": {"type": "string"},
+        "timeout_seconds": {"type": "integer", "minimum": 1},
+        "max_retries": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

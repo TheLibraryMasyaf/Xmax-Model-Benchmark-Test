@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Asset Sources",
+  "type": "object",
+  "required": ["sources"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "kind", "enabled", "asset_kind"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {
+            "enum": [
+              "local_directory",
+              "http_manifest",
+              "feishu_sheet",
+              "feishu_bitable",
+              "feishu_wiki"
+            ]
+          },
+          "enabled": {"type": "boolean"},
+          "asset_kind": {
+            "enum": ["feed_video", "feed_image", "prompt_text", "prompt_image", "prompt_video", "mask_video"]
+          },
+          "path": {"type": "string"},
+          "manifest_path": {"type": "string"},
+          "include": {"type": "array", "items": {"type": "string"}},
+          "url": {"type": "string"},
+          "app_token": {"type": "string"},
+          "table_id": {"type": "string"},
+          "view_id": {"type": "string"},
+          "spreadsheet_token": {"type": "string"},
+          "sheet_id": {"type": "string"},
+          "range": {"type": "string"},
+          "wiki_token": {"type": "string"},
+          "selection_field": {"type": "string"},
+          "selection_value": {},
+          "field_mapping": {"type": "object", "additionalProperties": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

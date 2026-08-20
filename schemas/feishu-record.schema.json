@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Feishu Sync Record",
+  "type": "object",
+  "required": ["entity_type", "entity_id", "payload_hash", "sync_status"],
+  "properties": {
+    "entity_type": {
+      "enum": [
+        "feed_data",
+        "prompt_data",
+        "case_data",
+        "asset",
+        "test_case",
+        "generation_run",
+        "evaluation_result",
+        "human_signal",
+        "dimension_proposal",
+        "judge_version",
+        "model_version_report"
+      ]
+    },
+    "entity_id": {"type": "string"},
+    "payload_hash": {"type": "string"},
+    "feishu_record_id": {"type": ["string", "null"]},
+    "sync_status": {"enum": ["pending", "synced", "error", "conflict"]},
+    "attempt_count": {"type": "integer", "minimum": 0},
+    "last_error": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

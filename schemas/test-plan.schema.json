@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Test Plan",
+  "type": "object",
+  "required": [
+    "plan_id",
+    "plan_version",
+    "input_asset_batch_ids",
+    "benchmark_version",
+    "scenario_pack_version",
+    "cases"
+  ],
+  "properties": {
+    "plan_id": {"type": "string"},
+    "plan_version": {"type": "string"},
+    "input_asset_batch_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "benchmark_version": {"type": "string"},
+    "scenario_pack_version": {"type": "string"},
+    "created_at": {"type": "string"},
+    "seed": {"type": "integer"},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "case_number",
+          "feed_number",
+          "prompt_number",
+          "feed_asset_id",
+          "prompt_text",
+          "generation_mode",
+          "repeat_index",
+          "model_id"
+          ,"operation_recipe_id"
+          ,"operation_recipe_version"
+          ,"edited_video_asset_id"
+          ,"expected_audio_source_asset_id"
+        ],
+        "properties": {
+          "case_id": {"type": "string"},
+          "case_number": {"type": "string", "pattern": "^feed[0-9]+_prompt[0-9]+(?:_[0-9]{2,})?$"},
+          "feed_number": {"type": "string", "pattern": "^feed[0-9]+$"},
+          "prompt_number": {"type": "string", "pattern": "^prompt[0-9]+$"},
+          "feed_asset_id": {"type": "string"},
+          "prompt_asset_ids": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "prompt_text": {"type": "string"},
+          "generation_mode": {"enum": ["offline", "realtime"]},
+          "repeat_index": {"type": "integer", "minimum": 1},
+          "model_id": {"type": "string"},
+          "operation_recipe_id": {"type": "string"},
+          "operation_recipe_version": {"type": "string"},
+          "evaluation_operation_contract": {
+            "type": "object",
+            "properties": {
+              "operation_summary": {"type": "string"},
+              "result_expectation": {"type": "string"},
+              "role_semantics": {
+                "type": "object",
+                "additionalProperties": {"type": "string"}
+              },
+              "must_preserve": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "must_change": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            },
+            "additionalProperties": false
+          },
+          "edited_video_asset_id": {"type": "string"},
+          "expected_audio_source_asset_id": {"type": "string"},
+          "api_asset_bindings": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "scenario_id": {"type": ["string", "null"]},
+          "scenario_pack_version": {"type": "string"},
+          "scene_tags": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "generation_config": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

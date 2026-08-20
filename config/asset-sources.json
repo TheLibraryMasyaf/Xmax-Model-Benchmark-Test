@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/asset-sources.schema.json",
+  "sources": [
+    {
+      "source_id": "feishu-test-feeds",
+      "kind": "feishu_bitable",
+      "enabled": true,
+      "url": "https://zcn0qf3aul03.feishu.cn/base/NdlnbJNiwadmlYsZDj8c9y7Hnhg?table=tblE5VK7UH4aRHtU&view=vew0BeJqQT",
+      "app_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+      "table_id": "tblE5VK7UH4aRHtU",
+      "view_id": "vew0BeJqQT",
+      "asset_kind": "feed_video",
+      "selection_field": "是否是测试数据",
+      "selection_value": "是",
+      "field_mapping": {
+        "feed_reference": "feed文件",
+        "record_number": "feed编号",
+        "test_tags": "测试tag",
+        "content_tags": "内容tag"
+      }
+    },
+    {
+      "source_id": "feishu-test-prompts",
+      "kind": "feishu_bitable",
+      "enabled": true,
+      "url": "https://zcn0qf3aul03.feishu.cn/base/NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+      "app_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+      "table_id": "tblfeF0q2vqMn2S8",
+      "asset_kind": "prompt_text",
+      "selection_field": "是否是测试数据",
+      "selection_value": "是",
+      "field_mapping": {
+        "prompt_text": "prompt文字",
+        "prompt_reference": "prompt素材",
+        "record_number": "prompt编号",
+        "play_name": "内容tag",
+        "test_tags": "测试tag",
+        "content_tags": "内容tag"
+      }
+    }
+  ]
+}

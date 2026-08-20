@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Generation Run",
+  "type": "object",
+  "required": [
+    "run_id",
+    "run_batch_id",
+    "case_id",
+    "case_number",
+    "mode",
+    "model_id",
+    "origin",
+    "provenance",
+    "status",
+    "events"
+  ],
+  "properties": {
+    "run_id": {"type": "string"},
+    "run_batch_id": {"type": "string", "minLength": 1},
+    "case_id": {"type": "string"},
+    "case_number": {"type": "string"},
+    "mode": {"enum": ["offline", "realtime"]},
+    "model_id": {"type": "string"},
+    "origin": {
+      "enum": [
+        "xmax_offline",
+        "xmax_realtime",
+        "feishu_import",
+        "local_import",
+        "stage_manifest_import"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["source_type", "source_locator", "source_hash"],
+      "properties": {
+        "source_type": {"type": "string", "minLength": 1},
+        "source_locator": {"type": "string", "minLength": 1},
+        "source_record_id": {"type": ["string", "null"]},
+        "source_attachment_tokens": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "source_hash": {"type": "string", "minLength": 1},
+        "imported_at": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "status": {"enum": ["planned", "running", "completed", "error", "cancelled"]},
+    "result_asset_id": {"type": ["string", "null"]},
+    "edited_video_asset_id": {"type": ["string", "null"]},
+    "expected_audio_source_asset_id": {"type": ["string", "null"]},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event", "timestamp"],
+        "properties": {
+          "event": {"type": "string"},
+          "timestamp": {"type": "string"},
+          "payload": {"type": "object"}
+        }
+      }
+    },
+    "metrics": {"type": "object"},
+    "error": {"type": ["object", "null"]},
+    "raw_events_uri": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}
