@@ -141,8 +141,22 @@ class OpenAiCompatibleProvider:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                    raw_text = response.read().decode("utf-8")
+                # urllib's per-request ``timeout`` covers connect and read, but
+                # through a TUN/NAT proxy (e.g. macOS Surge/Clash virtual
+                # interface) the underlying socket can lose its deadline after
+                # the CONNECT handshake, letting response.read() block forever
+                # and stall the whole evaluation pipeline.  Set the
+                # process-wide socket default timeout as a hard backstop and
+                # restore it as soon as the request completes.
+                previous_socket_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(self._timeout)
+                try:
+                    with urllib.request.urlopen(
+                        request, timeout=self._timeout
+                    ) as response:
+                        raw_text = response.read().decode("utf-8")
+                finally:
+                    socket.setdefaulttimeout(previous_socket_timeout)
                 if _is_free_tier_exhausted(200, raw_text):
                     if paid_reservation is not None:
                         self._budget_gate.release(

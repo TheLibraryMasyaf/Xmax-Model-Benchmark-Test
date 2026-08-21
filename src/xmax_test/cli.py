@@ -937,9 +937,9 @@ def _generate_executor(
 
         def generate_case(case: dict[str, Any]) -> dict[str, Any]:
             nonlocal offline_adapter, realtime_controller
-            if req.resume:
-                from .planning.builder import generation_signature
+            from .planning.builder import generation_signature
 
+            if req.resume:
                 candidate_signature = case.get("generation_signature") or generation_signature(case)
                 existing = [
                     run
@@ -976,7 +976,22 @@ def _generate_executor(
                     realtime_controller = composition.realtime_controller(
                         run_batch_id=batch_id, model_id=model_id
                     )
-                return realtime_controller.run_case(case, composition.realtime_case_config(case))
+                try:
+                    return realtime_controller.run_case(
+                        case, composition.realtime_case_config(case)
+                    )
+                except Exception as exc:
+                    # A realtime case that cannot run (e.g. the browser SDK
+                    # rejects the input media MIME type) must not trip the
+                    # generate circuit breaker and abort the remaining offline
+                    # plan.  Signal the streaming coordinator with a dedicated
+                    # error so it records the failure and keeps draining.
+                    from .errors import RealtimeUnavailableError
+
+                    raise RealtimeUnavailableError(
+                        f"realtime case {case['case_id']} cannot run: {exc}",
+                        entity_id=case["case_id"],
+                    ) from exc
             if offline_adapter is None:
                 offline_adapter = composition.offline_adapter(
                     run_batch_id=batch_id, model_id=model_id

@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..errors import EvaluationBudgetPausedError
+from ..errors import EvaluationBudgetPausedError, RealtimeUnavailableError
 
 StageCallable = Callable[..., dict[str, Any]]
 
@@ -227,6 +227,14 @@ class StreamingPipelineCoordinator:
                 consecutive = None
                 if self._preprocess is not None:
                     generated_queue.put(run)
+            except RealtimeUnavailableError as exc:
+                # A realtime case the harness refuses (e.g. unsupported media
+                # MIME type) is a known condition, not a transient failure.
+                # Record it but do not let it trip the circuit breaker: the
+                # remaining offline cases are still valid and must drain.
+                self._add_error(outcome, lock, "generate", case.get("case_id"), exc)
+                consecutive = None
+                continue
             except Exception as exc:
                 self._add_error(outcome, lock, "generate", case.get("case_id"), exc)
                 consecutive = self._failure_count(consecutive, exc)

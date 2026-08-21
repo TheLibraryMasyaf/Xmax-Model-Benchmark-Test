@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 
-from xmax_test.errors import EvaluationBudgetPausedError
+from xmax_test.errors import EvaluationBudgetPausedError, RealtimeUnavailableError
 from xmax_test.pipeline.streaming import StreamingPipelineCoordinator
 
 
@@ -116,6 +116,32 @@ class StreamingPipelineTests(unittest.TestCase):
 
         self.assertEqual(calls, ["0", "1", "2"])
         self.assertTrue(outcome.metadata["circuit_breaker"]["aborted"])
+
+    def test_realtime_unavailable_does_not_abort_remaining_plan(self) -> None:
+        """RealtimeUnavailableError is a known condition, not a transient
+        failure: it must be recorded per-case without tripping the circuit
+        breaker, so the remaining offline cases keep draining."""
+
+        calls: list[str] = []
+
+        def generate(case):
+            calls.append(case["case_id"])
+            raise RealtimeUnavailableError(f"realtime {case['case_id']} unsupported")
+
+        outcome = StreamingPipelineCoordinator(
+            generate_case=generate,
+            circuit_breaker_threshold=3,
+        ).run([{"case_id": str(i)} for i in range(10)])
+
+        self.assertEqual(calls, [str(i) for i in range(10)])
+        self.assertFalse(outcome.metadata["circuit_breaker"]["aborted"])
+        self.assertEqual(len(outcome.errors["generate"]), 10)
+        self.assertTrue(
+            all(
+                item["code"] == "xmax.realtime_unavailable"
+                for item in outcome.errors["generate"]
+            )
+        )
 
     def test_budget_pause_defers_evaluation_but_generation_keeps_draining(self) -> None:
         generated: list[str] = []

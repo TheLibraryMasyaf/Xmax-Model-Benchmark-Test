@@ -109,6 +109,22 @@ class ExternalServiceError(XmaxTestError):
     stage = "external"
 
 
+class RealtimeUnavailableError(XmaxTestError):
+    """A realtime case cannot run because the harness rejects its inputs.
+
+    Raised by the generate executor when the browser SDK refuses a realtime
+    case (e.g. unsupported media MIME type).  Unlike a transient external
+    failure it must NOT trip the streaming circuit breaker: the remaining
+    offline plan is still valid and should keep draining.  The pipeline
+    records the case as a generation error and continues.
+    """
+
+    code = "xmax.realtime_unavailable"
+    exit_code = EXIT_PARTIAL
+    retryable = False
+    stage = "generate"
+
+
 class PartialCompletionError(XmaxTestError):
     """Some items completed but others failed; see errors for details."""
 
