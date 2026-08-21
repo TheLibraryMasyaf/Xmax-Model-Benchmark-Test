@@ -234,7 +234,10 @@ class HttpOfflineTaskTransport:
         filename: str | None = None,
         mime_type: str | None = None,
     ) -> dict[str, Any]:
-        sts = self._sts or self.upload_credentials()
+        # STS temporary credentials have a short lifetime; never reuse a stale
+        # cached credential across long-running batches.  Refresh before every
+        # upload so an expired AccessKeyId cannot fail the whole queue.
+        sts = self.upload_credentials()
         credentials = sts.get("credentials", {})
         required = ("bucket", "region", "prefix")
         if any(not sts.get(key) for key in required) or not credentials:

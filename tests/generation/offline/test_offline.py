@@ -200,6 +200,67 @@ class RestBindingTests(OfflineTestBase):
             },
         )
 
+    def test_upload_refreshes_sts_every_time(self) -> None:
+        """STS temporary credentials expire; a long-running batch must not
+        reuse a stale cached credential (InvalidAccessKeyId)."""
+
+        transport = HttpOfflineTaskTransport(
+            base_url="https://example.invalid/open/api/v1", quality="hd", fps=24
+        )
+        sts_calls: list[int] = []
+
+        def upload_credentials():
+            sts_calls.append(len(sts_calls) + 1)
+            return {
+                "bucket": "bucket-1",
+                "region": "ap-test",
+                "prefix": "open/resource/user/u/",
+                "credentials": {
+                    "accessKeyId": f"AKID-{len(sts_calls)}",
+                    "secretAccessKey": "secret",
+                    "sessionToken": "token",
+                },
+            }
+
+        transport.upload_credentials = upload_credentials
+        mp4 = Path(self.directory.name) / "video.bin"
+        mp4.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"x" * 20)
+
+        # Stub the COS client at the import site so no network is touched.
+        import qcloud_cos
+        import xmax_test.generation.offline.rest_adapter as rest
+
+        put_objects: list[dict] = []
+        real_client = qcloud_cos.CosS3Client
+
+        class FakeCosS3Client:
+            def __init__(self, config):
+                self._secret_id = config._secret_id
+
+            def put_object(self, **kwargs):
+                put_objects.append(
+                    {
+                        "key": kwargs["Key"],
+                        "config_secret_id": self._secret_id,
+                        "bucket": kwargs["Bucket"],
+                    }
+                )
+                return {"Location": f"https://cdn.example.com/{kwargs['Key']}"}
+
+        qcloud_cos.CosS3Client = FakeCosS3Client
+        try:
+            transport.upload_video(str(mp4))
+            transport.upload_video(str(mp4))
+        finally:
+            qcloud_cos.CosS3Client = real_client
+
+        self.assertEqual(len(sts_calls), 2, "STS must be refreshed for every upload")
+        self.assertEqual(len(put_objects), 2)
+        # Each upload used the freshly fetched credential set, not a stale cache.
+        self.assertNotEqual(
+            put_objects[0]["config_secret_id"], put_objects[1]["config_secret_id"]
+        )
+
     def test_image_reference_binds_feed_as_video_and_prompt_image_as_image(
         self,
     ) -> None:

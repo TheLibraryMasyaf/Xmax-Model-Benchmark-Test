@@ -111,6 +111,30 @@ class DeterminismTests(PlanningTestBase):
         )
         self.assertTrue(all(case.get("generation_signature") for case in first["cases"]))
 
+    def test_rebuild_reuses_frozen_plan_instead_of_renumbering_cases(self) -> None:
+        """A crashed run must not re-allocate Case suffixes on rebuild: the
+        frozen plan and its task batch stay identical so resume never hits a
+        duplicate-task payload conflict."""
+
+        first = self.builder.build(self.request(seed=7, repeat_count=2))
+        plan_id = first["plan_id"]
+        plan_hash = first["plan_hash"]
+        case_numbers = [case["case_number"] for case in first["cases"]]
+        task_ids = list(first.get("task_ids", []))
+
+        # Simulate a mid-batch crash + resume: rebuild with the same inputs.
+        rebuilt = self.builder.build(self.request(seed=7, repeat_count=2))
+        self.assertEqual(rebuilt["plan_id"], plan_id)
+        self.assertEqual(rebuilt["plan_hash"], plan_hash)
+        self.assertEqual(
+            [case["case_number"] for case in rebuilt["cases"]], case_numbers
+        )
+        self.assertEqual(list(rebuilt.get("task_ids", [])), task_ids)
+        # Rebuild did not create new tasks; the original task set is reused.
+        tasks = self.repository.list_test_tasks(task_batch_id=rebuilt["task_batch_id"])
+        self.assertEqual(len(tasks), len(task_ids))
+        self.assertEqual({task["task_id"] for task in tasks}, set(task_ids))
+
     def test_first_n_filters_are_deterministic_and_change_plan_hash(self) -> None:
         full = self.builder.build(self.request(seed=42, repeat_count=1))
         limited = self.builder.build(

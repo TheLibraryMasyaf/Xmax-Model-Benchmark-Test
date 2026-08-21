@@ -119,6 +119,15 @@ class TestPlanBuilder:
         plan_hash = content_hash(plan_hash_payload)
         plan_id = request.get("plan_id") or f"plan-{plan_hash[:12]}"
 
+        # A TestPlan is a frozen immutable snapshot: the same selected inputs
+        # must always yield the same plan.  Rebuilding it after a crash would
+        # re-read the current case-number suffix and produce shifted
+        # ``case_number`` values while keeping stable task IDs, which breaks
+        # idempotent task persistence.  Reuse the already-frozen plan instead.
+        existing_plan = self._repository.find_plan_by_hash(plan_hash)
+        if existing_plan is not None:
+            return existing_plan
+
         snapshot = PlanSnapshot(
             plan_id=plan_id,
             plan_version="1",
