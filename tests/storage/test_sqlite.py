@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 
 from xmax_test.errors import ContractError, DuplicateError, NotFoundError, StateError
-from xmax_test.storage.migrations import _checksum, applied_migrations, available_migrations
+from xmax_test.storage.migrations import (
+    _checksum,
+    applied_migrations,
+    available_migrations,
+)
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 from xmax_test.time import FixedClock
 
@@ -52,6 +55,32 @@ class MigrationTests(unittest.TestCase):
         _, sql, checksum = available_migrations()[0]
         self.assertEqual(checksum, _checksum(sql))
 
+    def test_concurrent_repository_startup_migration_is_idempotent(self) -> None:
+        barrier = threading.Barrier(4)
+        failures: list[Exception] = []
+
+        def open_repository() -> None:
+            try:
+                barrier.wait()
+                repository = SqliteMetadataRepository(self.database)
+                repository.close()
+            except Exception as exc:  # pragma: no cover - asserted below
+                failures.append(exc)
+
+        threads = [threading.Thread(target=open_repository) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(failures, [])
+        repository = SqliteMetadataRepository(self.database)
+        self.assertEqual(
+            applied_migrations(repository._conn),
+            {version: checksum for version, _, checksum in available_migrations()},
+        )
+        repository.close()
+
 
 class RunEventTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -75,12 +104,14 @@ class RunEventTests(unittest.TestCase):
                 "mode": "offline",
                 "origin": "xmax_offline",
                 "status": "planned",
-                "provenance": {"source_type": "test", "source_locator": "fake", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "test",
+                    "source_locator": "fake",
+                    "source_hash": "h",
+                },
             }
         )
-        self.repository.append_event(
-            "run-1", "status_running", payload={"attempt": 1}
-        )
+        self.repository.append_event("run-1", "status_running", payload={"attempt": 1})
         self.repository.append_event(
             "run-1", "status_completed", payload={"ok": True}, external_key="task-9"
         )
@@ -90,7 +121,10 @@ class RunEventTests(unittest.TestCase):
         )
         log = self.repository.get_event_log("run-1")
         self.assertEqual(len(log), 3)
-        self.assertEqual([item["event"] for item in log], ["run_created", "status_running", "status_completed"])
+        self.assertEqual(
+            [item["event"] for item in log],
+            ["run_created", "status_running", "status_completed"],
+        )
         rebuilt = self.repository.rebuild_run_from_events("run-1")
         self.assertIsNotNone(rebuilt)
         self.assertEqual(rebuilt["status"], "completed")
@@ -107,7 +141,11 @@ class RunEventTests(unittest.TestCase):
                 "mode": "offline",
                 "origin": "xmax_offline",
                 "status": "planned",
-                "provenance": {"source_type": "test", "source_locator": "fake", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "test",
+                    "source_locator": "fake",
+                    "source_hash": "h",
+                },
             }
         )
         self.repository.update_run_status("run-2", "completed")
@@ -125,7 +163,11 @@ class RunEventTests(unittest.TestCase):
                 "mode": "offline",
                 "origin": "xmax_offline",
                 "status": "planned",
-                "provenance": {"source_type": "test", "source_locator": "fake", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "test",
+                    "source_locator": "fake",
+                    "source_hash": "h",
+                },
             }
         )
         errors: list[Exception] = []
@@ -204,16 +246,26 @@ class RunEventTests(unittest.TestCase):
         }
         self.repository.save_test_plan(plan)
         self.assertEqual(self.repository.get_test_plan("plan-1", "1")["plan_hash"], "hash-1")
-        self.assertEqual(self.repository.get_test_case("case-1")["case_number"], "feed001_prompt001_01")
+        self.assertEqual(
+            self.repository.get_test_case("case-1")["case_number"],
+            "feed001_prompt001_01",
+        )
 
     def test_sync_ledger_upsert_and_update(self) -> None:
         self.repository.upsert_sync_ledger(
-            "case_data", "feed001_prompt001_01", "feishu",
-            payload_hash="p1", sync_status="pending",
+            "case_data",
+            "feed001_prompt001_01",
+            "feishu",
+            payload_hash="p1",
+            sync_status="pending",
         )
         self.repository.upsert_sync_ledger(
-            "case_data", "feed001_prompt001_01", "feishu",
-            payload_hash="p2", sync_status="synced", feishu_record_id="rec-1",
+            "case_data",
+            "feed001_prompt001_01",
+            "feishu",
+            payload_hash="p2",
+            sync_status="synced",
+            feishu_record_id="rec-1",
         )
         entries = self.repository.list_sync_ledger(entity_type="case_data")
         self.assertEqual(len(entries), 1)

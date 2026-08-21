@@ -67,8 +67,7 @@ class ArtifactStore:
         actual_hash = file_sha256(source)
         if expected_sha256 and actual_hash != expected_sha256:
             raise ValidationError(
-                f"source hash mismatch for {source}: expected {expected_sha256}, "
-                f"got {actual_hash}"
+                f"source hash mismatch for {source}: expected {expected_sha256}, got {actual_hash}"
             )
         target = self._root / namespace / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -140,8 +139,7 @@ class ArtifactStore:
         actual = file_sha256(path)
         if expected_sha256 and actual != expected_sha256:
             raise ValidationError(
-                f"artifact hash mismatch for {uri}: expected {expected_sha256}, "
-                f"got {actual}"
+                f"artifact hash mismatch for {uri}: expected {expected_sha256}, got {actual}"
             )
         return {"uri": uri, "sha256": actual, "bytes": path.stat().st_size, "ok": True}
 
@@ -169,9 +167,7 @@ class ArtifactStore:
         returned manifest is the deletion record.
         """
 
-        candidates = [
-            path for path in self._root.rglob(f"{TEMP_PREFIX}*") if path.is_file()
-        ]
+        candidates = [path for path in self._root.rglob(f"{TEMP_PREFIX}*") if path.is_file()]
         result: list[dict[str, Any]] = []
         for path in sorted(candidates):
             entry = {

@@ -33,9 +33,7 @@ def classify_delta(delta: float | None, policy: dict[str, Any] | None) -> str:
     return "p1"
 
 
-def classify_pair(
-    pair: dict[str, Any], policy: dict[str, Any] | None
-) -> dict[str, Any]:
+def classify_pair(pair: dict[str, Any], policy: dict[str, Any] | None) -> dict[str, Any]:
     """Classify one paired sample on both canonical and scenario deltas."""
 
     baseline_eval = pair["baseline"].get("_evaluation", {})
@@ -66,7 +64,9 @@ def _classify_field(
 ) -> dict[str, Any]:
     baseline = baseline_eval.get(field)
     candidate = candidate_eval.get(field)
-    delta = round(candidate - baseline, 2) if baseline is not None and candidate is not None else None
+    delta = (
+        round(candidate - baseline, 2) if baseline is not None and candidate is not None else None
+    )
     return {
         "baseline": baseline,
         "candidate": candidate,
@@ -76,8 +76,12 @@ def _classify_field(
 
 
 def _new_gate_failure(baseline_eval: dict[str, Any], candidate_eval: dict[str, Any]) -> bool:
-    baseline_failed = bool(baseline_eval.get("applied_gate_ids")) and baseline_eval.get("final_verdict")
-    candidate_failed = bool(candidate_eval.get("applied_gate_ids")) and candidate_eval.get("final_verdict")
+    baseline_failed = bool(baseline_eval.get("applied_gate_ids")) and baseline_eval.get(
+        "final_verdict"
+    )
+    candidate_failed = bool(candidate_eval.get("applied_gate_ids")) and candidate_eval.get(
+        "final_verdict"
+    )
     return (not baseline_failed) and candidate_failed
 
 
@@ -94,7 +98,12 @@ def _worst(*classifications: str) -> str:
 def bucket_pairs(
     pairs: list[dict[str, Any]], policy: dict[str, Any] | None
 ) -> dict[str, list[dict[str, Any]]]:
-    buckets: dict[str, list[dict[str, Any]]] = {"p0": [], "p1": [], "p2": [], "unclassified": []}
+    buckets: dict[str, list[dict[str, Any]]] = {
+        "p0": [],
+        "p1": [],
+        "p2": [],
+        "unclassified": [],
+    }
     for pair in pairs:
         classified = classify_pair(pair, policy)
         buckets[classified["classification"]].append(classified)

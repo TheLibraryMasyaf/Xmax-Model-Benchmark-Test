@@ -19,4 +19,3 @@ class TrainerPlugin(Protocol):
 
     def validate(self, artifact_uri: str, holdout_uri: str) -> dict[str, Any]:
         """Return a validation report used by the release gate."""
-

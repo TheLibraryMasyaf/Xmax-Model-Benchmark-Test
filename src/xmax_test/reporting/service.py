@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..errors import ContractError
 from .classification import bucket_pairs, classify_delta, comparison_policy
 from .comparison import ModelComparisonService
 from .renderer import build_report_json, render_markdown, template_hash, write_report
@@ -38,6 +37,10 @@ class ModelUpdateReportService:
         comparison_id: str,
         baseline_model_version: str,
         candidate_model_version: str,
+        baseline_run_batch_id: str,
+        candidate_run_batch_id: str,
+        baseline_evaluation_batch_id: str,
+        candidate_evaluation_batch_id: str,
         requested_scene_ids: list[str],
         template_path: str | Path,
         output_directory: str | Path,
@@ -45,16 +48,26 @@ class ModelUpdateReportService:
         compared = self._comparison.compare(
             baseline_model_version=baseline_model_version,
             candidate_model_version=candidate_model_version,
+            baseline_run_batch_id=baseline_run_batch_id,
+            candidate_run_batch_id=candidate_run_batch_id,
+            baseline_evaluation_batch_id=baseline_evaluation_batch_id,
+            candidate_evaluation_batch_id=candidate_evaluation_batch_id,
             requested_scene_ids=requested_scene_ids,
         )
         status = compared.get("status", "not_comparable")
         pairs = compared.get("pairs", [])
 
         policy = comparison_policy(self._score_schema)
-        classified = bucket_pairs(pairs, policy) if pairs else {"p0": [], "p1": [], "p2": [], "unclassified": []}
+        classified = (
+            bucket_pairs(pairs, policy)
+            if pairs
+            else {"p0": [], "p1": [], "p2": [], "unclassified": []}
+        )
         if status == "not_comparable":
             classified = {"p0": [], "p1": [], "p2": [], "unclassified": []}
-        classified = {key: [_to_comparison_item(item) for item in items] for key, items in classified.items()}
+        classified = {
+            key: [_to_comparison_item(item) for item in items] for key, items in classified.items()
+        }
         for dimension in compared.get("overall", {}).get("dimensions", []):
             bucket = classify_delta(dimension.get("delta_points"), policy)
             classified.setdefault(bucket, []).append(
@@ -85,6 +98,28 @@ class ModelUpdateReportService:
             template_hash_value="",
             artifact_uris=[],
         )
+        evaluation_ids = {
+            pair[side].get("_evaluation", {}).get("evaluation_id")
+            for pair in pairs
+            for side in ("baseline", "candidate")
+        }
+        evaluation_ids.discard(None)
+        related_signals = [
+            item
+            for item in self._repository.human_signals()
+            if item.get("evaluation_id") in evaluation_ids
+        ]
+        related_overrides = [
+            item
+            for item in self._repository.evaluation_overrides()
+            if item.get("evaluation_id") in evaluation_ids
+        ]
+        report["human_signal_summary"] = {
+            "count": len(related_signals),
+            "overrides": len(related_overrides),
+            "signal_ids": sorted(item.get("signal_id", "") for item in related_signals),
+            "override_ids": sorted(item.get("override_id", "") for item in related_overrides),
+        }
 
         present_scenes = {scene["scenario_id"] for scene in compared.get("scene_results", [])}
         missing_scenes = [scene for scene in requested_scene_ids if scene not in present_scenes]

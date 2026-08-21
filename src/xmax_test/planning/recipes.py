@@ -75,9 +75,7 @@ class RecipeResolver:
                 None,
             )
             if video_recipe is not None:
-                inferred_play = play_name or next(
-                    iter(video_recipe.get("play_names", [])), None
-                )
+                inferred_play = play_name or next(iter(video_recipe.get("play_names", [])), None)
                 override = overrides.get(video_recipe["recipe_id"]) or (
                     overrides.get(inferred_play) if inferred_play else None
                 )
@@ -99,9 +97,7 @@ class RecipeResolver:
         override = overrides.get(recipe_id) or overrides.get(play_name)
         if override:
             if override not in recipe.get("allowed_generation_modes", []):
-                return {}, (
-                    f"recipe {recipe_id} does not allow explicit mode {override}"
-                )
+                return {}, (f"recipe {recipe_id} does not allow explicit mode {override}")
             recipe = {**recipe, "default_generation_mode": override}
         return recipe, None
 
@@ -127,23 +123,17 @@ class RecipeResolver:
         )
         if requested is not None:
             if requested not in recipe.get("allowed_generation_modes", []):
-                raise ContractError(
-                    f"request mode {requested} not allowed by recipe {recipe_id}"
-                )
+                raise ContractError(f"request mode {requested} not allowed by recipe {recipe_id}")
             return requested
         default = recipe.get("default_generation_mode")
         if default not in recipe.get("allowed_generation_modes", []):
-            raise ContractError(
-                f"recipe {recipe_id} default mode {default} not in allowed modes"
-            )
+            raise ContractError(f"recipe {recipe_id} default mode {default} not in allowed modes")
         return default
 
     def bindings(self, recipe: dict[str, Any], mode: str) -> dict[str, str]:
         bindings = recipe.get("bindings", {}).get(mode)
         if not isinstance(bindings, dict):
-            raise ContractError(
-                f"recipe {recipe['recipe_id']} has no bindings for mode {mode}"
-            )
+            raise ContractError(f"recipe {recipe['recipe_id']} has no bindings for mode {mode}")
         return {key: str(value) for key, value in bindings.items()}
 
 

@@ -9,9 +9,9 @@ and where they are bound. The audio baseline is the recipe-declared
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 from ...errors import ContractError, ExternalServiceError, ValidationError
@@ -124,7 +124,11 @@ class OfflineGenerationAdapter:
                 payload={"external_task_id": external_id},
                 external_key=external_id,
             )
-            return {"external_task_id": external_id, "backend": "rest", "status": "submitted"}
+            return {
+                "external_task_id": external_id,
+                "backend": "rest",
+                "status": "submitted",
+            }
         machine = SessionTaskStateMachine(
             self._session_api,
             self._rtc,
@@ -153,7 +157,11 @@ class OfflineGenerationAdapter:
                 "state": state,
                 "terminal": terminal,
             }
-        return {"event": "status_completed", "state": task.get("outcome", {}), "terminal": True}
+        return {
+            "event": "status_completed",
+            "state": task.get("outcome", {}),
+            "terminal": True,
+        }
 
     def cancel(self, task: dict[str, Any]) -> None:
         if task.get("backend") == "rest":
@@ -199,6 +207,7 @@ class OfflineGenerationAdapter:
     def run_case(self, case: dict[str, Any]) -> dict[str, Any]:
         """Full cycle: create run, submit, poll to terminal, persist result."""
 
+        started_monotonic = time.monotonic()
         prepared = self.prepare(case)
         run_id = prepared["run_id"]
         self._repository.create_run(
@@ -248,9 +257,8 @@ class OfflineGenerationAdapter:
                     or generation_signature(case),
                     "failure_class": "submit_failure",
                     "error": str(exc),
-                    "expected_audio_source_asset_id": case.get(
-                        "expected_audio_source_asset_id"
-                    ),
+                    "generation_elapsed_s": round(time.monotonic() - started_monotonic, 3),
+                    "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
                     "audio_facts": self._audio_facts(case),
                 },
             )
@@ -259,21 +267,22 @@ class OfflineGenerationAdapter:
 
         for _ in range(300):
             event = self.poll(task)
-            self._repository.append_event(
-                run_id, event["event"], payload={"state": event["state"]}
-            )
+            self._repository.append_event(run_id, event["event"], payload={"state": event["state"]})
             task["state"] = event["state"]
             if event["terminal"]:
                 break
-            if self._backend == "rest" and self._transport.__class__.__name__ == "HttpOfflineTaskTransport":
+            if (
+                self._backend == "rest"
+                and self._transport.__class__.__name__ == "HttpOfflineTaskTransport"
+            ):
                 time.sleep(2)
 
         collected = self.collect(task)
         status = collected["status"]
         metrics = {
             **collected["metrics"],
-            "generation_signature": case.get("generation_signature")
-            or generation_signature(case),
+            "generation_elapsed_s": round(time.monotonic() - started_monotonic, 3),
+            "generation_signature": case.get("generation_signature") or generation_signature(case),
             "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
             "audio_facts": self._audio_facts(case),
         }
@@ -318,9 +327,7 @@ class OfflineGenerationAdapter:
                 raise ValidationError(f"case {case['case_id']} requires a prompt image")
             ref_image = self._asset_file(prompt_images[0])
         elif ref_image_role == "feed_capture":
-            ref_image = (
-                feed if feed.get("kind") == "feed_image" else self._feed_capture(feed)
-            )
+            ref_image = feed if feed.get("kind") == "feed_image" else self._feed_capture(feed)
         return {"ref_video": ref_video, "ref_image": ref_image}
 
     def _asset_file(self, asset_id: str) -> dict[str, Any]:
@@ -349,17 +356,26 @@ class OfflineGenerationAdapter:
 
         ensure_media_tools()
         capture_id = f"{feed['asset_id']}-{feed.get('sha256', '')[:12]}"
-        target = self._artifacts.resolve(
-            f"artifact://captures/{capture_id}/middle.jpg"
-        )
+        target = self._artifacts.resolve(f"artifact://captures/{capture_id}/middle.jpg")
         if not target.is_file() or target.stat().st_size == 0:
             target.parent.mkdir(parents=True, exist_ok=True)
             duration = float(feed.get("media", {}).get("duration_s") or 1.0)
             timestamp = max(0.0, duration / 2.0)
             completed = subprocess.run(
                 [
-                    "ffmpeg", "-y", "-v", "error", "-ss", f"{timestamp:.3f}",
-                    "-i", feed["path"], "-frames:v", "1", "-q:v", "2", str(target),
+                    "ffmpeg",
+                    "-y",
+                    "-v",
+                    "error",
+                    "-ss",
+                    f"{timestamp:.3f}",
+                    "-i",
+                    feed["path"],
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "2",
+                    str(target),
                 ],
                 capture_output=True,
                 text=True,
@@ -414,17 +430,13 @@ class OfflineGenerationAdapter:
     def _register_result(self, case: dict[str, Any], result_url: str | None) -> str:
         if not result_url:
             raise ExternalServiceError("completed task has no result_url")
-        target = self._artifacts.resolve(
-            f"artifact://runs/{case['case_id']}/result.mp4"
-        )
+        target = self._artifacts.resolve(f"artifact://runs/{case['case_id']}/result.mp4")
         target.parent.mkdir(parents=True, exist_ok=True)
         download = self._result_source.fetch(result_url, target)
         media = self._validator.validate(target, "result_video")
         return self._register_asset(download, media, case["case_id"])
 
-    def _register_asset(
-        self, download: dict[str, Any], media: dict[str, Any], case_id: str
-    ) -> str:
+    def _register_asset(self, download: dict[str, Any], media: dict[str, Any], case_id: str) -> str:
         from ...assets.models import DownloadResult
 
         path = Path(download["path"])

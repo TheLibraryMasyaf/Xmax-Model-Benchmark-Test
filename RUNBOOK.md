@@ -70,7 +70,7 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 
 显式设`execution_mode=batch`可恢复“整批生成完再预处理/评测”。只列出单阶段时，无论该字段为何都不会暗中执行下游。
 
-小批次可在`filters`中使用`feed_limit`、`prompt_limit`、`feed_asset_ids`或`prompt_record_numbers`。Feed和Prompt先按飞书业务编号、再按稳定ID排序后截取；过滤条件属于计划哈希，不能复用到全量计划。仓库提供`config/run-smoke-5x5.json`作为前5个Feed × 前5个Prompt、每组合1次的真实小批次入口。
+小批次可在`filters`中使用`feed_limit`、`prompt_limit`、`feed_asset_ids`或`prompt_record_numbers`。Feed和Prompt先按飞书业务编号、再按稳定ID排序后截取；过滤条件属于计划哈希，不能复用到全量计划。仓库提供`config/run-smoke-5x5.example.json`作为前5个Feed × 前5个Prompt、每组合1次的安全模板。它默认`dry_run=true`；复制为本轮请求、完成`context-check`和预算确认后才能改为false。
 
 统一Run的`--dry-run`会为每个阶段产生仅供本次验证传递的占位引用，不创建业务Run、不调用Judge、不写飞书；因此可以完整验证阶段合同而不会在`preprocess/evaluate`处因缺少真实批次中断。
 
@@ -203,3 +203,15 @@ Canonical与Scenario结果
 var/reports/model-version-updates/<comparison_id>.md
 var/reports/model-version-updates/<comparison_id>.json
 ```
+
+## 10. 单版本/单批次评测报告
+
+当用户只要求报告一个模型版本或某次指定测试批次时，读取`docs/single-version-reporting.md`，使用`report-templates/single-version-evaluation-report.md`。报告必须包含总分分布、全量适用维度、细则级得分或缺失说明、强项、短板、Good/Bad Case和P0/P1/P2改进建议。
+
+当前没有独立的单版本报告CLI；执行Agent从已有产物填写模板，写入：
+
+```text
+var/reports/single-version/<report_id>.md
+```
+
+不得为了填写细则表而从维度分反推细则分。新批次必须从EvaluationResult.`criterion_results`和Evaluation Batch Manifest.`metadata.aggregate.criterion_summary`生成细则表；当前批次是旧口径且未产出细则级Judgment时，必须明确写“旧口径，需Replay”。

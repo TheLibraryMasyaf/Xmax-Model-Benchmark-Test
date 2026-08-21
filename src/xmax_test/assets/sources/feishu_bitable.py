@@ -6,13 +6,14 @@ are extracted through the source's field mapping.
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 from typing import Any
 
+from xmax_test.assets.models import DownloadResult, RemoteAsset
 from xmax_test.errors import ContractError
 from xmax_test.hashing import file_sha256
-from xmax_test.assets.models import DownloadResult, RemoteAsset
+
 from .base import BaseSource
 
 
@@ -70,7 +71,13 @@ class FeishuBitableSource(BaseSource):
             "test_tags": _scalar(fields.get(self._mapping.get("test_tags", ""))),
             "content_tags": _scalar(fields.get(self._mapping.get("content_tags", ""))),
         }
-        metadata_keys = {"record_number", "play_name", "scenario_id", "test_tags", "content_tags"}
+        metadata_keys = {
+            "record_number",
+            "play_name",
+            "scenario_id",
+            "test_tags",
+            "content_tags",
+        }
         for entity_field, source_field in self._mapping.items():
             if entity_field in metadata_keys:
                 continue
@@ -106,7 +113,11 @@ class FeishuBitableSource(BaseSource):
         return remotes
 
     def _attachment_asset(
-        self, record_id: str, entity_field: str, index: int, item: Any,
+        self,
+        record_id: str,
+        entity_field: str,
+        index: int,
+        item: Any,
         shared_metadata: dict[str, Any],
     ) -> RemoteAsset | None:
         if not isinstance(item, dict):
@@ -119,9 +130,7 @@ class FeishuBitableSource(BaseSource):
             name = str(item.get("name") or item.get("file_name") or "").lower()
             prefix = "prompt" if entity_field == "prompt_reference" else "feed"
             asset_kind = (
-                f"{prefix}_video"
-                if name.endswith((".mp4", ".mov", ".webm"))
-                else f"{prefix}_image"
+                f"{prefix}_video" if name.endswith((".mp4", ".mov", ".webm")) else f"{prefix}_image"
             )
         return RemoteAsset(
             source_id=self.source_id,
@@ -159,9 +168,7 @@ class FeishuBitableSource(BaseSource):
                 metadata=remote.metadata,
             )
         if not token:
-            raise ContractError(
-                f"bitable remote {remote.remote_key} has no attachment token"
-            )
+            raise ContractError(f"bitable remote {remote.remote_key} has no attachment token")
         if destination.is_file() and destination.stat().st_size > 0:
             return DownloadResult(
                 remote_key=remote.remote_key,
@@ -172,8 +179,11 @@ class FeishuBitableSource(BaseSource):
                 metadata=remote.metadata,
             )
         raw = self._client.download_attachment(
-            token, destination, app_token=self._app_token,
-            table_id=self._table_id, record_id=remote.record_id,
+            token,
+            destination,
+            app_token=self._app_token,
+            table_id=self._table_id,
+            record_id=remote.record_id,
         )
         return DownloadResult(
             remote_key=remote.remote_key,

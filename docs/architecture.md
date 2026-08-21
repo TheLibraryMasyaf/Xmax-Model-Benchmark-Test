@@ -110,7 +110,7 @@ Builder通过可注册分配策略把TestPlan展开为冻结Task Batch。Worker�
 
 ### 4.6 Evaluation Orchestrator
 
-加载当前 Benchmark 与 Scenario Pack，按维度路由 Judge，执行硬失败规则、置信度校准和融合。融合层先计算不依赖场景权重的 `canonical_score`，再按 Benchmark 中的预设权重档和场景规则计算 `scenario_score`，并保存完整规则轨迹。没有兼容 Judge 的维度可以标记为 `no_automated_judge`，不能伪造分数。
+加载当前 Benchmark 与 Scenario Pack，按维度路由 Judge，但Judge的唯一评分事实是逐细则`criterion_results`。Fusion先合并同一细则的多Judge结果，确定性汇总维度，执行硬失败规则，再计算不依赖场景权重的 `canonical_score` 与按预设权重档/场景规则计算的 `scenario_score`。单视频Evaluation和批次Manifest同时保存细则覆盖与统计。没有兼容 Judge 的细则标记为`uncovered`，证据不足则是`unassessable`；都不能伪造分数。
 
 ### 4.7 Human Signal Hub
 

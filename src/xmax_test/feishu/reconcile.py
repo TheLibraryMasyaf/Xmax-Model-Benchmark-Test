@@ -48,16 +48,12 @@ class ReconcileService:
             # A stage-level read-back verifies only the records just synced;
             # unrelated rows in the shared Case table are not orphans.
             remote_by_key = {
-                key: records
-                for key, records in remote_by_key.items()
-                if key in local_by_key
+                key: records for key, records in remote_by_key.items() if key in local_by_key
             }
 
         missing = sorted(set(local_by_key) - set(remote_by_key))
         duplicates = {f"{k[0]}+{k[1]}": len(v) for k, v in remote_by_key.items() if len(v) > 1}
-        orphan_keys = (
-            [] if scoped else sorted(set(remote_by_key) - set(local_by_key))
-        )
+        orphan_keys = [] if scoped else sorted(set(remote_by_key) - set(local_by_key))
 
         conflicts: list[dict[str, Any]] = []
         for key, run in local_by_key.items():
@@ -122,6 +118,9 @@ class ReconcileService:
             return float(self._config["case_score"]["failed_run_value"])
         if evaluation is None:
             return None
+        override = self._repository.latest_evaluation_override(evaluation.get("evaluation_id", ""))
+        if override and override.get("human_score_percent") is not None:
+            return override["human_score_percent"]
         return evaluation.get("case_score_percent")
 
     def _page_all(self, app_token: str, table_id: str) -> list[dict[str, Any]]:

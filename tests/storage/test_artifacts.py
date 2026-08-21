@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 
 from xmax_test.errors import ContractError, ValidationError
-from xmax_test.storage.artifacts import TEMP_PREFIX, ArtifactStore
 from xmax_test.hashing import sha256_bytes
+from xmax_test.storage.artifacts import TEMP_PREFIX, ArtifactStore
 
 
 class ArtifactStoreTests(unittest.TestCase):

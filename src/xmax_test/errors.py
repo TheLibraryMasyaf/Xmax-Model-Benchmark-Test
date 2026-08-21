@@ -19,7 +19,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 EXIT_OK = 0
 EXIT_INPUT_ERROR = 2
 EXIT_MISSING_DEPENDENCY = 3
@@ -118,9 +117,7 @@ class PartialCompletionError(XmaxTestError):
     retryable = True
     stage = "pipeline"
 
-    def __init__(
-        self, message: str, *, errors: list[dict[str, Any]] | None = None
-    ) -> None:
+    def __init__(self, message: str, *, errors: list[dict[str, Any]] | None = None) -> None:
         super().__init__(message)
         self.errors = errors or []
 

@@ -4,7 +4,7 @@
 
 ## 1. 责任类型
 
-Benchmark中的每个维度应声明：
+Benchmark中的每个维度声明路由，每条细则是实际评分单元。维度应声明：
 
 ```text
 primary_judge_kind
@@ -15,6 +15,8 @@ human_signal_policy
 ```
 
 可用Judge种类：`metric`、`cv`、`mlmm`和`fusion`。`mlmm`是Provider无关的能力类型，可由本地Codex CLI、OpenAI兼容API或自定义Python Provider提供。人工信号是独立监督来源，不作为常规必经Judge。
+
+同一维度中的平行细则可分配给不同Judge。例如O6.1由画质CV提供，O6.2由音频Metric提供，O6.3由MLLM/规格检查提供；它们的细则分等权汇总为O6，不是把三个Judge的“O6整体分”再平均。
 
 ## 2. 主判矩阵
 

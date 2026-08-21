@@ -1,0 +1,9 @@
+{
+  "$schema": "../schemas/single-version-report-request.schema.json",
+  "report_id": "x2-0-core-scenes-20260821",
+  "model_version": "x2.0",
+  "run_batch_id": "runs-replace-me",
+  "evaluation_batch_id": "eval-replace-me",
+  "requested_scene_ids": ["core-selfie-appearance"],
+  "output_directory": "var/reports/single-version"
+}

@@ -7,90 +7,81 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from xmax_test.errors import ExternalServiceError, MissingDependencyError
-from xmax_test.judges.codex_cli import FakeCodexCliJudge
+from xmax_test.errors import MissingDependencyError, ValidationError
+from xmax_test.judges.mlmm.codex import CodexCliProvider
 from xmax_test.judges.plugins.audio_integrity import AudioIntegrityJudge, _correlation
-from xmax_test.judges.plugins.video_quality import VideoQualityJudge
-from xmax_test.judges.plugins.video_quality import _quality_score
 from xmax_test.judges.plugins.run_metrics import RunMetricsJudge
+from xmax_test.judges.plugins.video_quality import VideoQualityJudge, _quality_score
 from xmax_test.judges.registry import JudgeRegistry
 from xmax_test.judges.worker import JudgeWorker
 
 
-class CodexJudgeTests(unittest.TestCase):
-    def test_fake_codex_returns_normalized_judgments(self) -> None:
-        judge = FakeCodexCliJudge()
-        judgments = judge.evaluate(
-            {
-                "prompt": "judge this",
-                "evaluation_id": "eval-1",
-                "run_id": "run-1",
-                "benchmark_version": "0.1.0-draft",
-            }
-        )
-        self.assertEqual(len(judgments), 1)
-        self.assertEqual(judgments[0]["dimension_id"], "C2")
-        self.assertEqual(judgments[0]["judge_id"], "codex-mlmm")
-        self.assertNotEqual(judge.prompt_hashes[0], "")
-
-    def test_invalid_output_retries_then_fails(self) -> None:
-        judge = FakeCodexCliJudge(
-            outputs=["not-json", "also-not-json", "still-not-json"],
-            always_invalid=True,
-        )
-        with self.assertRaises(ExternalServiceError):
-            judge.evaluate({"prompt": "x", "evaluation_id": "e", "run_id": "r"})
-        self.assertGreaterEqual(judge.attempts, 1)
-
+class CodexProviderTests(unittest.TestCase):
     def test_missing_binary_raises_dependency_error(self) -> None:
-        judge = FakeCodexCliJudge()
-        # The fake never checks the binary, so we test the real one's guard via
-        # a nonexistent path.
-        from xmax_test.judges.codex_cli import CodexCliJudge
-
-        real = CodexCliJudge(binary="/nonexistent/codex-binary")
+        real = CodexCliProvider(binary="/nonexistent/codex-binary")
         with self.assertRaises(MissingDependencyError):
-            real.evaluate({"prompt": "x", "evidence_images": []})
+            real.complete_json(prompt="x", image_paths=[], output_schema={})
 
-    @patch("xmax_test.judges.codex_cli.subprocess.run")
-    def test_real_command_uses_images_schema_ephemeral_and_isolated_cwd(
-        self, run
-    ) -> None:
-        # Import inside the test so the real adapter can be exercised without
-        # calling the service.
-        from xmax_test.judges.codex_cli import CodexCliJudge
-
+    @patch("xmax_test.judges.mlmm.codex.subprocess.run")
+    def test_real_command_uses_images_schema_ephemeral_and_isolated_cwd(self, run) -> None:
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "frame.jpg"
             image.write_bytes(b"jpeg")
-            judge = CodexCliJudge(binary="codex", max_retries=0)
-            with patch("shutil.which", return_value="/usr/bin/codex"):
+            provider = CodexCliProvider(binary="codex")
+            with patch("xmax_test.judges.mlmm.codex.which", return_value="/usr/bin/codex"):
                 run.return_value.returncode = 0
                 run.return_value.stderr = ""
-                run.return_value.stdout = (
-                    '{"verdict":"ok","score":1,"confidence":0.8,"evidence":[]}'
+                run.return_value.stdout = '{"verdict":"ok"}'
+                response = provider.complete_json(
+                    prompt="judge",
+                    image_paths=[str(image)],
+                    output_schema={"type": "object"},
                 )
-                results = judge.evaluate(
-                    {
-                        "prompt": "judge",
-                        "evidence_images": [str(image)],
-                        "output_schema": {"type": "object"},
-                        "evaluation_id": "e",
-                        "run_id": "r",
-                        "benchmark_version": "b",
-                        "dimension_id": "C2",
-                        "dimension_version": "v",
-                    }
-                )
-        self.assertEqual(results[0]["verdict"], "ok")
+        self.assertEqual(response.payload["verdict"], "ok")
         command = run.call_args.args[0]
         self.assertIn("--output-schema", command)
         self.assertIn("--ephemeral", command)
         self.assertIn("-i", command)
-        self.assertIn("xmax-codex-judge-", run.call_args.kwargs["cwd"])
+        self.assertIn("xmax-mlmm-codex-", run.call_args.kwargs["cwd"])
 
 
 class WorkerTests(unittest.TestCase):
+    def test_worker_rejects_dimension_only_score(self) -> None:
+        class LegacyJudge:
+            def manifest(self):
+                return {
+                    "judge_id": "legacy",
+                    "version": "1",
+                    "kind": "metric",
+                    "supported_dimensions": ["C1"],
+                    "supported_modes": ["offline"],
+                }
+
+            def evaluate(self, context):
+                return [
+                    {
+                        "dimension_id": "C1",
+                        "verdict": "legacy",
+                        "score": 2.0,
+                        "confidence": 1.0,
+                        "assessable": True,
+                        "evidence": [],
+                    }
+                ]
+
+        registry = JudgeRegistry()
+        registry.register(LegacyJudge())
+        with self.assertRaisesRegex(ValidationError, "criterion_results"):
+            JudgeWorker(registry).run(
+                evaluation_id="e",
+                run_id="r",
+                benchmark_version="b",
+                dimension_id="C1",
+                dimension_version="v",
+                mode="offline",
+                context={"dimension_contract": {"criteria": [{"criterion_id": "C1.1"}]}},
+            )
+
     def test_worker_routes_dimension_and_validates(self) -> None:
         registry = JudgeRegistry()
         registry.register(VideoQualityJudge())
@@ -150,18 +141,11 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(results[0]["verdict"], "judge_error")
         self.assertIn("error", results[0])
 
-    def test_blind_inputs_do_not_contain_model_names(self) -> None:
-        judge = FakeCodexCliJudge()
-        prompt = "Please judge this sample without any model identification."
-        judge.evaluate(
-            {"prompt": prompt, "evaluation_id": "e", "run_id": "r", "benchmark_version": "b"}
-        )
-        self.assertIn(prompt, prompt)  # prompt is opaque to the judge
-        self.assertNotIn("x2.0", prompt[:0])
-
 
 class PluginTests(unittest.TestCase):
-    def test_run_metrics_scores_runtime_facts_and_refuses_short_long_session(self) -> None:
+    def test_run_metrics_scores_runtime_facts_and_refuses_short_long_session(
+        self,
+    ) -> None:
         judge = RunMetricsJudge()
         c1 = judge.evaluate(
             {
@@ -183,9 +167,24 @@ class PluginTests(unittest.TestCase):
         self.assertFalse(r6["assessable"])
 
     def test_video_quality_thresholds_have_three_levels(self) -> None:
-        good = {"sharpness": 8, "clipped_ratio": 0.01, "duplicate_ratio": 0.0, "flicker": 2}
-        minor = {"sharpness": 4, "clipped_ratio": 0.01, "duplicate_ratio": 0.0, "flicker": 2}
-        severe = {"sharpness": 1, "clipped_ratio": 0.01, "duplicate_ratio": 0.0, "flicker": 2}
+        good = {
+            "sharpness": 8,
+            "clipped_ratio": 0.01,
+            "duplicate_ratio": 0.0,
+            "flicker": 2,
+        }
+        minor = {
+            "sharpness": 4,
+            "clipped_ratio": 0.01,
+            "duplicate_ratio": 0.0,
+            "flicker": 2,
+        }
+        severe = {
+            "sharpness": 1,
+            "clipped_ratio": 0.01,
+            "duplicate_ratio": 0.0,
+            "flicker": 2,
+        }
         self.assertEqual(_quality_score(good)[0], 2.0)
         self.assertEqual(_quality_score(minor)[0], 1.0)
         self.assertEqual(_quality_score(severe)[0], 0.0)
@@ -196,14 +195,16 @@ class PluginTests(unittest.TestCase):
         from jsonschema import Draft202012Validator
 
         schema = json.loads(
-            (Path(__file__).resolve().parents[2] / "schemas" / "judge-manifest.schema.json").read_text()
+            (
+                Path(__file__).resolve().parents[2] / "schemas" / "judge-manifest.schema.json"
+            ).read_text()
         )
         Draft202012Validator(schema).validate(VideoQualityJudge().manifest())
 
-    def test_video_quality_without_backend_does_not_fabricate_neutral_score(self) -> None:
-        result = VideoQualityJudge().evaluate(
-            {"media": {"width": 704, "height": 1280}}
-        )[0]
+    def test_video_quality_without_backend_does_not_fabricate_neutral_score(
+        self,
+    ) -> None:
+        result = VideoQualityJudge().evaluate({"media": {"width": 704, "height": 1280}})[0]
         self.assertFalse(result["assessable"])
         self.assertIsNone(result["score"])
 

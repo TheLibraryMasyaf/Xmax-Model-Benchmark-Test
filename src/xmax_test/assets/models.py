@@ -68,13 +68,17 @@ class SourceDescriptor:
     config: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, item: dict[str, Any]) -> "SourceDescriptor":
+    def from_config(cls, item: dict[str, Any]) -> SourceDescriptor:
         return cls(
             source_id=item["source_id"],
             kind=item["kind"],
             enabled=bool(item.get("enabled", False)),
             asset_kind=item["asset_kind"],
-            config={key: value for key, value in item.items() if key not in {"source_id", "kind", "enabled", "asset_kind"}},
+            config={
+                key: value
+                for key, value in item.items()
+                if key not in {"source_id", "kind", "enabled", "asset_kind"}
+            },
         )
 
 

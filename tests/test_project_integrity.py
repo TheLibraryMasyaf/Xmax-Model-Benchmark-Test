@@ -1,8 +1,9 @@
 import json
-from pathlib import Path
 import re
 import unittest
+from pathlib import Path
 
+from xmax_test.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -21,9 +22,7 @@ PIPELINE_STAGES = [
 
 class ProjectIntegrityTests(unittest.TestCase):
     def test_all_json_files_parse(self) -> None:
-        paths = sorted((ROOT / "config").glob("*.json")) + sorted(
-            (ROOT / "schemas").glob("*.json")
-        )
+        paths = sorted((ROOT / "config").glob("*.json")) + sorted((ROOT / "schemas").glob("*.json"))
         self.assertTrue(paths)
         for path in paths:
             with self.subTest(path=path.relative_to(ROOT)):
@@ -36,6 +35,15 @@ class ProjectIntegrityTests(unittest.TestCase):
                 schema_ref = data.get("$schema")
                 self.assertIsInstance(schema_ref, str)
                 self.assertTrue((path.parent / schema_ref).resolve().is_file())
+
+    def test_all_schema_declaring_configs_validate(self) -> None:
+        for path in sorted((ROOT / "config").glob("*.json")):
+            with self.subTest(path=path.relative_to(ROOT)):
+                data = json.loads(path.read_text(encoding="utf-8"))
+                schema_ref = data.get("$schema")
+                if not schema_ref:
+                    continue
+                load_config(path, Path(schema_ref).name, base_dir=ROOT)
 
     def test_local_markdown_links_exist(self) -> None:
         markdown_paths = [ROOT / "README.md", ROOT / "AGENTS.md", ROOT / "RUNBOOK.md"]
@@ -53,23 +61,33 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_model_update_template_keeps_three_level_summary(self) -> None:
-        template = (
-            ROOT / "report-templates" / "model-version-update-report.md"
-        ).read_text(encoding="utf-8")
+        template = (ROOT / "report-templates" / "model-version-update-report.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("### P0 — 新模型总分提升与明显改进", template)
         self.assertIn("### P1 — 新模型持平项", template)
         self.assertIn("### P2 — 新模型劣化项", template)
         self.assertIn("## 3. 分场景详细结果", template)
 
-    def test_draft_scenario_pack_matches_benchmark_rules(self) -> None:
-        scenarios = json.loads(
-            (ROOT / "config" / "scenarios.json").read_text(encoding="utf-8")
+    def test_single_version_template_keeps_scores_and_priority_levels(self) -> None:
+        template = (ROOT / "report-templates" / "single-version-evaluation-report.md").read_text(
+            encoding="utf-8"
         )
+        self.assertIn("## 2. 总分与总体分布", template)
+        self.assertIn("## 4. 全量评分维度得分", template)
+        self.assertIn("## 5. 评分细则得分", template)
+        self.assertIn("### 3.2 表现较好的维度", template)
+        self.assertIn("### 3.3 表现不足的维度", template)
+        self.assertIn("### P0 — 发布/可用性阻断", template)
+        self.assertIn("### P1 — 明显短板", template)
+        self.assertIn("### P2 — 局部优化", template)
+        self.assertIn("禁止把维度分平均拆给各细则", template)
+
+    def test_draft_scenario_pack_matches_benchmark_rules(self) -> None:
+        scenarios = json.loads((ROOT / "config" / "scenarios.json").read_text(encoding="utf-8"))
         self.assertEqual(scenarios["status"], "shadow")
         self.assertEqual(len(scenarios["scenarios"]), 32)
-        self.assertEqual(
-            sum(item["tier"] == "core" for item in scenarios["scenarios"]), 10
-        )
+        self.assertEqual(sum(item["tier"] == "core" for item in scenarios["scenarios"]), 10)
         self.assertEqual(
             sum(item["tier"] == "supplementary" for item in scenarios["scenarios"]),
             22,
@@ -97,9 +115,7 @@ class ProjectIntegrityTests(unittest.TestCase):
                     self.assertIn(mode, recipe["bindings"])
 
     def test_feishu_case_score_contract_is_percentage_and_nullable(self) -> None:
-        config = json.loads(
-            (ROOT / "config" / "feishu.example.json").read_text(encoding="utf-8")
-        )
+        config = json.loads((ROOT / "config" / "feishu.example.json").read_text(encoding="utf-8"))
         self.assertEqual(config["tables"]["case_data"], "tblohc666GKQCi1A")
         case_fields = config["field_projection"]["case_data"]
         self.assertEqual(case_fields["score_percent"], "case评分")
@@ -113,9 +129,7 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertEqual(score["failed_run_value"], 0)
 
         evaluation_schema = json.loads(
-            (ROOT / "schemas" / "evaluation-result.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "evaluation-result.schema.json").read_text(encoding="utf-8")
         )
         score_schema = evaluation_schema["properties"]["case_score_percent"]
         self.assertIn("null", score_schema["type"])
@@ -124,31 +138,21 @@ class ProjectIntegrityTests(unittest.TestCase):
 
     def test_feishu_sync_schema_exposes_business_tables(self) -> None:
         schema = json.loads(
-            (ROOT / "schemas" / "feishu-record.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "feishu-record.schema.json").read_text(encoding="utf-8")
         )
         entity_types = schema["properties"]["entity_type"]["enum"]
         self.assertTrue({"feed_data", "prompt_data", "case_data"} <= set(entity_types))
 
     def test_pipeline_stages_and_default_handoff_are_canonical(self) -> None:
         schema = json.loads(
-            (ROOT / "schemas" / "run-request.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "run-request.schema.json").read_text(encoding="utf-8")
         )
         self.assertEqual(schema["properties"]["stages"]["items"]["enum"], PIPELINE_STAGES)
-        self.assertEqual(
-            schema["properties"]["dependency_policy"]["const"], "explicit_only"
-        )
-        self.assertEqual(
-            schema["properties"]["missing_input_policy"]["const"], "error"
-        )
+        self.assertEqual(schema["properties"]["dependency_policy"]["const"], "explicit_only")
+        self.assertEqual(schema["properties"]["missing_input_policy"]["const"], "error")
 
         example = json.loads(
-            (ROOT / "config" / "run-request.example.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "config" / "run-request.example.json").read_text(encoding="utf-8")
         )
         self.assertEqual(
             example["stages"],
@@ -169,9 +173,7 @@ class ProjectIntegrityTests(unittest.TestCase):
 
     def test_stage_manifest_has_versioned_inputs_and_outputs(self) -> None:
         schema = json.loads(
-            (ROOT / "schemas" / "stage-manifest.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "stage-manifest.schema.json").read_text(encoding="utf-8")
         )
         required = set(schema["required"])
         self.assertTrue(
@@ -189,9 +191,7 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertEqual(schema["properties"]["stage"]["enum"], PIPELINE_STAGES)
 
         batch_schema = json.loads(
-            (ROOT / "schemas" / "batch-manifest.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "batch-manifest.schema.json").read_text(encoding="utf-8")
         )
         self.assertTrue(
             {
@@ -205,20 +205,16 @@ class ProjectIntegrityTests(unittest.TestCase):
         )
 
         selector_schema = json.loads(
-            (ROOT / "schemas" / "pipeline-selector.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "pipeline-selector.schema.json").read_text(encoding="utf-8")
         )
         self.assertIn("state", selector_schema["required"])
-        self.assertEqual(
-            selector_schema["properties"]["state"]["enum"], ["request", "frozen"]
-        )
+        self.assertEqual(selector_schema["properties"]["state"]["enum"], ["request", "frozen"])
 
-    def test_existing_result_import_is_read_only_and_creates_completed_runs(self) -> None:
+    def test_existing_result_import_is_read_only_and_creates_completed_runs(
+        self,
+    ) -> None:
         config = json.loads(
-            (ROOT / "config" / "existing-results.example.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "config" / "existing-results.example.json").read_text(encoding="utf-8")
         )
         self.assertEqual(config["source"]["kind"], "feishu_case_data")
         self.assertEqual(config["selector"]["entity_type"], "source_record")
@@ -227,13 +223,9 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertFalse(config["write_remote"])
 
         run_schema = json.loads(
-            (ROOT / "schemas" / "generation-run.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "generation-run.schema.json").read_text(encoding="utf-8")
         )
-        self.assertTrue(
-            {"run_batch_id", "origin", "provenance"} <= set(run_schema["required"])
-        )
+        self.assertTrue({"run_batch_id", "origin", "provenance"} <= set(run_schema["required"]))
         self.assertTrue(
             {"feishu_import", "local_import", "stage_manifest_import"}
             <= set(run_schema["properties"]["origin"]["enum"])
@@ -259,9 +251,7 @@ class ProjectIntegrityTests(unittest.TestCase):
         }
         for filename, (stages, sync_policy) in expected.items():
             with self.subTest(filename=filename):
-                request = json.loads(
-                    (ROOT / "config" / filename).read_text(encoding="utf-8")
-                )
+                request = json.loads((ROOT / "config" / filename).read_text(encoding="utf-8"))
                 self.assertEqual(request["stages"], stages)
                 self.assertEqual(request["sync_policy"], sync_policy)
                 self.assertEqual(request["dependency_policy"], "explicit_only")

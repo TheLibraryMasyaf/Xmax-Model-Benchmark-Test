@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xmax-test"
-version = "0.1.0"
-description = "XMAX offline/realtime generation benchmark orchestration scaffold"
+version = "0.3.0"
+description = "Production XMAX offline/realtime generation and evaluation pipeline"
 requires-python = ">=3.11"
 dependencies = [
   "jsonschema>=4.23,<5"
@@ -25,3 +25,15 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "C901"]
+
+[tool.ruff.lint.mccabe]
+# Coordinators legitimately branch by stage/provider. The previous 33-branch
+# streaming function was split; 30 is now the enforced ceiling for adapters.
+max-complexity = 30

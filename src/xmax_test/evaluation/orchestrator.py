@@ -13,10 +13,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..errors import ContractError, MissingInputError, ValidationError
+from ..errors import ContractError
 from ..hashing import content_hash
 from ..time import utc_now
+from .aggregation import aggregate_evaluation_results
 from .fusion import JudgmentFusion
+from .group_metrics import BatchGroupEvaluator
 from .preprocess import PreprocessService
 
 
@@ -49,15 +51,33 @@ class EvaluationOrchestrator:
         self,
         runs: list[dict[str, Any]],
         preprocess_by_run: dict[str, dict[str, Any]] | None = None,
+        *,
+        resume: bool = False,
     ) -> dict[str, Any]:
         if not runs:
             raise ContractError("evaluate requires at least one run")
-        evaluation_batch_id = f"eval-{content_hash({'runs': sorted(r['run_id'] for r in runs)})[:12]}"
+        fingerprint = content_hash(
+            {
+                "runs": sorted(r["run_id"] for r in runs),
+                "benchmark_version": self._benchmark.get("benchmark_version"),
+                "scenario_pack_version": self._scenario_pack.get("version"),
+                "judges": self._judge_registry.manifests(),
+            }
+        )
+        evaluation_batch_id = self._evaluation_batch_id(fingerprint, resume)
         results: list[dict[str, Any]] = []
         coverage: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
         for run in runs:
             try:
+                if resume:
+                    existing = self._repository.list_evaluation_results(
+                        run_id=run["run_id"],
+                        evaluation_batch_id=evaluation_batch_id,
+                    )
+                    if existing:
+                        results.append(existing[-1])
+                        continue
                 preprocess = (preprocess_by_run or {}).get(run["run_id"])
                 result = self.evaluate_run(run, evaluation_batch_id, preprocess=preprocess)
                 results.append(result)
@@ -71,6 +91,8 @@ class EvaluationOrchestrator:
                         "entity_id": run.get("run_id"),
                     }
                 )
+        results = self.finalize_batch_context(runs, results)
+        aggregate = aggregate_evaluation_results(results)
         if results:
             manifest = {
                 "manifest_version": "1.0",
@@ -78,12 +100,17 @@ class EvaluationOrchestrator:
                 "entity_type": "evaluation_batch",
                 "item_entity_type": "evaluation_result",
                 "item_ids": sorted(r["evaluation_id"] for r in results),
-                "content_hash": content_hash({"evaluation_ids": sorted(r["evaluation_id"] for r in results)}),
+                "content_hash": content_hash(
+                    {"evaluation_ids": sorted(r["evaluation_id"] for r in results)}
+                ),
                 "producer_stage_run_id": f"evaluate-{evaluation_batch_id[-8:]}",
                 "created_at": utc_now(),
                 "metadata": {
                     "benchmark_version": self._benchmark.get("benchmark_version"),
                     "scenario_pack_version": self._scenario_pack.get("version"),
+                    "score_source": "criterion_results",
+                    "evaluation_fingerprint": fingerprint,
+                    "aggregate": aggregate,
                 },
             }
             self._repository.save_batch_manifest(manifest)
@@ -94,7 +121,57 @@ class EvaluationOrchestrator:
             "errors": errors,
             "coverage": coverage,
             "results": results,
+            "aggregate": aggregate,
+            "criterion_summary": aggregate["criterion_summary"],
+            "dimension_summary": aggregate["dimension_summary"],
+            "case_score_summary": aggregate["case_score_summary"],
         }
+
+    def _evaluation_batch_id(self, fingerprint: str, resume: bool) -> str:
+        if resume:
+            matches = [
+                item
+                for item in self._repository.list_batch_manifests("evaluation_batch")
+                if item.get("metadata", {}).get("evaluation_fingerprint") == fingerprint
+            ]
+            if matches:
+                return matches[-1]["batch_id"]
+        return f"eval-{fingerprint[:12]}-{uuid.uuid4().hex[:8]}"
+
+    def finalize_batch_context(
+        self,
+        runs: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Add batch-only criteria and deterministically re-fuse each result."""
+
+        by_run = {item["run_id"]: item for item in results}
+        generated = BatchGroupEvaluator(self._repository).judgments(runs, results)
+        for run_id, extra_judgments in generated.items():
+            previous = by_run.get(run_id)
+            run = next((item for item in runs if item.get("run_id") == run_id), None)
+            if previous is None or run is None:
+                continue
+            for judgment in extra_judgments:
+                self._repository.append_judgment(judgment)
+            case = self._repository.get_test_case(run["case_id"])
+            fused = self._fusion.fuse(
+                self._benchmark,
+                self._scenario_pack,
+                case,
+                self._repository.list_judgments(previous["evaluation_id"]),
+                run.get("metrics", {}),
+            )
+            updated = {
+                **previous,
+                **fused,
+                "evaluation_id": previous["evaluation_id"],
+                "evaluation_batch_id": previous["evaluation_batch_id"],
+                "run_id": run_id,
+            }
+            self._repository.save_evaluation_result(updated)
+            by_run[run_id] = updated
+        return [by_run[item["run_id"]] for item in results]
 
     def evaluate_run(
         self,
@@ -122,9 +199,7 @@ class EvaluationOrchestrator:
         judgments: list[dict[str, Any]] = []
         evidence_groups = self._evidence_groups(preprocess)
         operation_contract = self._operation_contract(case, mode)
-        evidence_images = [
-            image for group in evidence_groups for image in group["images"]
-        ]
+        evidence_images = [image for group in evidence_groups for image in group["images"]]
         common_context = {
             "evaluation_id": evaluation_id,
             "run_id": run["run_id"],
@@ -176,27 +251,43 @@ class EvaluationOrchestrator:
             if not judge_items:
                 continue
             dimension = self._dimension(dimension_id)
-            judgments.extend(
-                self._worker.run(
-                    evaluation_id=evaluation_id,
-                    run_id=run["run_id"],
-                    benchmark_version=self._benchmark.get("benchmark_version", ""),
-                    dimension_id=dimension_id,
-                    dimension_version=dimension.get("version", ""),
-                    mode=mode,
-                    context={
-                        **common_context,
-                        "dimension_contract": dimension,
-                        "prompt": self._judge_prompt(
-                            dimension, case, mode, evidence_groups, operation_contract
-                        ),
-                    },
-                    judge_ids=judge_items,
+            for judge_item in judge_items:
+                registered = self._judge_registry.get(*judge_item)
+                judge_dimension = self._contract_for_judge(dimension, registered)
+                if not judge_dimension.get("criteria"):
+                    continue
+                judgments.extend(
+                    self._worker.run(
+                        evaluation_id=evaluation_id,
+                        run_id=run["run_id"],
+                        benchmark_version=self._benchmark.get("benchmark_version", ""),
+                        dimension_id=dimension_id,
+                        dimension_version=dimension.get("version", ""),
+                        mode=mode,
+                        context={
+                            **common_context,
+                            "dimension_contract": judge_dimension,
+                            "prompt": self._judge_prompt(
+                                judge_dimension,
+                                case,
+                                mode,
+                                evidence_groups,
+                                operation_contract,
+                            ),
+                        },
+                        judge_ids=[judge_item],
+                    )
                 )
-            )
 
         for (judge_id, judge_version), dimension_ids in batched.items():
-            dimensions = [self._dimension(item) for item in dimension_ids]
+            registered = self._judge_registry.get(judge_id, judge_version)
+            dimensions = [
+                self._contract_for_judge(self._dimension(item), registered)
+                for item in dimension_ids
+            ]
+            dimensions = [item for item in dimensions if item.get("criteria")]
+            if not dimensions:
+                continue
             dimension_versions = {
                 item["dimension_id"]: item.get("version", "") for item in dimensions
             }
@@ -235,9 +326,7 @@ class EvaluationOrchestrator:
         result["evaluation_batch_id"] = evaluation_batch_id
         result["run_id"] = run["run_id"]
         result["model_id"] = run.get("model_id")
-        result["generation_config_hash"] = content_hash(
-            case.get("generation_config", {})
-        )
+        result["generation_config_hash"] = content_hash(case.get("generation_config", {}))
         result["preprocess_id"] = preprocess.get("preprocess_id")
         result["preprocessor_version"] = preprocess.get("producer_version")
         self._repository.save_evaluation_result(result)
@@ -263,16 +352,44 @@ class EvaluationOrchestrator:
         primary_kinds = set(routing.get("primary_kinds", []))
         secondary_kinds = set(routing.get("secondary_kinds", []))
         primary = [
-            item for item in matches if item.manifest.get("kind") in primary_kinds
+            item
+            for item in matches
+            if item.manifest.get("kind") in primary_kinds
+            and self._contract_for_judge(self._dimension(dimension_id), item).get("criteria")
         ]
         secondary = [
-            item for item in matches if item.manifest.get("kind") in secondary_kinds
+            item
+            for item in matches
+            if item.manifest.get("kind") in secondary_kinds
+            and self._contract_for_judge(self._dimension(dimension_id), item).get("criteria")
         ]
         # Primary and secondary judges are complementary evidence producers.
         # Keeping both also permits an assessable secondary result when a
         # primary CV backend truthfully returns unassessable for one sample.
-        selected = list({(item.judge_id, item.version): item for item in primary + secondary}.values())
+        selected = list(
+            {(item.judge_id, item.version): item for item in primary + secondary}.values()
+        )
         return [(item.judge_id, item.version) for item in selected]
+
+    @staticmethod
+    def _contract_for_judge(dimension: dict[str, Any], registered: Any) -> dict[str, Any]:
+        """Return only criteria explicitly owned by this Judge.
+
+        A legacy manifest without ``supported_criteria`` is allowed for test
+        plugins, but production config validation reports it as incomplete.
+        """
+
+        supported = set(registered.manifest.get("supported_criteria") or [])
+        if not supported:
+            return dict(dimension)
+        return {
+            **dimension,
+            "criteria": [
+                criterion
+                for criterion in dimension.get("criteria", [])
+                if criterion.get("criterion_id") in supported
+            ],
+        }
 
     def _media_of(self, run: dict[str, Any]) -> dict[str, Any]:
         result_asset_id = run.get("result_asset_id")
@@ -352,16 +469,12 @@ class EvaluationOrchestrator:
                 result.append(item)
         if run.get("result_asset_id"):
             asset_id = run["result_asset_id"]
-            item = self._media_input(
-                "result_video", asset_id, media_urls.get(asset_id)
-            )
+            item = self._media_input("result_video", asset_id, media_urls.get(asset_id))
             if item:
                 result.append(item)
         return result
 
-    def _operation_contract(
-        self, case: dict[str, Any], mode: str
-    ) -> dict[str, Any]:
+    def _operation_contract(self, case: dict[str, Any], mode: str) -> dict[str, Any]:
         evaluation = dict(case.get("evaluation_operation_contract") or {})
         recipe: dict[str, Any] = {}
         if self._recipe_resolver is not None and case.get("operation_recipe_id"):
@@ -388,9 +501,7 @@ class EvaluationOrchestrator:
                 "feed_asset_id": case.get("feed_asset_id"),
                 "prompt_asset_ids": case.get("prompt_asset_ids", []),
                 "edited_video_asset_id": case.get("edited_video_asset_id"),
-                "expected_audio_source_asset_id": case.get(
-                    "expected_audio_source_asset_id"
-                ),
+                "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
             },
         }
 
@@ -427,9 +538,7 @@ class EvaluationOrchestrator:
             kind = str(asset.get("kind") or "")
             mime = str(asset.get("mime_type") or "")
             media_kind = (
-                "video"
-                if kind.endswith("_video") or mime.startswith("video/")
-                else "image"
+                "video" if kind.endswith("_video") or mime.startswith("video/") else "image"
             )
             item = {
                 "role": role,
@@ -443,9 +552,7 @@ class EvaluationOrchestrator:
         except Exception:
             return None
 
-    def _run_media_urls(
-        self, case: dict[str, Any], run: dict[str, Any]
-    ) -> dict[str, str]:
+    def _run_media_urls(self, case: dict[str, Any], run: dict[str, Any]) -> dict[str, str]:
         """Recover already-published XMAX URLs without re-uploading media.
 
         Input uploads include the content SHA in their object names. Result URLs
@@ -554,8 +661,13 @@ class EvaluationOrchestrator:
         return (
             "你是盲评视频质量评测器。不得猜测模型名称、版本或未在证据中出现的事实。"
             "只评价下面一个维度；抽帧无法证明的连续性、延迟、音频或因果关系必须标记不可评。"
-            "按0差、1合格、2好的尺度输出一个JSON对象，不要Markdown。字段必须包含："
-            "verdict,score,confidence,assessable,evidence。系统会补齐评测、Run、维度和Judge身份字段。"
+            "按0差、1合格、2好的尺度，对合同中每一条criterion独立评分。"
+            "输出一个JSON对象，不要Markdown。字段必须包含："
+            "verdict,confidence,assessable,evidence,criterion_results。"
+            "criterion_results必须恰好包含合同中所有criterion_id；每项必须包含"
+            "criterion_id,verdict,score,confidence,assessable,evidence。"
+            "不可评时score为null并说明原因。不要输出维度score，系统只会从细则分汇总维度。"
+            "系统会补齐评测、Run、维度和Judge身份字段。"
             "evidence必须引用可见时刻或说明不可评原因。\n评测合同："
             + json.dumps(payload, ensure_ascii=False, sort_keys=True)
         )
@@ -605,8 +717,11 @@ class EvaluationOrchestrator:
             "一次评价下面列出的全部维度，每个维度恰好输出一项。若输入包含原始视频，"
             "可以依据其可见画面判断连续性和时序；若只有抽帧则不得推断连续性。"
             "任何视觉输入都不能证明音频、API延迟或未显示的运行因果，这些必须标记不可评。"
-            "按0差、1合格、2好的尺度返回JSON对象，顶层字段为judgments；每项必须包含"
-            "dimension_id,verdict,score,confidence,assessable,evidence。不要Markdown。"
+            "按0差、1合格、2好的尺度返回JSON对象，顶层字段为judgments；每个维度项必须包含"
+            "dimension_id,verdict,confidence,assessable,evidence,criterion_results。"
+            "criterion_results必须恰好包含该维度合同中的全部criterion_id，且每条细则必须包含"
+            "criterion_id,verdict,score,confidence,assessable,evidence。不可评时score为null。"
+            "不要输出维度score；系统只会从细则分确定性汇总维度和总分。不要Markdown。"
             "不同维度不可复制同一理由代替独立判断。系统会补齐评测、Run、版本和Judge身份。\n评测合同："
             + json.dumps(payload, ensure_ascii=False, sort_keys=True)
         )

@@ -17,7 +17,7 @@
 ```text
 人工原文
 → 不可变保存
-→ Codex Normalizer
+→ 可配置MLLM Normalizer
 → 映射现有维度或产生维度提案
 → 完整性/矛盾检查
 → 人工评测池
@@ -33,6 +33,8 @@ xmax-test human import --input <independent-dataset.json>
 xmax-test human feedback --input <ai-result-feedback.json>
 xmax-test human normalize --pending
 xmax-test human partition --output var/feedback/learning.jsonl
+xmax-test human build-challenger --judge-id <id> --version <version> --route mlmm --train var/feedback/learning.train.jsonl
+xmax-test judges promote --judge-id <id> --version <version> --validation <holdout-validation.json>
 ```
 
 导入保留时间段、ROI、bbox/mask/关键点、人工分数和Feed/Prompt/Result Asset ID等扩展监督字段，Normalizer不能删除或改写它们。
@@ -73,12 +75,12 @@ LLM可以草拟，只有标准负责人可以激活。
 
 分区按Feed、人物、Prompt家族和场景分组，避免相似生成泄漏到训练与Holdout。
 
-分区会持久回HumanSignal，并导出主JSONL及`.train/.calibration/.holdout.jsonl`。每条学习包声明`route_kind`和`training_eligible`；Holdout包固定为false，`LearningRouter.route()`对Holdout会直接报错。这些文件是CV/MLLM/Fusion Challenger的稳定输入接口，项目不在收到单条反馈时自动微调当前Judge。
+分区会持久回HumanSignal，并导出主JSONL及`.train/.calibration/.holdout.jsonl`。每条学习包声明`route_kind`和`training_eligible`；Holdout包固定为false，`LearningRouter.route()`对Holdout会直接报错。`build-challenger`对MLLM生成Judge可直接读取的Train-only few-shot校准锚点，对CV调用`TrainerPlugin.train`，对Fusion生成标定集；所有路线先登记为Shadow，不会热更新Champion。
 
 ## 7. 路由
 
 - 可定位身份、姿态、实例、画质问题：CV学习通道。
-- 目标完成、物理、语义、整体观感：Codex学习通道。
+- 目标完成、物理、语义、整体观感：MLLM学习通道。
 - 延迟、FPS、费用、成功率阈值：Fusion/规则通道。
 - 模糊主观评价：先进入MLLM案例候选，不直接训练专项CV。
 

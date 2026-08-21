@@ -42,14 +42,8 @@ class StreamingPipelineTests(unittest.TestCase):
         self.assertEqual(len(outcome.runs), 2)
         self.assertEqual(len(outcome.preprocess), 2)
         self.assertEqual(len(outcome.evaluations), 2)
-        self.assertLess(
-            events.index("evaluate_start_run-1"), events.index("generate_end_2")
-        )
-        self.assertTrue(
-            outcome.metadata["overlap_observed"][
-                "evaluate_before_generation_finished"
-            ]
-        )
+        self.assertLess(events.index("evaluate_start_run-1"), events.index("generate_end_2"))
+        self.assertTrue(outcome.metadata["overlap_observed"]["evaluate_before_generation_finished"])
 
     def test_failed_generation_is_not_sent_downstream(self) -> None:
         preprocessed: list[str] = []
@@ -105,9 +99,7 @@ class StreamingPipelineTests(unittest.TestCase):
 
         self.assertEqual(len(outcome.sync), 2)
         self.assertLess(events.index("synced-run-1"), events.index("generated-2"))
-        self.assertTrue(
-            outcome.metadata["overlap_observed"]["sync_before_generation_finished"]
-        )
+        self.assertTrue(outcome.metadata["overlap_observed"]["sync_before_generation_finished"])
 
     def test_repeated_identical_generation_error_opens_circuit_breaker(self) -> None:
         calls: list[str] = []

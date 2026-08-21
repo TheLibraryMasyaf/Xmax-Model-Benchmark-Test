@@ -97,15 +97,9 @@ class HumanMediaImporter:
         # frame for many MP4 files. Never seek the exact EOF timestamp.
         frame_margin = max(0.05, (1.0 / fps) if fps > 0 else 0.05)
         sample_duration = max(0.001, duration_s - frame_margin)
-        timestamps = global_samples(
-            sample_duration, self._frame_count, cover_edges=True
-        )
-        frames = self._frames.extract_asset(
-            signal_id, asset, timestamps, "human_result"
-        )
-        image_paths = [
-            str(self._artifacts.resolve(frame["uri"]).resolve()) for frame in frames
-        ]
+        timestamps = global_samples(sample_duration, self._frame_count, cover_edges=True)
+        frames = self._frames.extract_asset(signal_id, asset, timestamps, "human_result")
+        image_paths = [str(self._artifacts.resolve(frame["uri"]).resolve()) for frame in frames]
         return {
             **record,
             "signal_id": signal_id,

@@ -108,9 +108,7 @@ class SessionTaskStateMachine:
             except Exception:
                 pass
 
-    def _wait_lifecycle(
-        self, task_uid: str, heartbeat_errors: list[str]
-    ) -> dict[str, Any]:
+    def _wait_lifecycle(self, task_uid: str, heartbeat_errors: list[str]) -> dict[str, Any]:
         deadline = time.monotonic() + self._lifecycle_timeout
         saw_started = False
         while time.monotonic() < deadline:
@@ -135,14 +133,17 @@ class SessionTaskStateMachine:
                         result_url=payload.get("resultUrl"),
                     )
                 elif event == "error":
-                    self._append("error", {"taskUid": task_uid, "message": payload.get("message")})
-                    return self._failure(
-                        "model_error", str(payload.get("message", "model error"))
+                    self._append(
+                        "error",
+                        {"taskUid": task_uid, "message": payload.get("message")},
                     )
+                    return self._failure("model_error", str(payload.get("message", "model error")))
             if heartbeat_errors and not saw_started:
                 return self._failure("heartbeat_failure", heartbeat_errors[0])
             time.sleep(0.1)
-        return self._failure("lifecycle_timeout", f"no completion within {self._lifecycle_timeout}s")
+        return self._failure(
+            "lifecycle_timeout", f"no completion within {self._lifecycle_timeout}s"
+        )
 
     def _failure(self, failure_class: str, message: str, **extra: Any) -> dict[str, Any]:
         self._append(f"failed_{failure_class}", {"message": message, **extra})

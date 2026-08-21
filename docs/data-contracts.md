@@ -65,11 +65,13 @@ planned → running → completed
 
 ### 2.4 Judgment
 
-Schema：`schemas/judgment.schema.json`。每条只对应一个维度、一个Judge版本和一个Run。总分是派生数据，不覆盖分项Judgment。
+Schema：`schemas/judgment.schema.json`。每条只对应一个维度、一个Judge版本和一个Run，并必须保存非空`criterion_results`。每条细则结果含`criterion_id`、0/1/2或`null`、`assessable`、置信度和证据。Judge的顶层维度分只用于审计，不进入最终融合。
 
 ### 2.5 EvaluationResult
 
-Schema：`schemas/evaluation-result.schema.json`。同时保存不随场景变化的 `canonical_score` 与按预设规则计算的 `scenario_score`，并记录权重档、命中规则、有评测能力的维度集合、最终有效权重和硬门槛结果。`case_score_percent`取Score Schema声明的`case_score_output`，范围0–100，用于单次Case的飞书展示。投影到飞书百分比字段时转为0–1（写入除100，读回乘100），内部对象始终保持0–100。该对象只能引用已落盘的 Judgment，不能包含 Judge 未输出的新事实。
+Schema：`schemas/evaluation-result.schema.json`。必须保存融合后的`criterion_results`与由它们确定性计算的`dimension_results`；维度分不得反向填充细则分。对同一细则的多Judge结果保存Judge列表、版本、证据和`judge_score_count`。同时保存不随场景变化的 `canonical_score` 与按预设规则计算的 `scenario_score`，并记录权重档、命中规则、有评测能力的维度/细则集合、最终有效权重和硬门槛结果。`case_score_percent`取Score Schema声明的`case_score_output`，范围0–100，用于单次Case的飞书展示。投影到飞书百分比字段时转为0–1（写入除100，读回乘100），内部对象始终保持0–100。
+
+Evaluation Batch Manifest的`metadata.aggregate`保存逐细则、逐维度和总分统计。历史Evaluation没有`criterion_results`时只能标记为旧口径/缺失，必须用新Benchmark重评后才能进入细则汇总。
 
 生成失败、结果无效或阻断型Hard Gate产生`case_score_percent=0`；尚未使用新Benchmark重评的历史Case使用`null`。空值与0分不可互换。
 

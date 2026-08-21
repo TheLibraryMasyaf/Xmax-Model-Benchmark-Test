@@ -1,24 +1,22 @@
 """Planning domain services."""
 
-from .builder import TestPlanBuilder
 from .budget import BudgetPreview
+from .builder import TestPlanBuilder
 from .case_numbers import CaseNumberAllocator
 from .models import CaseCandidate, PlanSnapshot, PromptBundle
 from .recipes import RecipeResolver, recipe_binding_hash
-from .repository import PlanRepository
 from .strategies import AllocationStrategy, SelectedCombination, StrategyRegistry
 
 __all__ = [
-    "TestPlanBuilder",
+    "AllocationStrategy",
     "BudgetPreview",
-    "CaseNumberAllocator",
     "CaseCandidate",
+    "CaseNumberAllocator",
     "PlanSnapshot",
     "PromptBundle",
     "RecipeResolver",
-    "recipe_binding_hash",
-    "PlanRepository",
-    "AllocationStrategy",
     "SelectedCombination",
     "StrategyRegistry",
+    "TestPlanBuilder",
+    "recipe_binding_hash",
 ]

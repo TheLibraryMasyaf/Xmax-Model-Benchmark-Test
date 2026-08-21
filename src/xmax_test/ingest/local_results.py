@@ -42,7 +42,11 @@ class LocalResultsImporter:
 
     def download_inputs(self, case: ImportedCase, config: dict[str, Any]) -> ImportedCase:
         downloads = config.get("download", {})
-        if downloads.get("result_video") and case.result_download is None and case.provenance.get("result_path"):
+        if (
+            downloads.get("result_video")
+            and case.result_download is None
+            and case.provenance.get("result_path")
+        ):
             source = Path(case.provenance["result_path"])
             case = self._copy_into(case, source, "result")
         if downloads.get("feed_and_prompt_inputs"):
@@ -64,7 +68,11 @@ class LocalResultsImporter:
             "path": str(target),
             "sha256": file_sha256(target),
             "bytes": target.stat().st_size,
-            "kind": {"result": "result_video", "feed": "feed_video", "prompt": "prompt_video"}[role],
+            "kind": {
+                "result": "result_video",
+                "feed": "feed_video",
+                "prompt": "prompt_video",
+            }[role],
         }
         data = case.__dict__.copy()
         if role == "result":
@@ -87,9 +95,13 @@ class LocalResultsImporter:
             provenance={
                 "source_type": "local_directory",
                 "source_locator": str(directory),
-                "result_path": str(directory / item["result_file"]) if item.get("result_file") else None,
+                "result_path": str(directory / item["result_file"])
+                if item.get("result_file")
+                else None,
                 "feed_path": str(directory / item["feed_file"]) if item.get("feed_file") else None,
-                "prompt_path": str(directory / item["prompt_file"]) if item.get("prompt_file") else None,
+                "prompt_path": str(directory / item["prompt_file"])
+                if item.get("prompt_file")
+                else None,
                 "case_number": item.get("case_number"),
             },
         )
@@ -126,4 +138,7 @@ class LocalResultsImporter:
 
     @staticmethod
     def snapshot(config: dict[str, Any]) -> dict[str, Any]:
-        return {"kind": "local_directory", "directory": config.get("source", {}).get("directory")}
+        return {
+            "kind": "local_directory",
+            "directory": config.get("source", {}).get("directory"),
+        }

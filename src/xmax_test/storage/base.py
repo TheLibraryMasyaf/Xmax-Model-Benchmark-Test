@@ -20,4 +20,3 @@ class ArtifactStore(Protocol):
 
     def resolve(self, uri: str) -> Path:
         """Resolve a local artifact URI for a worker."""
-

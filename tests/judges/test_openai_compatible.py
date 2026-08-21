@@ -82,8 +82,15 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
         self.assertEqual(
             [item["type"] for item in content],
             [
-                "text", "text", "video_url", "text", "text",
-                "text", "image_url", "text", "video_url",
+                "text",
+                "text",
+                "video_url",
+                "text",
+                "text",
+                "text",
+                "image_url",
+                "text",
+                "video_url",
             ],
         )
         self.assertEqual(content[1]["text"], "[INPUT_ROLE:feed]")
@@ -132,9 +139,7 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
             response_format_type="json_object",
             direct_media=True,
         )
-        success = _Response(
-            {"choices": [{"message": {"content": '{"ok":true}'}}]}
-        )
+        success = _Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
         requests = []
 
         def urlopen(request, timeout):
@@ -236,9 +241,7 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
             429,
             "rate limited",
             {},
-            io.BytesIO(
-                b'{"error":{"code":"Throttling.AllocationQuota","message":"TPM"}}'
-            ),
+            io.BytesIO(b'{"error":{"code":"Throttling.AllocationQuota","message":"TPM"}}'),
         )
         with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
             with mock.patch("urllib.request.urlopen", side_effect=rate_limit):
@@ -249,7 +252,9 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
                         output_schema={"type": "object"},
                     )
 
-    def test_structured_free_tier_code_rotates_even_when_gateway_uses_http_400(self) -> None:
+    def test_structured_free_tier_code_rotates_even_when_gateway_uses_http_400(
+        self,
+    ) -> None:
         provider = OpenAiCompatibleProvider(
             endpoint="https://example.test/compatible-mode/v1",
             models=["model-a", "model-b"],
@@ -257,9 +262,7 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
             response_format_type="json_object",
         )
         requests = []
-        success = _Response(
-            {"choices": [{"message": {"content": '{"ok":true}'}}]}
-        )
+        success = _Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
 
         def urlopen(request, timeout):
             requests.append(json.loads(request.data))
@@ -269,9 +272,7 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
                     400,
                     "quota",
                     {},
-                    io.BytesIO(
-                        b'{"error":{"code":"AllocationQuota.FreeTierOnly"}}'
-                    ),
+                    io.BytesIO(b'{"error":{"code":"AllocationQuota.FreeTierOnly"}}'),
                 )
             return success
 

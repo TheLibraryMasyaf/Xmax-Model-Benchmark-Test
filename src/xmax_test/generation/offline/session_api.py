@@ -14,18 +14,15 @@ import urllib.error
 import urllib.request
 from typing import Any, Protocol
 
-from ...errors import ExternalServiceError, MissingDependencyError
+from ...errors import ExternalServiceError
 
 
 class SessionApiClient(Protocol):
-    def create_session(self, payload: dict[str, Any]) -> dict[str, Any]:
-        ...
+    def create_session(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
-    def heartbeat(self, session_uid: str) -> dict[str, Any]:
-        ...
+    def heartbeat(self, session_uid: str) -> dict[str, Any]: ...
 
-    def close_session(self, session_uid: str) -> dict[str, Any]:
-        ...
+    def close_session(self, session_uid: str) -> dict[str, Any]: ...
 
 
 class HttpSessionApiClient:
@@ -76,7 +73,12 @@ class HttpSessionApiClient:
                 return json.loads(raw.decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 self._log.append(
-                    {"method": method, "path": path, "attempt": attempt, "status": exc.code}
+                    {
+                        "method": method,
+                        "path": path,
+                        "attempt": attempt,
+                        "status": exc.code,
+                    }
                 )
                 if exc.code in {401, 403}:
                     raise ExternalServiceError(
@@ -92,7 +94,12 @@ class HttpSessionApiClient:
                     ) from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 self._log.append(
-                    {"method": method, "path": path, "attempt": attempt, "status": "network"}
+                    {
+                        "method": method,
+                        "path": path,
+                        "attempt": attempt,
+                        "status": "network",
+                    }
                 )
                 if attempt > self._max_retries:
                     raise ExternalServiceError(

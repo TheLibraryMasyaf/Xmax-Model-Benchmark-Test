@@ -6,14 +6,11 @@ collects per-frame/event/RTC data, and persists a unified GenerationRun.
 
 from __future__ import annotations
 
-import json
 import uuid
-from pathlib import Path
 from typing import Any
 
 from ...errors import ContractError
-from ...hashing import content_hash
-from ...hashing import file_sha256
+from ...hashing import content_hash, file_sha256
 from ...time import utc_now
 
 
@@ -42,13 +39,35 @@ class FakeRealtimeHarness:
         duration_s = config.get("duration_s", 3.0)
 
         session_uid = f"session-{uuid.uuid4().hex[:10]}"
-        ts = [0.0, 0.25, 0.5]
         callbacks = [
-            {"callback": "connect_call", "tsMonotonicMs": 0.0, "tsWallMs": self._wall(0.0)},
-            {"callback": "connect_completed", "tsMonotonicMs": 120.0, "tsWallMs": self._wall(120.0), "sessionUid": session_uid},
-            {"callback": "onRemoteStream", "tsMonotonicMs": 180.0, "tsWallMs": self._wall(180.0)},
-            {"callback": "onStateChange", "tsMonotonicMs": 200.0, "tsWallMs": self._wall(200.0), "state": "running"},
-            {"callback": "onRoomEvent", "tsMonotonicMs": 210.0, "tsWallMs": self._wall(210.0), "event": "video_started"},
+            {
+                "callback": "connect_call",
+                "tsMonotonicMs": 0.0,
+                "tsWallMs": self._wall(0.0),
+            },
+            {
+                "callback": "connect_completed",
+                "tsMonotonicMs": 120.0,
+                "tsWallMs": self._wall(120.0),
+                "sessionUid": session_uid,
+            },
+            {
+                "callback": "onRemoteStream",
+                "tsMonotonicMs": 180.0,
+                "tsWallMs": self._wall(180.0),
+            },
+            {
+                "callback": "onStateChange",
+                "tsMonotonicMs": 200.0,
+                "tsWallMs": self._wall(200.0),
+                "state": "running",
+            },
+            {
+                "callback": "onRoomEvent",
+                "tsMonotonicMs": 210.0,
+                "tsWallMs": self._wall(210.0),
+                "event": "video_started",
+            },
         ]
 
         frames: list[dict[str, Any]] = []
@@ -66,7 +85,12 @@ class FakeRealtimeHarness:
             )
 
         events: list[dict[str, Any]] = [
-            {"event": "task_start", "plannedMs": 0.0, "executedMs": 0.0, "payload": {"round": 1}},
+            {
+                "event": "task_start",
+                "plannedMs": 0.0,
+                "executedMs": 0.0,
+                "payload": {"round": 1},
+            },
         ]
         # 30 FPS track frames mapped from DOM to content coordinates.
         for index in range(int(duration_s * 30)):
@@ -85,7 +109,12 @@ class FakeRealtimeHarness:
                 }
             )
         events.append(
-            {"event": "task_stop", "plannedMs": duration_s * 1000, "executedMs": duration_s * 1000, "payload": {"round": 1}}
+            {
+                "event": "task_stop",
+                "plannedMs": duration_s * 1000,
+                "executedMs": duration_s * 1000,
+                "payload": {"round": 1},
+            }
         )
 
         rtc_log = [
@@ -108,7 +137,12 @@ class FakeRealtimeHarness:
             if config.get("simulate_reconnect"):
                 state_changes.append({"state": "running", "tsMonotonicMs": 2500.0})
                 callbacks.append(
-                    {"callback": "onRoomEvent", "tsMonotonicMs": 2600.0, "tsWallMs": self._wall(2600.0), "event": "video_started"}
+                    {
+                        "callback": "onRoomEvent",
+                        "tsMonotonicMs": 2600.0,
+                        "tsWallMs": self._wall(2600.0),
+                        "event": "video_started",
+                    }
                 )
 
         audio = {"publish": True, "subscribe": True}
@@ -178,7 +212,9 @@ class RealtimeController:
         self._clock = clock
         self._validator = validator
 
-    def run_case(self, case: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run_case(
+        self, case: dict[str, Any], config: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         config = config or {}
         bindings = case.get("api_asset_bindings", {})
         input_method = bindings.get("input_method")
@@ -210,11 +246,13 @@ class RealtimeController:
             "provenance": {
                 "source_type": "xmax_realtime",
                 "source_locator": "realtime-harness",
-                "source_hash": content_hash({
-                    "case": case["case_id"],
-                    "harness": type(self._harness).__name__,
-                    "input_method": input_method,
-                }),
+                "source_hash": content_hash(
+                    {
+                        "case": case["case_id"],
+                        "harness": type(self._harness).__name__,
+                        "input_method": input_method,
+                    }
+                ),
             },
             "edited_video_asset_id": case.get("edited_video_asset_id"),
             "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
@@ -231,12 +269,16 @@ class RealtimeController:
             return None
         path = self._artifacts.resolve(uri)
         sha256 = file_sha256(path)
-        media = self._validator.validate(path, "video_result") if self._validator else {
-            "duration_s": result.get("metrics", {}).get("duration_s") or 1.0,
-            "width": result.get("stream_setting", {}).get("width"),
-            "height": result.get("stream_setting", {}).get("height"),
-            "has_audio": result.get("audio", {}).get("subscribe", False),
-        }
+        media = (
+            self._validator.validate(path, "video_result")
+            if self._validator
+            else {
+                "duration_s": result.get("metrics", {}).get("duration_s") or 1.0,
+                "width": result.get("stream_setting", {}).get("width"),
+                "height": result.get("stream_setting", {}).get("height"),
+                "has_audio": result.get("audio", {}).get("subscribe", False),
+            }
+        )
         asset_id = f"asset_{sha256[:16]}"
         self._repository.upsert_asset(
             {
@@ -255,7 +297,9 @@ class RealtimeController:
         )
         return asset_id
 
-    def _save_artifacts(self, case: dict[str, Any], run_id: str, result: dict[str, Any]) -> str | None:
+    def _save_artifacts(
+        self, case: dict[str, Any], run_id: str, result: dict[str, Any]
+    ) -> str | None:
         import json as _json
 
         payload = {
@@ -271,6 +315,8 @@ class RealtimeController:
             "stream_setting": result.get("stream_setting"),
         }
         stored = self._artifacts.put_bytes(
-            "runs", f"{run_id}/realtime.json", _json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+            "runs",
+            f"{run_id}/realtime.json",
+            _json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
         )
         return stored["uri"]

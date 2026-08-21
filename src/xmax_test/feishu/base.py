@@ -14,4 +14,3 @@ class FeishuSyncAdapter(Protocol):
 
     def reconcile(self, entity_type: str | None = None) -> dict[str, Any]:
         """Report missing, duplicate, orphan and conflicting records."""
-

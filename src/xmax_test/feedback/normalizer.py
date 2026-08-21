@@ -9,13 +9,8 @@ learning pool.
 from __future__ import annotations
 
 import json
-import subprocess
-import tempfile
-from pathlib import Path
 from typing import Any
-from shutil import which
 
-from ..errors import ContractError, ExternalServiceError, MissingDependencyError
 from ..hashing import content_hash
 
 
@@ -33,9 +28,7 @@ class MlmmHumanNormalizer:
         self._threshold = threshold
         self._version = version
 
-    def normalize(
-        self, raw_signal: dict[str, Any], benchmark: dict[str, Any]
-    ) -> dict[str, Any]:
+    def normalize(self, raw_signal: dict[str, Any], benchmark: dict[str, Any]) -> dict[str, Any]:
         dimensions = [
             {
                 "dimension_id": item.get("dimension_id"),
@@ -52,9 +45,7 @@ class MlmmHumanNormalizer:
             }
             for item in benchmark.get("dimensions", [])
         ]
-        image_paths = [
-            str(path) for path in raw_signal.get("evidence_images", []) if path
-        ]
+        image_paths = [str(path) for path in raw_signal.get("evidence_images", []) if path]
         prompt = (
             "你负责把一条人工视频评语转写为绝对的单视频监督标签。视频证据和人工原文是唯一主要输入。"
             "不得猜测模型版本、成功率、Feed或Prompt，也不得把‘相对减少’夸大成‘完全没有’。"
@@ -84,9 +75,7 @@ class MlmmHumanNormalizer:
             output_schema=_human_mlmm_output_schema(),
         )
         parsed = response.payload
-        allowed = {
-            item["dimension_id"] for item in dimensions if item.get("dimension_id")
-        }
+        allowed = {item["dimension_id"] for item in dimensions if item.get("dimension_id")}
         labels = []
         for label in parsed.get("normalized_labels", []):
             if label.get("dimension_id") not in allowed:
@@ -122,128 +111,6 @@ class MlmmHumanNormalizer:
         return normalized
 
 
-class CodexNormalizer:
-    """Normalize immutable human text with local Codex CLI.
-
-    Codex may only derive labels/proposals. Identity fields and the original
-    text are restored from ``raw_signal`` so model output cannot rewrite them.
-    """
-
-    def __init__(
-        self,
-        *,
-        binary: str = "codex",
-        timeout_s: int = 180,
-        threshold: float = 0.7,
-        version: str = "1.0.0",
-        work_dir: str | None = None,
-    ) -> None:
-        self._binary = binary
-        self._timeout_s = timeout_s
-        self._threshold = threshold
-        self._version = version
-        self._work_dir = work_dir
-
-    def normalize(self, raw_signal: dict[str, Any], benchmark: dict[str, Any]) -> dict[str, Any]:
-        if which(self._binary) is None:
-            raise MissingDependencyError(f"codex binary not found: {self._binary}")
-        dimensions = [
-            {
-                "dimension_id": item.get("dimension_id"),
-                "name": item.get("name"),
-                "definition": item.get("definition"),
-            }
-            for item in benchmark.get("dimensions", [])
-        ]
-        prompt = (
-            "You normalize one human video-evaluation comment. Return JSON only. "
-            "Do not invent a score. mapping_status must be existing, partial, "
-            "unmapped, or needs_clarification. normalized_labels is an array of "
-            "{dimension_id, confidence, rationale}; confidence is 0..1. Use only "
-            "listed dimension_ids. If the text expresses a missing concept, set "
-            "dimension_proposal to {name, definition, status:'proposed'}; otherwise null.\n"
-            + json.dumps(
-                {
-                    "raw_text": raw_signal.get("raw_text", ""),
-                    "review_context": raw_signal.get("review_context", "unknown"),
-                    "dimensions": dimensions,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        )
-        with tempfile.TemporaryDirectory(prefix="xmax-codex-normalizer-") as directory:
-            schema_path = Path(directory) / "normalizer-output.schema.json"
-            schema_path.write_text(
-                json.dumps(_normalizer_output_schema(), ensure_ascii=False),
-                encoding="utf-8",
-            )
-            try:
-                result = subprocess.run(
-                    [
-                        self._binary,
-                        "exec",
-                        "--skip-git-repo-check",
-                        "--ephemeral",
-                        "--ignore-rules",
-                        "--color",
-                        "never",
-                        "--sandbox",
-                        "read-only",
-                        "--output-schema",
-                        str(schema_path),
-                        prompt,
-                    ],
-                    cwd=directory,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._timeout_s,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                raise ExternalServiceError(f"codex normalizer failed: {exc}") from exc
-        if result.returncode != 0:
-            raise ExternalServiceError(
-                f"codex normalizer exited {result.returncode}: {result.stderr[-500:]}"
-            )
-        try:
-            parsed = json.loads(result.stdout.strip())
-        except json.JSONDecodeError as exc:
-            raise ExternalServiceError(f"codex normalizer returned non-JSON: {exc}") from exc
-        if not isinstance(parsed, dict):
-            raise ContractError("codex normalizer output must be a JSON object")
-        allowed = {item["dimension_id"] for item in dimensions if item.get("dimension_id")}
-        labels = []
-        for label in parsed.get("normalized_labels", []):
-            if label.get("dimension_id") not in allowed:
-                continue
-            confidence = float(label.get("confidence", 0.0))
-            labels.append({**label, "confidence": min(1.0, max(0.0, confidence))})
-        status = parsed.get("mapping_status", "needs_clarification")
-        if status not in {"existing", "partial", "unmapped", "needs_clarification"}:
-            status = "needs_clarification"
-        confidence = max((item["confidence"] for item in labels), default=0.0)
-        normalized = {
-            **raw_signal,
-            "signal_id": raw_signal["signal_id"],
-            "raw_text": raw_signal.get("raw_text", ""),
-            "mapping_status": status,
-            "normalized_labels": labels,
-            "dimension_proposal": parsed.get("dimension_proposal"),
-            "learning_permission": status in {"existing", "partial"} and confidence >= self._threshold,
-            "normalizer_id": "codex-cli-normalizer",
-            "normalizer_version": self._version,
-        }
-        normalized["normalized_hash"] = content_hash(
-            {
-                "signal_id": normalized["signal_id"],
-                "labels": labels,
-                "status": status,
-                "normalizer_version": self._version,
-            }
-        )
-        return normalized
-
-
 class RuleNormalizer:
     """Deterministic fallback normalizer used by tests and dry-runs.
 
@@ -255,7 +122,9 @@ class RuleNormalizer:
         self._benchmark = benchmark
         self._threshold = threshold
 
-    def normalize(self, raw_signal: dict[str, Any], benchmark: dict[str, Any] | None = None) -> dict[str, Any]:
+    def normalize(
+        self, raw_signal: dict[str, Any], benchmark: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         benchmark = benchmark or self._benchmark
         raw_text = raw_signal.get("raw_text", "")
         labels: list[dict[str, Any]] = []
@@ -307,43 +176,13 @@ def _keywords(dimension: dict[str, Any]) -> list[str]:
     return [word for word in words if word]
 
 
-def _normalizer_output_schema() -> dict[str, Any]:
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "required": ["mapping_status", "normalized_labels", "dimension_proposal"],
-        "properties": {
-            "mapping_status": {
-                "enum": ["existing", "partial", "unmapped", "needs_clarification"]
-            },
-            "normalized_labels": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["dimension_id", "confidence", "rationale"],
-                    "properties": {
-                        "dimension_id": {"type": "string"},
-                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                        "rationale": {"type": "string"},
-                    },
-                    "additionalProperties": False,
-                },
-            },
-            "dimension_proposal": _dimension_proposal_schema(),
-        },
-        "additionalProperties": False,
-    }
-
-
 def _human_mlmm_output_schema() -> dict[str, Any]:
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "required": ["mapping_status", "normalized_labels", "dimension_proposal"],
         "properties": {
-            "mapping_status": {
-                "enum": ["existing", "partial", "unmapped", "needs_clarification"]
-            },
+            "mapping_status": {"enum": ["existing", "partial", "unmapped", "needs_clarification"]},
             "normalized_labels": {
                 "type": "array",
                 "items": {
@@ -359,12 +198,8 @@ def _human_mlmm_output_schema() -> dict[str, Any]:
                         "dimension_id": {"type": "string"},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         "rationale": {"type": "string"},
-                        "polarity": {
-                            "enum": ["positive", "negative", "mixed", "neutral"]
-                        },
-                        "severity": {
-                            "enum": ["none", "mild", "moderate", "severe", "unknown"]
-                        },
+                        "polarity": {"enum": ["positive", "negative", "mixed", "neutral"]},
+                        "severity": {"enum": ["none", "mild", "moderate", "severe", "unknown"]},
                     },
                     "additionalProperties": False,
                 },

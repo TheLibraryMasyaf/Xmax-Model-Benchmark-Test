@@ -20,9 +20,7 @@ class FakeProvider:
     def provider_id(self) -> str:
         return "fake_mlmm"
 
-    def complete_json(
-        self, *, prompt, image_paths, output_schema, media_inputs=None
-    ):
+    def complete_json(self, *, prompt, image_paths, output_schema, media_inputs=None):
         self.calls.append(
             {
                 "prompt": prompt,
@@ -32,20 +30,30 @@ class FakeProvider:
             }
         )
         if "judgments" in output_schema.get("properties", {}):
-            dimensions = output_schema["properties"]["judgments"]["items"][
-                "properties"
-            ]["dimension_id"]["enum"]
+            branches = output_schema["properties"]["judgments"]["items"]["oneOf"]
             payload = {
                 "judgments": [
                     {
-                        "dimension_id": dimension,
+                        "dimension_id": branch["properties"]["dimension_id"]["const"],
                         "verdict": "ok",
-                        "score": 1.0,
                         "confidence": 0.8,
                         "assessable": True,
-                        "evidence": [{"description": f"visible {dimension}"}],
+                        "evidence": [{"description": "visible dimension"}],
+                        "criterion_results": [
+                            {
+                                "criterion_id": criterion_id,
+                                "verdict": "ok",
+                                "score": 1.0,
+                                "confidence": 0.8,
+                                "assessable": True,
+                                "evidence": [{"description": f"visible {criterion_id}"}],
+                            }
+                            for criterion_id in branch["properties"]["criterion_results"]["items"][
+                                "properties"
+                            ]["criterion_id"]["enum"]
+                        ],
                     }
-                    for dimension in dimensions
+                    for branch in branches
                 ]
             }
         else:
@@ -92,8 +100,16 @@ class MlmmBatchTests(unittest.TestCase):
             context={
                 "prompt": "blind batch",
                 "dimension_contracts": [
-                    {"dimension_id": "C2", "version": "v1"},
-                    {"dimension_id": "C10", "version": "v1"},
+                    {
+                        "dimension_id": "C2",
+                        "version": "v1",
+                        "criteria": [{"criterion_id": "C2.1"}],
+                    },
+                    {
+                        "dimension_id": "C10",
+                        "version": "v1",
+                        "criteria": [{"criterion_id": "C10.1"}],
+                    },
                 ],
                 "evidence_images": [],
                 "media_inputs": [
@@ -139,8 +155,16 @@ class MlmmBatchTests(unittest.TestCase):
                 context={
                     "prompt": "blind batch",
                     "dimension_contracts": [
-                        {"dimension_id": "C2", "version": "v1"},
-                        {"dimension_id": "C10", "version": "v1"},
+                        {
+                            "dimension_id": "C2",
+                            "version": "v1",
+                            "criteria": [{"criterion_id": "C2.1"}],
+                        },
+                        {
+                            "dimension_id": "C10",
+                            "version": "v1",
+                            "criteria": [{"criterion_id": "C10.1"}],
+                        },
                     ],
                 },
                 judge_id="mlmm",
@@ -193,7 +217,13 @@ class MlmmBatchTests(unittest.TestCase):
             judge.evaluate(
                 {
                     "prompt": "blind batch",
-                    "dimension_contracts": [{"dimension_id": "C2", "version": "v1"}],
+                    "dimension_contracts": [
+                        {
+                            "dimension_id": "C2",
+                            "version": "v1",
+                            "criteria": [{"criterion_id": "C2.1"}],
+                        }
+                    ],
                     "evidence_images": [],
                 }
             )

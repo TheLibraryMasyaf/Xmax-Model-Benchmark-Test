@@ -20,4 +20,3 @@ class AssetRegistry(Protocol):
 
     def get(self, asset_id: str) -> dict[str, Any]:
         """Return one immutable asset version."""
-

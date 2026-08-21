@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ...errors import ExternalServiceError, MissingDependencyError
+from ...feishu.record_pages import normalize_record_page
 from ...hashing import file_sha256
 from ...time import utc_now
-from ...feishu.record_pages import normalize_record_page
 
 
 class FeishuClient(Protocol):
@@ -112,11 +112,19 @@ class LarkCliFeishuClient:
     ) -> dict[str, Any]:
         data = self._run(
             [
-                "sheets", "+cells-get", "--spreadsheet-token", spreadsheet_token,
-                "--sheet-id", sheet_id, "--range", cell_range,
+                "sheets",
+                "+cells-get",
+                "--spreadsheet-token",
+                spreadsheet_token,
+                "--sheet-id",
+                sheet_id,
+                "--range",
+                cell_range,
             ]
         )
-        values = data.get("values") or data.get("rows") or data.get("valueRange", {}).get("values") or []
+        values = (
+            data.get("values") or data.get("rows") or data.get("valueRange", {}).get("values") or []
+        )
         return {
             "has_more": bool(data.get("has_more", False)),
             "truncated": bool(data.get("truncated", False)),
@@ -132,8 +140,16 @@ class LarkCliFeishuClient:
         offset = int(page_token or 0)
         data = self._run(
             [
-                "base", "+record-list", "--base-token", app_token,
-                "--table-id", table_id, "--offset", str(offset), "--limit", "200",
+                "base",
+                "+record-list",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--offset",
+                str(offset),
+                "--limit",
+                "200",
             ]
         )
         return normalize_record_page(data, offset=offset)
@@ -142,17 +158,40 @@ class LarkCliFeishuClient:
         return self._run(["wiki", "+node-get", "--node-token", wiki_token])
 
     def download_attachment(
-        self, token: str, destination: Path, *, app_token: str | None = None,
-        table_id: str | None = None, record_id: str | None = None,
+        self,
+        token: str,
+        destination: Path,
+        *,
+        app_token: str | None = None,
+        table_id: str | None = None,
+        record_id: str | None = None,
     ) -> dict[str, Any]:
         if app_token and table_id and record_id:
             args = [
-                "base", "+record-download-attachment", "--base-token", app_token,
-                "--table-id", table_id, "--record-id", record_id,
-                "--file-token", token, "--output", str(destination), "--overwrite",
+                "base",
+                "+record-download-attachment",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--record-id",
+                record_id,
+                "--file-token",
+                token,
+                "--output",
+                str(destination),
+                "--overwrite",
             ]
         else:
-            args = ["docs", "+media-download", "--token", token, "--output", str(destination), "--overwrite"]
+            args = [
+                "docs",
+                "+media-download",
+                "--token",
+                token,
+                "--output",
+                str(destination),
+                "--overwrite",
+            ]
         result = self._run(args)
         path = Path(result.get("path", destination))
         if not path.is_file():

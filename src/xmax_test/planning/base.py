@@ -11,4 +11,3 @@ class TestPlanBuilder(Protocol):
 
     def build(self, request: dict[str, Any]) -> dict[str, Any]:
         """Build a deterministic test plan matching test-plan.schema.json."""
-

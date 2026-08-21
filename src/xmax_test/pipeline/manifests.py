@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from ..contracts import EntityRef
-from ..errors import ContractError
 from ..hashing import content_hash
 from ..time import utc_now
 

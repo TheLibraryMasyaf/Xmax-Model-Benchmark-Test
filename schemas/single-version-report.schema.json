@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Single Version Report",
+  "type": "object",
+  "required": [
+    "report_schema_version",
+    "report_id",
+    "status",
+    "model_version",
+    "run_batch_id",
+    "evaluation_batch_id",
+    "benchmark_version",
+    "coverage",
+    "scores",
+    "dimension_results",
+    "criterion_results",
+    "case_results",
+    "strengths",
+    "weaknesses",
+    "priorities",
+    "audit"
+  ],
+  "properties": {
+    "report_schema_version": {"const": "single-version-report/1.0"},
+    "report_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["complete", "partial"]},
+    "model_version": {"type": "string", "minLength": 1},
+    "run_batch_id": {"type": "string", "minLength": 1},
+    "evaluation_batch_id": {"type": "string", "minLength": 1},
+    "benchmark_version": {"type": "string"},
+    "coverage": {"type": "object"},
+    "scores": {"type": "object"},
+    "dimension_results": {"type": "array", "items": {"type": "object"}},
+    "criterion_results": {"type": "array", "items": {"type": "object"}},
+    "case_results": {"type": "array", "items": {"type": "object"}},
+    "strengths": {"type": "array", "items": {"type": "object"}},
+    "weaknesses": {"type": "array", "items": {"type": "object"}},
+    "priorities": {
+      "type": "object",
+      "required": ["p0", "p1", "p2"],
+      "properties": {
+        "p0": {"type": "array", "items": {"type": "object"}},
+        "p1": {"type": "array", "items": {"type": "object"}},
+        "p2": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": false
+    },
+    "audit": {"type": "object"}
+  },
+  "additionalProperties": true
+}

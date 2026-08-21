@@ -22,11 +22,11 @@
 | P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、互动Profile、Fake | 需Key的付费真实会话待运行时smoke |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
 | P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、免费额度自动回退、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
-| P8 Evaluation | DONE | Orchestrator、主辅Judge并行路由、逐模式覆盖检查、硬门槛、不可评归一、双总分和结果Schema | O4/R5/R6等仍由实际样本是否具备重复组/异常脚本/长会话决定可评性 |
-| P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立MLLM Normalizer、维度提案、持久分区、训练集匿名锚点 | 可训练CV权重仍由外部Challenger消费JSONL，不允许单条热更新 |
+| P8 Evaluation | DONE | Orchestrator、细则级Judge路由与覆盖检查、批次级重复/跨输入评分、硬门槛、双总分、精确批次续跑和结果Schema | R5/R6等仍由实际样本是否具备异常脚本/长会话决定可评性 |
+| P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
 | P11 Release/Replay | DONE | Challenger、Holdout验证、回放、发布和回滚 | 发布仍需明确operator和验证文件 |
-| P12 Model Update Reporting | DONE | 可比性、配对、多统计量、维度/场景P0/P1/P2、JSON/Markdown | 阈值随Score Schema版本维护 |
+| P12 Reporting | DONE | 精确Run/Evaluation Batch的版本对比与单版本报告、Case/维度/细则多统计量、人工修订、P0/P1/P2、JSON/Markdown | 对比阈值随Score Schema版本维护；无阈值时不臆造绝对合格线 |
 | P13 Unified CLI | DONE | RUNBOOK命令、`run`内强制ContextChecker、配置内容指纹缓存、稳定退出码、付费批准门 | 新命令须同步RUNBOOK和E2E |
 
 ### 1.1 外部运行就绪度
@@ -83,7 +83,7 @@ CLI目标：`xmax-test db migrate|check`、`xmax-test artifacts verify|gc --dry-
 
 阅读：`docs/stage-orchestration.md`、`docs/data-contracts.md`、`docs/implementation-contract.md`。
 
-目标文件：`pipeline/models.py`、`pipeline/selectors.py`、`pipeline/manifests.py`、`pipeline/dependencies.py`、`pipeline/orchestrator.py`、`pipeline/repository.py`、`tests/pipeline/`。
+目标文件：`pipeline/models.py`、`pipeline/selectors.py`、`pipeline/manifests.py`、`pipeline/dependencies.py`、`pipeline/orchestrator.py`、`pipeline/streaming.py`、`storage/sqlite.py`、`tests/pipeline/`。
 
 CLI目标：`xmax-test stage show`、`xmax-test batch show`、以及统一Run中的阶段解析。
 
@@ -116,7 +116,7 @@ CLI目标：`xmax-test ingest assets discover|sync|verify`。
 
 阅读：`docs/stage-orchestration.md`、`docs/assets.md`、`docs/feishu-database.md`和`docs/operation-recipes.md`。
 
-目标文件：`ingest/results.py`、`ingest/models.py`、`ingest/feishu_case.py`、`ingest/local_results.py`、`ingest/manifest_results.py`、`ingest/repository.py`、`tests/ingest/`。
+目标文件：`ingest/results.py`、`ingest/models.py`、`ingest/feishu_case.py`、`ingest/local_results.py`、`ingest/manifest_results.py`、`storage/sqlite.py`、`tests/ingest/`。
 
 CLI目标：`xmax-test ingest results --config config/existing-results.json`。
 
@@ -126,7 +126,7 @@ CLI目标：`xmax-test ingest results --config config/existing-results.json`。
 
 阅读：`docs/test-planning.md`、`docs/operation-recipes.md`、`docs/feishu-database.md`。
 
-目标文件：`planning/models.py`、`planning/recipes.py`、`planning/builder.py`、`planning/case_numbers.py`、`planning/budget.py`、`planning/repository.py`。
+目标文件：`planning/models.py`、`planning/recipes.py`、`planning/builder.py`、`planning/case_numbers.py`、`planning/budget.py`、`planning/strategies.py`、`storage/sqlite.py`。
 
 CLI目标：`xmax-test plan preview|build|show`。
 
@@ -197,31 +197,31 @@ CLI目标：`xmax-test preprocess --run ...`。
 
 阅读：`docs/cv-judges.md`、`docs/codex-mlmm.md`、`docs/judge-responsibilities.md`。
 
-目标文件：`judges/codex_cli.py`、`judges/worker.py`、`judges/plugins/`、`tests/judges/`。
+目标文件：`judges/mlmm/`、`judges/worker.py`、`judges/plugins/`、`judges/registry.py`、`tests/judges/`。
 
 CLI目标：`xmax-test judges list|check|run`。
 
-验收：Codex非JSON自动重试并保存原始输出；Judge缺依赖时明确不可用；插件输出通过Schema；blind输入不含模型/人工结论；fake Codex可离线测试。
+验收：MLLM Provider非JSON自动重试并保存原始输出；Judge缺依赖时明确不可用；插件逐细则输出通过Schema；blind输入不含模型/人工结论；OpenAI兼容API、Codex CLI和fake Provider可替换且离线测试不访问外网。
 
 ### P8 Evaluation
 
 阅读：`docs/evaluation-pipeline.md`、`docs/scene-weighting.md`。
 
-目标文件：`evaluation/orchestrator.py`、`evaluation/fusion.py`、`evaluation/gates.py`、`evaluation/repository.py`。
+目标文件：`evaluation/orchestrator.py`、`evaluation/fusion.py`、`evaluation/gates.py`、`evaluation/group_metrics.py`、`evaluation/aggregation.py`、`storage/sqlite.py`。
 
 CLI目标：`xmax-test evaluate --run-batch-id|--run-id ...`。
 
-验收：动态加载Benchmark；Judge并行且可续跑；不可评维度正确排除；输出Canonical/Scenario分；硬门槛生效；所有版本可追溯；输入可为生成或导入的completed Run；评测路径不依赖XMAX Adapter或飞书下载器。
+验收：动态加载Benchmark；Judge按细则分工且可续跑；只有Benchmark明确N/A的细则可从分母移除，缺评不得重归一；重复/跨输入指标在冻结批次完成后回填；输出Canonical/Scenario分；硬门槛生效；输入可为生成或导入的completed Run；评测路径不依赖XMAX Adapter或飞书下载器。
 
 ### P9 Human Signals
 
 阅读：`docs/human-feedback.md`、`docs/benchmark-lifecycle.md`。
 
-目标文件：`feedback/importer.py`、`feedback/normalizer.py`、`feedback/router.py`、`feedback/proposals.py`、`feedback/repository.py`。
+目标文件：`feedback/importer.py`、`feedback/normalizer.py`、`feedback/router.py`、`feedback/proposals.py`、`feedback/overrides.py`、`feedback/training.py`、`storage/sqlite.py`。
 
 CLI目标：`xmax-test human import|feedback|normalize|partition`。
 
-验收：原文不可覆盖；低置信度不进入学习；unmapped产生提案；单条override不热更新Judge；Holdout无法被训练读取。
+验收：原文与AI原分不可覆盖；人工总分/细则分以追加Override形成有效分；未知细则拒绝；低置信度不进入学习；unmapped产生提案；Train生成MLMM校准包或调用CV Trainer；单条override不热更新Judge；Holdout无法被训练读取，Challenger必须验证后显式发布。
 
 ### P10 Feishu
 
@@ -243,15 +243,15 @@ CLI目标：`xmax-test replay run`、`xmax-test release validate|promote|rollbac
 
 验收：Holdout隔离；旧结果不覆盖；新旧差异报告；失败版本不能promote；Champion可回滚。
 
-### P12 Model Update Reporting
+### P12 Reporting
 
 阅读：`docs/version-reporting.md`和`report-templates/model-version-update-report.md`。
 
-目标文件：`reporting/comparison.py`、`reporting/classification.py`、`reporting/renderer.py`、`reporting/repository.py`、`tests/reporting/`。
+目标文件：`reporting/comparison.py`、`reporting/classification.py`、`reporting/renderer.py`、`reporting/service.py`、`reporting/single_version.py`、`reporting/repository.py`、`tests/reporting/`。
 
-CLI目标：`xmax-test report model-update --request config/run-request.json`。
+CLI目标：`xmax-test report model-update --request config/run-request.json`、`xmax-test report single-version --request config/single-version-report.json`。
 
-验收：相同配对样本计算双分数变化；不可比配置拒绝升降结论；每个请求场景有独立小节；P0/P1/P2均按Score Schema阈值归类；新增Hard Gate失败必入P2；JSON与Markdown同时落盘；无未替换占位符；报告保存模板哈希。
+验收：版本对比必须显式选择两侧Run/Evaluation Batch，相同配对样本计算双分数变化；不可比配置拒绝升降结论；每个请求场景有独立小节；P0/P1/P2按已发布策略归类；新增Hard Gate失败必入P2。单版本报告必须输出总分、全量维度、全量细则、逐Case、多统计量、优劣项及建议；失败Run计0%；人工有效修订进入报告且保留AI原值；JSON与Markdown同时落盘并通过Schema。
 
 ### P13 Unified CLI
 

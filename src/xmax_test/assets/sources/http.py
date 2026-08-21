@@ -12,9 +12,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from xmax_test.assets.models import DownloadResult, RemoteAsset
 from xmax_test.errors import ExternalServiceError
 from xmax_test.hashing import file_sha256
-from xmax_test.assets.models import DownloadResult, RemoteAsset
+
 from .base import BaseSource
 
 

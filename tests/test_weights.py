@@ -2,7 +2,6 @@ import unittest
 
 from xmax_test.evaluation.weights import WeightResolutionError, resolve_scene_weights
 
-
 PROFILE = {
     "profile_id": "offline-default",
     "version": "1.0.0",
@@ -96,9 +95,7 @@ class SceneWeightTests(unittest.TestCase):
                 "weight_multipliers": {"D_UNKNOWN": 2.0},
             }
         ]
-        result = resolve_scene_weights(
-            PROFILE, rules, mode="offline", scene_tags={}
-        )
+        result = resolve_scene_weights(PROFILE, rules, mode="offline", scene_tags={})
         self.assertEqual(result.matched_rule_ids, ())
 
     def test_invalid_priority_is_rejected_with_contract_error(self) -> None:

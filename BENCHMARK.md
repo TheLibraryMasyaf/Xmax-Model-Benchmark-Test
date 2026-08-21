@@ -52,8 +52,7 @@
           "metric"
         ],
         "secondary_kinds": [
-          "cv",
-          "mlmm"
+          "cv"
         ],
         "fallback_policy": "no_automated_judge"
       },
@@ -126,7 +125,8 @@
           "mlmm"
         ],
         "secondary_kinds": [
-          "cv"
+          "cv",
+          "mlmm"
         ],
         "fallback_policy": "no_automated_judge"
       },
@@ -1578,7 +1578,8 @@
           "metric"
         ],
         "secondary_kinds": [
-          "cv"
+          "cv",
+          "mlmm"
         ],
         "fallback_policy": "no_automated_judge"
       },
@@ -1909,7 +1910,8 @@
         ],
         "secondary_kinds": [
           "cv",
-          "metric"
+          "metric",
+          "mlmm"
         ],
         "fallback_policy": "no_automated_judge"
       },
@@ -2002,7 +2004,9 @@
           "metric",
           "cv"
         ],
-        "secondary_kinds": [],
+        "secondary_kinds": [
+          "mlmm"
+        ],
         "fallback_policy": "no_automated_judge"
       },
       "criteria": [
@@ -2901,7 +2905,7 @@
 
 ## 7. 第一轮测试后的调整要求
 
-第一轮至少检查：分数分布、维度覆盖率、Judge一致性、场景排序变化、人工修订率、权重敏感性和Hard Gate误触发。调整时创建新的Benchmark/Profile/Rule/Score Schema版本并Replay旧Run，不修改`0.1.0-draft`历史。
+第一轮至少检查：分数分布、维度覆盖率、Judge一致性、场景排序变化、人工修订率、权重敏感性和Hard Gate误触发。调整时创建新的Benchmark/Profile/Rule/Score Schema版本并Replay旧Run，不修改`0.2.0-draft`历史。
 
 “明显提升、持平、劣化”的报告阈值当前不预设；先观察首轮分布，再补充`comparison_policy`，避免无数据时制造虚假精度。
 

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Append-only Human Evaluation Override",
+  "type": "object",
+  "required": ["override_id", "evaluation_id", "signal_id", "human_score_percent", "criterion_scores", "created_at"],
+  "properties": {
+    "override_id": {"type": "string", "minLength": 1},
+    "evaluation_id": {"type": "string", "minLength": 1},
+    "signal_id": {"type": "string", "minLength": 1},
+    "human_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "criterion_scores": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 2}},
+    "human_verdict": {"type": ["string", "null"]},
+    "raw_text": {"type": "string"},
+    "review_context": {"type": ["string", "null"]},
+    "created_at": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

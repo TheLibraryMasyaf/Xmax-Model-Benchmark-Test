@@ -45,14 +45,16 @@ def generation_signature(case: dict[str, Any]) -> str:
             "generation_config": case.get("generation_config", {}),
             "api_asset_bindings": case.get("api_asset_bindings", {}),
             "edited_video_asset_id": case.get("edited_video_asset_id"),
-            "expected_audio_source_asset_id": case.get(
-                "expected_audio_source_asset_id"
-            ),
+            "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
         }
     )
 
 
 class TestPlanBuilder:
+    # The public domain class name is intentional; keep pytest from treating
+    # it as a test container during collection.
+    __test__ = False
+
     def __init__(
         self,
         repository: Any,
@@ -81,9 +83,7 @@ class TestPlanBuilder:
             cases=[case for case, _ in cases],
             skipped=skipped + skipped_cases,
             repeat_count=(
-                1
-                if selection["strategy"] == "random_runs"
-                else request.get("repeat_count", 5)
+                1 if selection["strategy"] == "random_runs" else request.get("repeat_count", 5)
             ),
         )
         budget["feed_count"] = len(feeds)
@@ -104,9 +104,7 @@ class TestPlanBuilder:
         plan_hash_payload = {
             # Batch IDs are provenance only. The selected generation inputs
             # define identity; later result assets must not invalidate resume.
-            "generation_signatures": sorted(
-                generation_signature(case) for case, _ in cases
-            ),
+            "generation_signatures": sorted(generation_signature(case) for case, _ in cases),
             "benchmark_version": self._benchmark.get("benchmark_version"),
             "scenario_pack_version": self._scenario_pack.get("version"),
             "recipe_pack_version": self._recipes.pack_version,
@@ -160,9 +158,7 @@ class TestPlanBuilder:
     ) -> tuple[list[dict[str, Any]], list[PromptBundle], list[dict[str, Any]]]:
         filters = request.get("filters", {})
         ready = [asset for asset in assets if asset.get("status") == "ready"]
-        feeds = [
-            asset for asset in ready if asset.get("kind") in {"feed_video", "feed_image"}
-        ]
+        feeds = [asset for asset in ready if asset.get("kind") in {"feed_video", "feed_image"}]
         if filters.get("feed_asset_ids"):
             feeds = [asset for asset in feeds if asset["asset_id"] in filters["feed_asset_ids"]]
         feeds.sort(
@@ -175,9 +171,7 @@ class TestPlanBuilder:
         if feed_limit is not None:
             feeds = feeds[: int(feed_limit)]
 
-        text_assets = [
-            asset for asset in ready if asset.get("kind") == PROMPT_TEXT_KIND
-        ]
+        text_assets = [asset for asset in ready if asset.get("kind") == PROMPT_TEXT_KIND]
         ref_assets = [asset for asset in ready if asset.get("kind") in PROMPT_REF_KINDS]
 
         skipped: list[dict[str, Any]] = []
@@ -199,9 +193,7 @@ class TestPlanBuilder:
             )
         )
         if filters.get("prompt_record_numbers"):
-            allowed_prompt_numbers = {
-                str(value) for value in filters["prompt_record_numbers"]
-            }
+            allowed_prompt_numbers = {str(value) for value in filters["prompt_record_numbers"]}
             bundles = [
                 bundle
                 for bundle in bundles
@@ -354,9 +346,7 @@ class TestPlanBuilder:
                         "feed": feed,
                         "feed_number": feed_number,
                         "bundle": bundle,
-                        "prompt_record_number": str(
-                            bundle.metadata.get("record_number") or ""
-                        ),
+                        "prompt_record_number": str(bundle.metadata.get("record_number") or ""),
                         "recipe": recipe,
                         "mode": mode,
                         "binding": binding,
@@ -442,8 +432,12 @@ class TestPlanBuilder:
         edited_role = recipe.get("edited_video_role")
         audio_role = recipe.get("expected_audio_source_role")
 
-        prompt_video_ids = [aid for aid in bundle.prompt_asset_ids if aid in self._prompt_video_ids()]
-        prompt_image_ids = [aid for aid in bundle.prompt_asset_ids if aid in self._prompt_image_ids()]
+        prompt_video_ids = [
+            aid for aid in bundle.prompt_asset_ids if aid in self._prompt_video_ids()
+        ]
+        prompt_image_ids = [
+            aid for aid in bundle.prompt_asset_ids if aid in self._prompt_image_ids()
+        ]
 
         if ref_video_path == "prompt_video" and not prompt_video_ids:
             return {"skip_reason": f"recipe {recipe['recipe_id']} requires a prompt video"}
@@ -456,20 +450,23 @@ class TestPlanBuilder:
         ):
             return {
                 "skip_reason": (
-                    f"recipe {recipe['recipe_id']} requires a video Feed; "
-                    f"got {feed.get('kind')}"
+                    f"recipe {recipe['recipe_id']} requires a video Feed; got {feed.get('kind')}"
                 )
             }
 
         edited_video_asset_id = (
             feed["asset_id"]
             if edited_role == "feed_video" or edited_role == "realtime_input_stream"
-            else prompt_video_ids[0] if prompt_video_ids else None
+            else prompt_video_ids[0]
+            if prompt_video_ids
+            else None
         )
         expected_audio_source_asset_id = (
             feed["asset_id"]
             if audio_role == "feed_video" or audio_role == "realtime_input_stream"
-            else prompt_video_ids[0] if prompt_video_ids else None
+            else prompt_video_ids[0]
+            if prompt_video_ids
+            else None
         )
         if not edited_video_asset_id or not expected_audio_source_asset_id:
             return {"skip_reason": "cannot freeze edited video / audio source"}
@@ -560,9 +557,7 @@ class TestPlanBuilder:
             "model_id": model_id,
             "generation_config": {
                 **request.get("generation_config", {}),
-                "estimated_billable_duration_s": combo.get(
-                    "estimated_billable_duration_s"
-                ),
+                "estimated_billable_duration_s": combo.get("estimated_billable_duration_s"),
                 "estimated_credits": combo.get("estimated_credits"),
                 "credit_formula": combo.get("credit_formula"),
             },
@@ -592,9 +587,7 @@ class TestPlanBuilder:
             "scene_tags": combo["scene_tags"],
             "generation_config": {
                 **request.get("generation_config", {}),
-                "estimated_billable_duration_s": combo.get(
-                    "estimated_billable_duration_s"
-                ),
+                "estimated_billable_duration_s": combo.get("estimated_billable_duration_s"),
                 "estimated_credits": combo.get("estimated_credits"),
                 "credit_formula": combo.get("credit_formula"),
             },
@@ -615,9 +608,7 @@ class TestPlanBuilder:
         # Deterministic fallback: first scenario supporting the mode whose
         # description mentions the recipe's edited role.
         for scenario in self._scenario_pack.get("scenarios", []):
-            if mode in scenario.get("supported_modes", []) and (
-                "换" in scenario.get("name", "")
-            ):
+            if mode in scenario.get("supported_modes", []) and ("换" in scenario.get("name", "")):
                 return scenario["scenario_id"]
         for scenario in self._scenario_pack.get("scenarios", []):
             if mode in scenario.get("supported_modes", []):
@@ -654,9 +645,7 @@ class TestPlanBuilder:
             "scenario_pack_version": self._scenario_pack.get("version"),
             "filters": request.get("filters", {}),
             "generation_modes": sorted(request.get("generation_modes", ["offline"])),
-            "generation_mode_overrides": request.get(
-                "generation_mode_overrides", []
-            ),
+            "generation_mode_overrides": request.get("generation_mode_overrides", []),
             "generation_config": request.get("generation_config", {}),
             "combination_selection": self._selection(request),
         }

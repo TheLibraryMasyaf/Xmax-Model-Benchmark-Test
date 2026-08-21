@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..contracts import EntityRef, PipelineSelector
+from ..contracts import EntityRef
 from ..errors import ContractError, MissingInputError, NotFoundError
 from ..hashing import content_hash
 from ..time import utc_now
@@ -42,8 +42,7 @@ class SelectorResolver:
             ids = self._from_manifest(match["manifest_uri"])
         else:
             raise ContractError(
-                f"selector {selector_id} requires match.ids, match.filters "
-                "or match.manifest_uri"
+                f"selector {selector_id} requires match.ids, match.filters or match.manifest_uri"
             )
 
         if not ids:

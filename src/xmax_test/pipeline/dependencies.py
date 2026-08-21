@@ -12,13 +12,22 @@ from ..errors import MissingInputError
 from .models import required_inputs
 
 SUGGESTED_COMMANDS: dict[tuple[str, str], str] = {
-    ("plan", "asset_batch"): "xmax-test ingest assets sync --config config/asset-sources.json",
+    (
+        "plan",
+        "asset_batch",
+    ): "xmax-test ingest assets sync --config config/asset-sources.json",
     ("generate", "test_plan"): "xmax-test plan build --request config/run-request.json",
     ("preprocess", "run_batch"): "xmax-test generate offline --plan-id <plan_id>",
     ("evaluate", "run_batch"): "xmax-test generate offline --plan-id <plan_id>",
-    ("evaluate", "preprocess_batch"): "xmax-test preprocess --run-batch-id <run_batch_id>",
+    (
+        "evaluate",
+        "preprocess_batch",
+    ): "xmax-test preprocess --run-batch-id <run_batch_id>",
     ("report", "evaluation_batch"): "xmax-test evaluate --run-batch-id <run_batch_id>",
-    ("reconcile", "sync_batch"): "xmax-test sync run --selector <selector.json> --policy <policy>",
+    (
+        "reconcile",
+        "sync_batch",
+    ): "xmax-test sync run --selector <selector.json> --policy <policy>",
 }
 
 

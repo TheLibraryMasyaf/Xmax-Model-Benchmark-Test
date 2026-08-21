@@ -19,7 +19,9 @@ class ReleaseService:
         self._benchmark = benchmark
         self._score_schema = score_schema
 
-    def validate(self, *, holdout_results: list[dict[str, Any]], threshold: float = 0.5) -> dict[str, Any]:
+    def validate(
+        self, *, holdout_results: list[dict[str, Any]], threshold: float = 0.5
+    ) -> dict[str, Any]:
         """Validate a candidate release against holdout results."""
 
         benchmark_version = self._benchmark.get("benchmark_version")
@@ -29,16 +31,33 @@ class ReleaseService:
                 "release validation requires holdout results; holdout must be "
                 "isolated from training"
             )
+        if not 0 <= threshold <= 1:
+            raise ContractError("release threshold must be between 0 and 1")
         # Any blocking hard gate failure in holdout blocks promotion.
         gate_failures = [
             r for r in holdout_results if r.get("applied_gate_ids") and r.get("final_verdict")
         ]
-        valid = len(gate_failures) == 0
+        wrong_partition = [
+            item for item in holdout_results if item.get("data_partition") not in {None, "holdout"}
+        ]
+        scores = []
+        for item in holdout_results:
+            value = item.get("validation_score", item.get("agreement"))
+            if isinstance(value, (int, float)):
+                scores.append(float(value))
+            else:
+                scores.append(0.0 if item in gate_failures else 1.0)
+        mean_validation_score = sum(scores) / len(scores)
+        valid = (
+            len(gate_failures) == 0 and not wrong_partition and mean_validation_score >= threshold
+        )
         return {
             "benchmark_version": benchmark_version,
             "score_schema_version": schema_version,
             "holdout_sample_count": len(holdout_results),
             "hard_gate_failures": len(gate_failures),
+            "wrong_partition_count": len(wrong_partition),
+            "mean_validation_score": round(mean_validation_score, 4),
             "valid": valid,
             "threshold": threshold,
         }
@@ -57,7 +76,10 @@ class ReleaseService:
                 "promoted_at": None,
             },
         )
-        return {"status": "promoted", "benchmark_version": self._benchmark.get("benchmark_version")}
+        return {
+            "status": "promoted",
+            "benchmark_version": self._benchmark.get("benchmark_version"),
+        }
 
     def rollback(self, previous_version: str, operator: str) -> dict[str, Any]:
         """Return the previous Champion and record the rollback event."""

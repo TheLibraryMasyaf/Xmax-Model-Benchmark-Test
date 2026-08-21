@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from xmax_test.errors import ConfigError
 from xmax_test.assets.models import DownloadResult, RemoteAsset, SourceDescriptor
+from xmax_test.errors import ConfigError
 
 
 class BaseSource:
@@ -55,9 +56,7 @@ def build_source(
         return HttpManifestSource(descriptor)
     if kind in {"feishu_sheet", "feishu_bitable", "feishu_wiki"}:
         if client_factory is None:
-            raise ConfigError(
-                f"source {descriptor.source_id} kind {kind} requires a feishu client"
-            )
+            raise ConfigError(f"source {descriptor.source_id} kind {kind} requires a feishu client")
         client = client_factory(kind)
         if kind == "feishu_sheet":
             from .feishu_sheet import FeishuSheetSource

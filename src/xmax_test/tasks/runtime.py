@@ -60,7 +60,8 @@ class PipelineTaskRuntime:
             if case.get("generation_mode") == "realtime":
                 controller = self._composition.realtime_controller(
                     run_batch_id=run_batch_id,
-                    model_id=case.get("model_id") or self._composition.project.get("default_model", "x2.0"),
+                    model_id=case.get("model_id")
+                    or self._composition.project.get("default_model", "x2.0"),
                     headed=self._headed,
                 )
                 run = controller.run_case(
@@ -70,7 +71,8 @@ class PipelineTaskRuntime:
             else:
                 adapter = self._composition.offline_adapter(
                     run_batch_id=run_batch_id,
-                    model_id=case.get("model_id") or self._composition.project.get("default_model", "x2.0"),
+                    model_id=case.get("model_id")
+                    or self._composition.project.get("default_model", "x2.0"),
                 )
                 run = adapter.run_case(case)
             self._repository.set_run_batch_id(run["run_id"], run_batch_id)
@@ -83,14 +85,17 @@ class PipelineTaskRuntime:
             refs = self._save_refs(task_id, preprocess_id=preprocess["preprocess_id"])
 
             self._status(task_id, "evaluating")
-            evaluation_batch_id = "eval-task-" + content_hash(
-                {
-                    "task_id": task_id,
-                    "benchmark_version": self._composition.benchmark.get("benchmark_version"),
-                    "scenario_pack_version": self._composition.scenario_pack.get("version"),
-                    "judge_registry": self._judge_registry_fingerprint(),
-                }
-            )[:12]
+            evaluation_batch_id = (
+                "eval-task-"
+                + content_hash(
+                    {
+                        "task_id": task_id,
+                        "benchmark_version": self._composition.benchmark.get("benchmark_version"),
+                        "scenario_pack_version": self._composition.scenario_pack.get("version"),
+                        "judge_registry": self._judge_registry_fingerprint(),
+                    }
+                )[:12]
+            )
             existing = self._repository.list_evaluation_results(
                 run_id=run["run_id"], evaluation_batch_id=evaluation_batch_id
             )
@@ -120,16 +125,12 @@ class PipelineTaskRuntime:
                     run_ids=[run["run_id"]], evaluations=evaluations
                 )
                 if not outcome.get("ok"):
-                    raise ExternalServiceError(
-                        f"task {task_id} Feishu reconcile failed: {outcome}"
-                    )
+                    raise ExternalServiceError(f"task {task_id} Feishu reconcile failed: {outcome}")
                 refs = self._save_refs(task_id, reconcile=outcome)
 
         return {
             **refs,
-            "outcome": (
-                "completed" if run.get("status") == "completed" else "generation_error"
-            ),
+            "outcome": ("completed" if run.get("status") == "completed" else "generation_error"),
         }
 
     def _judge_registry_fingerprint(self) -> str | None:
@@ -138,18 +139,14 @@ class PipelineTaskRuntime:
             return None
         return content_hash({"content": path.read_text(encoding="utf-8")})
 
-    def _existing_run(
-        self, refs: dict[str, Any], run_batch_id: str
-    ) -> dict[str, Any] | None:
+    def _existing_run(self, refs: dict[str, Any], run_batch_id: str) -> dict[str, Any] | None:
         if refs.get("run_id"):
             return self._repository.get_run(refs["run_id"])
         runs = self._repository.list_runs(run_batch_id=run_batch_id)
         return runs[-1] if runs else None
 
     def _status(self, task_id: str, status: str) -> None:
-        self._repository.update_test_task(
-            task_id, status, lease_owner=self._lease_owner
-        )
+        self._repository.update_test_task(task_id, status, lease_owner=self._lease_owner)
 
     def _save_refs(self, task_id: str, **refs: Any) -> dict[str, Any]:
         task = self._repository.get_test_task(task_id)

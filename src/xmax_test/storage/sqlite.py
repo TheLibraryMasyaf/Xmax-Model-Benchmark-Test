@@ -13,9 +13,15 @@ import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from ..errors import ConflictError, ContractError, DuplicateError, NotFoundError, StateError
+from ..errors import (
+    ConflictError,
+    ContractError,
+    DuplicateError,
+    NotFoundError,
+    StateError,
+)
 from ..time import Clock, SystemClock, utc_now
 from .migrations import migrate
 
@@ -66,7 +72,14 @@ class SqliteMetadataRepository:
                     "INSERT INTO run_events(run_id, sequence, event, timestamp, payload, "
                     "external_key) SELECT ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ? "
                     "FROM run_events WHERE run_id = ?",
-                    (run_id, event, timestamp, _json(payload or {}), external_key, run_id),
+                    (
+                        run_id,
+                        event,
+                        timestamp,
+                        _json(payload or {}),
+                        external_key,
+                        run_id,
+                    ),
                 )
                 row = self._conn.execute(
                     "SELECT sequence FROM run_events WHERE run_id = ? "
@@ -94,7 +107,11 @@ class SqliteMetadataRepository:
         events = self.get_event_log(run_id)
         if not events:
             return None
-        state: dict[str, Any] = {"run_id": run_id, "events": events, "status": "planned"}
+        state: dict[str, Any] = {
+            "run_id": run_id,
+            "events": events,
+            "status": "planned",
+        }
         for item in events:
             payload = item.get("payload", {})
             if item["event"] in {
@@ -105,7 +122,9 @@ class SqliteMetadataRepository:
                 "status_error",
                 "status_cancelled",
             }:
-                state["status"] = item["event"].replace("status_", "").replace("run_created", "planned")
+                state["status"] = (
+                    item["event"].replace("status_", "").replace("run_created", "planned")
+                )
             for key, value in payload.items():
                 state[key] = value
         return state
@@ -120,9 +139,7 @@ class SqliteMetadataRepository:
             raise ContractError("asset requires asset_id and sha256")
         existing = self.find_asset_by_sha256(sha256)
         if existing is not None and existing["asset_id"] != asset_id:
-            raise DuplicateError(
-                f"sha256 {sha256} already registered as {existing['asset_id']}"
-            )
+            raise DuplicateError(f"sha256 {sha256} already registered as {existing['asset_id']}")
         with self._conn:
             self._conn.execute(
                 "INSERT INTO assets(asset_id, kind, uri, sha256, bytes, mime_type, "
@@ -147,17 +164,13 @@ class SqliteMetadataRepository:
         return self.get_asset(asset_id)
 
     def get_asset(self, asset_id: str) -> dict[str, Any]:
-        row = self._conn.execute(
-            "SELECT * FROM assets WHERE asset_id = ?", (asset_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM assets WHERE asset_id = ?", (asset_id,)).fetchone()
         if row is None:
             raise NotFoundError(f"asset not found: {asset_id}", entity_id=asset_id)
         return self._asset_dict(row)
 
     def find_asset_by_sha256(self, sha256: str) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT * FROM assets WHERE sha256 = ?", (sha256,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM assets WHERE sha256 = ?", (sha256,)).fetchone()
         return self._asset_dict(row) if row is not None else None
 
     def update_asset_status(self, asset_id: str, status: str) -> None:
@@ -271,9 +284,7 @@ class SqliteMetadataRepository:
                 (plan_id,),
             ).fetchall()
         else:
-            rows = self._conn.execute(
-                "SELECT payload FROM test_cases ORDER BY case_id"
-            ).fetchall()
+            rows = self._conn.execute("SELECT payload FROM test_cases ORDER BY case_id").fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
     # ------------------------------------------------------------------
@@ -398,9 +409,12 @@ class SqliteMetadataRepository:
             raise ContractError("lease_seconds must be at least 1")
         now = self._clock.now()
         expires = (
-            datetime.fromisoformat(now.replace("Z", "+00:00"))
-            + timedelta(seconds=lease_seconds)
-        ).astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            (datetime.fromisoformat(now.replace("Z", "+00:00")) + timedelta(seconds=lease_seconds))
+            .astimezone(UTC)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -452,8 +466,15 @@ class SqliteMetadataRepository:
         last_error: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         allowed = {
-            "pending", "leased", "generating", "preprocessing", "evaluating",
-            "syncing", "completed", "error", "cancelled"
+            "pending",
+            "leased",
+            "generating",
+            "preprocessing",
+            "evaluating",
+            "syncing",
+            "completed",
+            "error",
+            "cancelled",
         }
         if status not in allowed:
             raise ContractError(f"invalid test task status: {status}")
@@ -557,8 +578,7 @@ class SqliteMetadataRepository:
             )
         if expected_status is not None and current["status"] != expected_status:
             raise ConflictError(
-                f"run {run_id} status {current['status']!r} != expected "
-                f"{expected_status!r}"
+                f"run {run_id} status {current['status']!r} != expected {expected_status!r}"
             )
         with self._conn:
             self._conn.execute(
@@ -567,7 +587,9 @@ class SqliteMetadataRepository:
                 (
                     status,
                     _json(metrics or current.get("metrics", {})),
-                    result_asset_id if result_asset_id is not None else current.get("result_asset_id"),
+                    result_asset_id
+                    if result_asset_id is not None
+                    else current.get("result_asset_id"),
                     raw_events_uri if raw_events_uri is not None else current.get("raw_events_uri"),
                     utc_now(),
                     run_id,
@@ -641,25 +663,24 @@ class SqliteMetadataRepository:
     # preprocess runs
     # ------------------------------------------------------------------
     def upsert_preprocess_run(self, preprocess: dict[str, Any]) -> None:
-        with self._lock:
-            with self._conn:
-                self._conn.execute(
-                    "INSERT INTO preprocess_runs(preprocess_id, run_id, input_hash, "
-                    "config_hash, producer_version, payload, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(input_hash, config_hash, producer_version) "
-                    "DO UPDATE SET payload=excluded.payload, status=excluded.status",
-                    (
-                        preprocess.get("preprocess_id"),
-                        preprocess.get("run_id"),
-                        preprocess.get("input_hash", ""),
-                        preprocess.get("config_hash", ""),
-                        preprocess.get("producer_version", ""),
-                        _json(preprocess),
-                        preprocess.get("status", "completed"),
-                        preprocess.get("created_at", utc_now()),
-                    ),
-                )
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO preprocess_runs(preprocess_id, run_id, input_hash, "
+                "config_hash, producer_version, payload, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(input_hash, config_hash, producer_version) "
+                "DO UPDATE SET payload=excluded.payload, status=excluded.status",
+                (
+                    preprocess.get("preprocess_id"),
+                    preprocess.get("run_id"),
+                    preprocess.get("input_hash", ""),
+                    preprocess.get("config_hash", ""),
+                    preprocess.get("producer_version", ""),
+                    _json(preprocess),
+                    preprocess.get("status", "completed"),
+                    preprocess.get("created_at", utc_now()),
+                ),
+            )
 
     def find_preprocess_run(
         self, input_hash: str, config_hash: str, producer_version: str
@@ -721,8 +742,7 @@ class SqliteMetadataRepository:
 
     def list_judgments(self, evaluation_id: str) -> list[dict[str, Any]]:
         rows = self._conn.execute(
-            "SELECT payload FROM judgments WHERE evaluation_id = ? "
-            "ORDER BY dimension_id, judge_id",
+            "SELECT payload FROM judgments WHERE evaluation_id = ? ORDER BY dimension_id, judge_id",
             (evaluation_id,),
         ).fetchall()
         return [json.loads(row["payload"]) for row in rows]
@@ -761,13 +781,17 @@ class SqliteMetadataRepository:
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
-        for key, value in (("run_id", run_id), ("evaluation_batch_id", evaluation_batch_id)):
+        for key, value in (
+            ("run_id", run_id),
+            ("evaluation_batch_id", evaluation_batch_id),
+        ):
             if value:
                 clauses.append(f"{key} = ?")
                 params.append(value)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         rows = self._conn.execute(
-            f"SELECT payload FROM evaluation_results{where} ORDER BY evaluation_id", params
+            f"SELECT payload FROM evaluation_results{where} ORDER BY evaluation_id",
+            params,
         ).fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
@@ -785,6 +809,37 @@ class SqliteMetadataRepository:
             params,
         ).fetchone()
         return json.loads(row["payload"]) if row is not None else None
+
+    def append_evaluation_override(self, override: dict[str, Any]) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO evaluation_overrides(override_id, evaluation_id, "
+                "signal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    override["override_id"],
+                    override["evaluation_id"],
+                    override["signal_id"],
+                    _json(override),
+                    utc_now(),
+                ),
+            )
+
+    def list_evaluation_overrides(self, evaluation_id: str | None = None) -> list[dict[str, Any]]:
+        if evaluation_id:
+            rows = self._conn.execute(
+                "SELECT payload FROM evaluation_overrides WHERE evaluation_id = ? "
+                "ORDER BY created_at, override_id",
+                (evaluation_id,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT payload FROM evaluation_overrides ORDER BY created_at, override_id"
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
+    def latest_evaluation_override(self, evaluation_id: str) -> dict[str, Any] | None:
+        rows = self.list_evaluation_overrides(evaluation_id)
+        return rows[-1] if rows else None
 
     # ------------------------------------------------------------------
     # human signals and proposals
@@ -903,7 +958,8 @@ class SqliteMetadataRepository:
             return None
         data = json.loads(row["payload"])
         data["approval_id"] = self._conn.execute(
-            "SELECT approval_id FROM approvals WHERE approval_hash = ?", (approval_hash,)
+            "SELECT approval_id FROM approvals WHERE approval_hash = ?",
+            (approval_hash,),
         ).fetchone()["approval_id"]
         return data
 

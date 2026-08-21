@@ -11,6 +11,7 @@ from __future__ import annotations
 import statistics
 from typing import Any
 
+from ..feedback.overrides import HumanOverrideService
 from ..hashing import content_hash
 
 
@@ -26,16 +27,29 @@ class ModelComparisonService:
         self._benchmark = benchmark
         self._scenario_pack = scenario_pack
         self._score_schema = score_schema
+        self._overrides = HumanOverrideService(repository)
 
     def compare(
         self,
         *,
         baseline_model_version: str,
         candidate_model_version: str,
+        baseline_run_batch_id: str,
+        candidate_run_batch_id: str,
+        baseline_evaluation_batch_id: str,
+        candidate_evaluation_batch_id: str,
         requested_scene_ids: list[str],
     ) -> dict[str, Any]:
-        baseline_runs = self._runs_for_model(baseline_model_version)
-        candidate_runs = self._runs_for_model(candidate_model_version)
+        baseline_runs = self._runs_for_model(
+            baseline_model_version,
+            baseline_run_batch_id,
+            baseline_evaluation_batch_id,
+        )
+        candidate_runs = self._runs_for_model(
+            candidate_model_version,
+            candidate_run_batch_id,
+            candidate_evaluation_batch_id,
+        )
 
         if not baseline_runs or not candidate_runs:
             return {
@@ -60,7 +74,10 @@ class ModelComparisonService:
         excluded = sorted(set(baseline_by_key) ^ set(candidate_by_key))
 
         differences = self._comparability_differences(
-            baseline_by_key, candidate_by_key, baseline_model_version, candidate_model_version
+            baseline_by_key,
+            candidate_by_key,
+            baseline_model_version,
+            candidate_model_version,
         )
         if excluded:
             differences.append(
@@ -100,9 +117,7 @@ class ModelComparisonService:
             }
 
         overall = self._aggregate(pairs)
-        scene_results = [
-            self._scene_result(pairs, scene_id) for scene_id in requested_scene_ids
-        ]
+        scene_results = [self._scene_result(pairs, scene_id) for scene_id in requested_scene_ids]
         return {
             "status": "partial" if not comparable else "complete",
             "comparability": {
@@ -125,12 +140,25 @@ class ModelComparisonService:
         }
 
     # ------------------------------------------------------------------
-    def _runs_for_model(self, model_version: str) -> list[dict[str, Any]]:
+    def _runs_for_model(
+        self,
+        model_version: str,
+        run_batch_id: str,
+        evaluation_batch_id: str,
+    ) -> list[dict[str, Any]]:
         runs = []
-        for run in self._repository.list_runs(model_id=model_version):
-            result = self._repository.latest_evaluation_result(
-                run.get("run_id"), self._benchmark.get("benchmark_version")
+        run_manifest = self._repository.get_batch_manifest("run_batch", run_batch_id)
+        selected_evaluations = {
+            item["run_id"]: item
+            for item in self._repository.list_evaluation_results(
+                evaluation_batch_id=evaluation_batch_id
             )
+        }
+        for run_id in run_manifest.get("item_ids", []):
+            run = self._repository.get_run(run_id)
+            if run.get("model_id") != model_version:
+                continue
+            result = selected_evaluations.get(run_id)
             if result is None:
                 if run.get("status") == "error":
                     run["_evaluation"] = {
@@ -143,11 +171,13 @@ class ModelComparisonService:
                 else:
                     continue
             else:
-                run["_evaluation"] = result
+                run["_evaluation"] = self._overrides.effective_result(result)
             runs.append(run)
         return runs
 
-    def _keyed(self, runs: list[dict[str, Any]], model_version: str) -> dict[tuple[str, str, str], dict[str, Any]]:
+    def _keyed(
+        self, runs: list[dict[str, Any]], model_version: str
+    ) -> dict[tuple[str, str, str], dict[str, Any]]:
         keyed: dict[tuple[str, str, str], dict[str, Any]] = {}
         for run in runs:
             case = self._case_of(run)
@@ -198,26 +228,49 @@ class ModelComparisonService:
             right_eval = right.get("_evaluation", {})
             for field, left_value, right_value in (
                 ("mode", left.get("mode"), right.get("mode")),
-                ("benchmark_version", left_eval.get("benchmark_version"), right_eval.get("benchmark_version")),
-                ("score_schema_version", left_eval.get("score_schema_version"), right_eval.get("score_schema_version")),
-                ("scenario_pack_version", left_eval.get("scenario_pack_version"), right_eval.get("scenario_pack_version")),
-                ("preprocessor_version", left_eval.get("preprocessor_version"), right_eval.get("preprocessor_version")),
+                (
+                    "benchmark_version",
+                    left_eval.get("benchmark_version"),
+                    right_eval.get("benchmark_version"),
+                ),
+                (
+                    "score_schema_version",
+                    left_eval.get("score_schema_version"),
+                    right_eval.get("score_schema_version"),
+                ),
+                (
+                    "scenario_pack_version",
+                    left_eval.get("scenario_pack_version"),
+                    right_eval.get("scenario_pack_version"),
+                ),
+                (
+                    "preprocessor_version",
+                    left_eval.get("preprocessor_version"),
+                    right_eval.get("preprocessor_version"),
+                ),
                 (
                     "generation_config_hash",
                     content_hash(self._case_of(left).get("generation_config", {})),
                     content_hash(self._case_of(right).get("generation_config", {})),
                 ),
-                ("judge_versions", _judge_versions(left_eval), _judge_versions(right_eval)),
+                (
+                    "judge_versions",
+                    _judge_versions(left_eval),
+                    _judge_versions(right_eval),
+                ),
             ):
                 if left_value != right_value:
                     differences.append(
-                        {"kind": field, "case": left.get("case_number"), "baseline": left_value, "candidate": right_value}
+                        {
+                            "kind": field,
+                            "case": left.get("case_number"),
+                            "baseline": left_value,
+                            "candidate": right_value,
+                        }
                     )
         return differences
 
-    def _common_generation_config_hash(
-        self, pairs: list[dict[str, Any]]
-    ) -> str | None:
+    def _common_generation_config_hash(self, pairs: list[dict[str, Any]]) -> str | None:
         hashes = {
             content_hash(self._case_of(pair[side]).get("generation_config", {}))
             for pair in pairs
@@ -235,6 +288,7 @@ class ModelComparisonService:
             "canonical": self._delta_summary(pairs, "canonical_score"),
             "scenario": self._delta_summary(pairs, "scenario_score"),
             "dimensions": self._dimension_summaries(pairs),
+            "criteria": self._criterion_summaries(pairs),
             "baseline_mean_percent": _mean(baseline_scores),
             "candidate_mean_percent": _mean(candidate_scores),
             "comparable_pairs": len(pairs),
@@ -254,12 +308,8 @@ class ModelComparisonService:
         )
         summaries = []
         for dimension_id in dimension_ids:
-            baseline = _mean(
-                _dimension_score(pair["baseline"], dimension_id) for pair in pairs
-            )
-            candidate = _mean(
-                _dimension_score(pair["candidate"], dimension_id) for pair in pairs
-            )
+            baseline = _mean(_dimension_score(pair["baseline"], dimension_id) for pair in pairs)
+            candidate = _mean(_dimension_score(pair["candidate"], dimension_id) for pair in pairs)
             # Dimension scores use 0..2; report them as percentages.
             baseline_percent = round(baseline / 2 * 100, 2) if baseline is not None else None
             candidate_percent = round(candidate / 2 * 100, 2) if candidate is not None else None
@@ -273,19 +323,68 @@ class ModelComparisonService:
             )
         return summaries
 
+    def _criterion_summaries(self, pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        contracts: dict[str, dict[str, Any]] = {}
+        for pair in pairs:
+            for side in ("baseline", "candidate"):
+                for item in pair[side].get("_evaluation", {}).get("criterion_results", []):
+                    criterion_id = item.get("criterion_id")
+                    if criterion_id:
+                        contracts.setdefault(criterion_id, item)
+        summaries: list[dict[str, Any]] = []
+        for criterion_id, contract in sorted(contracts.items()):
+            baseline_values = [_criterion_score(pair["baseline"], criterion_id) for pair in pairs]
+            candidate_values = [_criterion_score(pair["candidate"], criterion_id) for pair in pairs]
+            baseline_numbers = [value for value in baseline_values if value is not None]
+            candidate_numbers = [value for value in candidate_values if value is not None]
+            baseline = _mean(baseline_numbers)
+            candidate = _mean(candidate_numbers)
+            baseline_percent = round(baseline / 2 * 100, 2) if baseline is not None else None
+            candidate_percent = round(candidate / 2 * 100, 2) if candidate is not None else None
+            summaries.append(
+                {
+                    "dimension_id": contract.get("dimension_id"),
+                    "criterion_id": criterion_id,
+                    "criterion_name": contract.get("criterion_name", ""),
+                    "baseline": baseline_percent,
+                    "candidate": candidate_percent,
+                    "delta_points": _delta(baseline_percent, candidate_percent),
+                    "baseline_assessable_count": len(baseline_numbers),
+                    "candidate_assessable_count": len(candidate_numbers),
+                    "classification": "unclassified",
+                    "evidence_ids": sorted(
+                        {
+                            run_id
+                            for pair in pairs
+                            for run_id in (
+                                pair["baseline"].get("run_id"),
+                                pair["candidate"].get("run_id"),
+                            )
+                            if run_id
+                        }
+                    ),
+                }
+            )
+        return summaries
+
     def _delta_summary(self, pairs: list[dict[str, Any]], field: str) -> dict[str, Any]:
-        baseline_values = [
-            p["baseline"].get("_evaluation", {}).get(field) for p in pairs
-        ]
-        candidate_values = [
-            p["candidate"].get("_evaluation", {}).get(field) for p in pairs
-        ]
+        # Scenario summaries are the effective case score, so a direct human
+        # score override corrects both the case table and the version report.
+        score_of = (
+            self._case_score
+            if field == "scenario_score"
+            else lambda run: run.get("_evaluation", {}).get(field)
+        )
+        baseline_values = [score_of(p["baseline"]) for p in pairs]
+        candidate_values = [score_of(p["candidate"]) for p in pairs]
         baseline = _mean(baseline_values)
         candidate = _mean(candidate_values)
         return {
             "baseline": baseline,
             "candidate": candidate,
-            "delta_points": round(candidate - baseline, 2) if baseline is not None and candidate is not None else None,
+            "delta_points": round(candidate - baseline, 2)
+            if baseline is not None and candidate is not None
+            else None,
             "delta_percent": (
                 round((candidate - baseline) / baseline * 100, 2)
                 if baseline not in (None, 0) and candidate is not None
@@ -302,7 +401,9 @@ class ModelComparisonService:
         return {
             "scenario_id": scene_id,
             "mode": modes[0] if len(modes) == 1 else "offline",
-            "score_summary": self._delta_summary(scene_pairs, "scenario_score") if scene_pairs else {
+            "score_summary": self._delta_summary(scene_pairs, "scenario_score")
+            if scene_pairs
+            else {
                 "baseline": None,
                 "candidate": None,
                 "delta_points": None,
@@ -336,7 +437,10 @@ class ModelComparisonService:
             "evidence_ids": [
                 run_id
                 for pair in scene_pairs
-                for run_id in (pair["baseline"].get("run_id"), pair["candidate"].get("run_id"))
+                for run_id in (
+                    pair["baseline"].get("run_id"),
+                    pair["candidate"].get("run_id"),
+                )
                 if run_id
             ],
             "comparable_pairs": len(scene_pairs),
@@ -344,17 +448,22 @@ class ModelComparisonService:
             "candidate_stats": _stats(candidate_scores),
             "hard_gate_failures": {
                 "baseline": sum(
-                    1 for pair in scene_pairs if pair["baseline"].get("_evaluation", {}).get("applied_gate_ids")
+                    1
+                    for pair in scene_pairs
+                    if pair["baseline"].get("_evaluation", {}).get("applied_gate_ids")
                 ),
                 "candidate": sum(
-                    1 for pair in scene_pairs if pair["candidate"].get("_evaluation", {}).get("applied_gate_ids")
+                    1
+                    for pair in scene_pairs
+                    if pair["candidate"].get("_evaluation", {}).get("applied_gate_ids")
                 ),
             },
         }
 
     @staticmethod
     def _case_score(run: dict[str, Any]) -> float | None:
-        value = run.get("_evaluation", {}).get("case_score_percent")
+        evaluation = run.get("_evaluation", {})
+        value = evaluation.get("effective_case_score_percent", evaluation.get("case_score_percent"))
         if value is None:
             return None
         if run.get("status") != "completed":
@@ -396,6 +505,14 @@ def _delta(left: float | None, right: float | None) -> float | None:
 def _dimension_score(run: dict[str, Any], dimension_id: str) -> float | None:
     for item in run.get("_evaluation", {}).get("dimension_results", []):
         if item.get("dimension_id") == dimension_id:
+            value = item.get("score")
+            return float(value) if value is not None else None
+    return None
+
+
+def _criterion_score(run: dict[str, Any], criterion_id: str) -> float | None:
+    for item in run.get("_evaluation", {}).get("criterion_results", []):
+        if item.get("criterion_id") == criterion_id:
             value = item.get("score")
             return float(value) if value is not None else None
     return None

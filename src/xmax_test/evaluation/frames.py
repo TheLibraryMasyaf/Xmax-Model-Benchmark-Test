@@ -81,13 +81,21 @@ class FfmpegFrameExtractor:
                     ]
                     try:
                         result = subprocess.run(
-                            command, capture_output=True, text=True, timeout=self._timeout
+                            command,
+                            capture_output=True,
+                            text=True,
+                            timeout=self._timeout,
                         )
                     except (OSError, subprocess.TimeoutExpired) as exc:
                         raise ValidationError(f"ffmpeg frame extraction failed: {exc}") from exc
                     if result.returncode == 0 and output.is_file() and output.stat().st_size > 0:
                         break
-                if result is None or result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
+                if (
+                    result is None
+                    or result.returncode != 0
+                    or not output.is_file()
+                    or output.stat().st_size == 0
+                ):
                     raise ValidationError(
                         f"ffmpeg cannot decode {source.name} at {timestamp:.3f}s: "
                         f"{(result.stderr if result else '')[-500:]}"

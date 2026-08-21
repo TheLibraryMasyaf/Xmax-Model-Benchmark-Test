@@ -1,21 +1,27 @@
 {
   "$schema": "../schemas/run-request.schema.json",
-  "request_id": "feishu-test-data-full-20260820",
-  "stages": ["ingest", "plan", "generate", "preprocess", "evaluate", "sync", "reconcile"],
-  "stage_inputs": {},
+  "request_id": "configure-before-running",
+  "stages": ["ingest"],
+  "stage_inputs": {
+    "ingest": [
+      {
+        "selector_id": "configure-asset-source",
+        "state": "request",
+        "entity_type": "source_record",
+        "match": {"ids": ["configure-me"]}
+      }
+    ]
+  },
   "dependency_policy": "explicit_only",
   "missing_input_policy": "error",
-  "sync_policy": "full",
-  "existing_results_request_path": null,
+  "sync_policy": "none",
   "benchmark_path": "BENCHMARK.md",
   "scenario_pack_path": "config/scenarios.json",
   "generation_modes": ["offline", "realtime"],
   "execution_mode": "streaming",
   "pipeline_queue_size": 4,
   "repeat_count": 5,
-  "generation_mode_overrides": [],
-  "dry_run": false,
-  "smoke_limit": null,
+  "dry_run": true,
   "filters": {},
   "manifest_directory": "var/manifests"
 }

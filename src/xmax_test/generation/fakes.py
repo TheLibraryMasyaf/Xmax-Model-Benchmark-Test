@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..errors import ExternalServiceError
-from ..hashing import file_sha256
 from .offline.rest_adapter import FakeOfflineTaskTransport
 
 
@@ -45,7 +43,6 @@ def build_offline_adapter(
     """Composition helper returning a fully-fake offline adapter."""
 
     from .offline.adapter import OfflineGenerationAdapter
-    from .offline.rest_adapter import FakeOfflineTaskTransport
     from .offline.rtc_adapter import FakeRtcAdapter
     from .offline.session_api import FakeSessionApiClient
 

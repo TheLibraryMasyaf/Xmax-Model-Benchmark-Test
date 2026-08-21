@@ -26,10 +26,12 @@ class LearningRouter:
         partitions: dict[str, float] | None = None,
     ) -> None:
         self._repository = repository
-        self._dimensions = {
-            item["dimension_id"]: item for item in benchmark.get("dimensions", [])
+        self._dimensions = {item["dimension_id"]: item for item in benchmark.get("dimensions", [])}
+        self._partitions = partitions or {
+            "train": 0.7,
+            "calibration": 0.15,
+            "holdout": 0.15,
         }
-        self._partitions = partitions or {"train": 0.7, "calibration": 0.15, "holdout": 0.15}
 
     def route(self, signal: dict[str, Any]) -> list[dict[str, Any]]:
         """Return learning candidates for one normalized signal."""
@@ -107,11 +109,7 @@ class LearningRouter:
     def assign_partition(self, signal: dict[str, Any]) -> str:
         """Deterministic partition by sample group to avoid leakage."""
 
-        group = (
-            signal.get("source_group_id")
-            or signal.get("sample_id")
-            or signal["signal_id"]
-        )
+        group = signal.get("source_group_id") or signal.get("sample_id") or signal["signal_id"]
         total = sum(self._partitions.values())
         digest = hashlib.sha256(str(group).encode("utf-8")).digest()
         fraction = int.from_bytes(digest[:8], "big") / float(2**64)

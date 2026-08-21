@@ -70,15 +70,41 @@ class FeishuCaseImporter:
         downloads = config.get("download", {})
         fields = case.provenance.get("record_fields_snapshot", {})
         if downloads.get("result_video"):
-            case = self._download_field(case, fields, mapping.get("result_attachment"), "result_video", "result", config)
+            case = self._download_field(
+                case,
+                fields,
+                mapping.get("result_attachment"),
+                "result_video",
+                "result",
+                config,
+            )
         if downloads.get("feed_and_prompt_inputs"):
-            case = self._download_field(case, fields, mapping.get("feed_attachment"), "feed_video", "feed", config)
-            case = self._download_field(case, fields, mapping.get("prompt_attachment"), "prompt_video", "prompt", config)
+            case = self._download_field(
+                case,
+                fields,
+                mapping.get("feed_attachment"),
+                "feed_video",
+                "feed",
+                config,
+            )
+            case = self._download_field(
+                case,
+                fields,
+                mapping.get("prompt_attachment"),
+                "prompt_video",
+                "prompt",
+                config,
+            )
         return case
 
     def _download_field(
-        self, case: ImportedCase, fields: dict[str, Any], source_field: str | None,
-        kind: str, role: str, config: dict[str, Any],
+        self,
+        case: ImportedCase,
+        fields: dict[str, Any],
+        source_field: str | None,
+        kind: str,
+        role: str,
+        config: dict[str, Any],
     ) -> ImportedCase:
         token = _first_token(fields, source_field)
         if not token:
@@ -89,8 +115,11 @@ class FeishuCaseImporter:
         try:
             source = config.get("source", {})
             raw = self._client.download_attachment(
-                token, target, app_token=source.get("base_token"),
-                table_id=source.get("table_id"), record_id=case.source_record_id,
+                token,
+                target,
+                app_token=source.get("base_token"),
+                table_id=source.get("table_id"),
+                record_id=case.source_record_id,
             )
         except ExternalServiceError as exc:
             case.errors.append(f"{role} download failed: {exc}")
@@ -122,9 +151,7 @@ class FeishuCaseImporter:
                 break
             page_token = page.get("page_token")
             if not page_token:
-                raise ContractError(
-                    f"feishu case table {table_id} has_more but no page_token"
-                )
+                raise ContractError(f"feishu case table {table_id} has_more but no page_token")
         return records
 
     @staticmethod

@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError as SchemaValidationError
 from referencing import Registry, Resource
 
 from .errors import ConfigError
@@ -85,9 +84,7 @@ def load_config(
     if errors:
         first = errors[0]
         pointer = "/".join(str(part) for part in first.path) or "<root>"
-        raise ConfigError(
-            f"config {path} fails {schema_name}: {pointer}: {first.message}"
-        )
+        raise ConfigError(f"config {path} fails {schema_name}: {pointer}: {first.message}")
 
     base = Path(base_dir) if base_dir is not None else path.parent
     resolved = resolve_paths(data, base)

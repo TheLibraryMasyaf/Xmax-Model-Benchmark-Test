@@ -36,10 +36,20 @@ class FakeRtcAdapter:
         never_ready: bool = False,
         ready_timeout_s: float = 1.0,
     ) -> None:
-        self._events = events if events is not None else [
-            {"event": "video_started", "payload": {"taskUid": "T", "ts": 1}},
-            {"event": "video_completed", "payload": {"taskUid": "T", "resultUrl": "https://example.invalid/result.mp4"}},
-        ]
+        self._events = (
+            events
+            if events is not None
+            else [
+                {"event": "video_started", "payload": {"taskUid": "T", "ts": 1}},
+                {
+                    "event": "video_completed",
+                    "payload": {
+                        "taskUid": "T",
+                        "resultUrl": "https://example.invalid/result.mp4",
+                    },
+                },
+            ]
+        )
         self._join_fails = join_fails
         self._start_fails = start_fails
         self._never_ready = never_ready

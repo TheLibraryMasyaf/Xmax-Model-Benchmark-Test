@@ -12,13 +12,12 @@ from pathlib import Path
 
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.errors import ContractError
-from xmax_test.evaluation.fusion import JudgmentFusion
 from xmax_test.evaluation.orchestrator import EvaluationOrchestrator
 from xmax_test.evaluation.preprocess import PreprocessService
 from xmax_test.evaluation.release import ReleaseService
 from xmax_test.evaluation.replay import ReplayService
-from xmax_test.judges.releases import JudgeReleaseService
 from xmax_test.judges.registry import JudgeRegistry
+from xmax_test.judges.releases import JudgeReleaseService
 from xmax_test.judges.worker import JudgeWorker
 from xmax_test.scenarios import load_scenario_pack
 from xmax_test.storage.artifacts import ArtifactStore
@@ -48,6 +47,17 @@ class MetricJudge:
         }
 
     def evaluate(self, context):
+        criterion_results = [
+            {
+                "criterion_id": item["criterion_id"],
+                "verdict": "ok",
+                "score": self._score,
+                "confidence": 0.9,
+                "assessable": True,
+                "evidence": [{"description": "metric fact"}],
+            }
+            for item in context.get("dimension_contract", {}).get("criteria", [])
+        ]
         return [
             {
                 "dimension_id": self._dimension,
@@ -56,6 +66,7 @@ class MetricJudge:
                 "confidence": 0.9,
                 "assessable": True,
                 "evidence": [{"description": "metric fact"}],
+                "criterion_results": criterion_results,
             }
         ]
 
@@ -116,7 +127,10 @@ class ReleaseReplayTestBase(unittest.TestCase):
                 "expected_audio_source_asset_id": "feed-a",
                 "scenario_id": "core-selfie-appearance",
                 "scenario_pack_version": self.pack.get("version"),
-                "scene_tags": {"input_dimension": "自拍", "instruction_dimension": "修改主体"},
+                "scene_tags": {
+                    "input_dimension": "自拍",
+                    "instruction_dimension": "修改主体",
+                },
             },
             "plan-1",
         )
@@ -131,7 +145,11 @@ class ReleaseReplayTestBase(unittest.TestCase):
                 "model_id": "x2.0",
                 "mode": mode,
                 "origin": "xmax_offline",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h",
+                },
                 "result_asset_id": "result-asset",
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
@@ -163,11 +181,16 @@ class ReplayTests(ReleaseReplayTestBase):
         old_id = first["evaluation_id"]
         self.assertIsNotNone(self.repository.get_evaluation_result(old_id))
         # Replay re-evaluates and must NOT overwrite the old evaluation.
-        replay = ReplayService(self.repository, self.orchestrator(), self.artifacts, clock=self.clock)
+        replay = ReplayService(
+            self.repository, self.orchestrator(), self.artifacts, clock=self.clock
+        )
         outcome = replay.replay_runs([run])
         self.assertEqual(outcome["old_results_preserved"], True)
         self.assertTrue(
-            any(r.get("evaluation_id") != old_id for r in self.repository.list_evaluation_results(run_id=run["run_id"]))
+            any(
+                r.get("evaluation_id") != old_id
+                for r in self.repository.list_evaluation_results(run_id=run["run_id"])
+            )
         )
         # The old evaluation is still readable under its original ID.
         self.assertIsNotNone(self.repository.get_evaluation_result(old_id))
@@ -180,14 +203,17 @@ class ReplayTests(ReleaseReplayTestBase):
         first = self.orchestrator().evaluate_run(run, "batch-first")
         self.assertEqual(first["evaluation_id"] is not None, True)
         # Replay with a different score producing a different result.
-        judge.set_score(5.0)
-        replay = ReplayService(self.repository, self.orchestrator(), self.artifacts, clock=self.clock)
+        judge.set_score(0.0)
+        replay = ReplayService(
+            self.repository, self.orchestrator(), self.artifacts, clock=self.clock
+        )
         outcome = replay.replay_runs([run])
         self.assertTrue(outcome["differences"])
         diff = outcome["differences"][0]
         self.assertEqual(diff["run_id"], run["run_id"])
         self.assertNotEqual(diff["new_evaluation_id"], diff["old_evaluation_id"])
-        self.assertIsNotNone(diff["delta_canonical"])
+        self.assertIsNone(diff["delta_canonical"])
+        self.assertTrue(diff["changed_dimensions"])
 
 
 class ReleaseTests(ReleaseReplayTestBase):
@@ -199,9 +225,7 @@ class ReleaseTests(ReleaseReplayTestBase):
     def test_failed_version_cannot_be_promoted(self) -> None:
         service = ReleaseService(self.repository, self.benchmark, self.score_schema)
         validation = service.validate(
-            holdout_results=[
-                {"applied_gate_ids": ["hard-gate-1"], "final_verdict": "fail"}
-            ],
+            holdout_results=[{"applied_gate_ids": ["hard-gate-1"], "final_verdict": "fail"}],
             threshold=0.5,
         )
         self.assertFalse(validation["valid"])
@@ -231,7 +255,17 @@ class ReleaseTests(ReleaseReplayTestBase):
     def test_judge_release_lifecycle(self) -> None:
         service = JudgeReleaseService(self.repository, clock=self.clock)
         # Shadow first, then promote after valid validation.
-        service.promote("video-quality", "2.0.0", validation={"valid": True})
+        self.repository.record_judge_release(
+            "video-quality",
+            "2.0.0",
+            "shadow",
+            {"judge_id": "video-quality", "version": "2.0.0", "status": "shadow"},
+        )
+        service.promote(
+            "video-quality",
+            "2.0.0",
+            validation={"valid": True, "data_partition": "holdout"},
+        )
         self.assertEqual(service.state("video-quality", "2.0.0")["action"], "promote")
         # Failed validation cannot promote.
         with self.assertRaises(ContractError):

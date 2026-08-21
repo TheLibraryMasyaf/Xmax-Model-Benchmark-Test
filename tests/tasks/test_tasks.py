@@ -39,9 +39,7 @@ class TaskTests(unittest.TestCase):
         schema = json.loads(
             (ROOT / "schemas" / "test-task.schema.json").read_text(encoding="utf-8")
         )
-        tasks = self.repository.list_test_tasks(
-            task_batch_id=self.batch["task_batch_id"]
-        )
+        tasks = self.repository.list_test_tasks(task_batch_id=self.batch["task_batch_id"])
         self.assertEqual(len(tasks), 2)
         for task in tasks:
             Draft202012Validator(schema).validate(task)
@@ -77,15 +75,13 @@ class TaskTests(unittest.TestCase):
             return {"run_id": "run-ok"}
 
         worker = TaskWorker(self.repository, execute)
-        summary = worker.run_batch(
-            self.batch["task_batch_id"], lease_owner="worker-a"
-        )
+        summary = worker.run_batch(self.batch["task_batch_id"], lease_owner="worker-a")
         self.assertEqual(summary["counts"], {"completed": 1, "error": 1})
         failed = self.repository.list_test_tasks(status="error")[0]
 
-        resumed = TaskWorker(
-            self.repository, lambda task: {"run_id": "run-retried"}
-        ).run_task(failed["task_id"], lease_owner="worker-b", resume=True)
+        resumed = TaskWorker(self.repository, lambda task: {"run_id": "run-retried"}).run_task(
+            failed["task_id"], lease_owner="worker-b", resume=True
+        )
         self.assertEqual(resumed["status"], "completed")
         self.assertEqual(resumed["result_refs"]["run_id"], "run-retried")
         self.assertEqual(
@@ -126,12 +122,10 @@ class TaskTests(unittest.TestCase):
         self.assertTrue(second["reused"])
 
     def test_explicit_claim_can_be_executed_by_same_owner(self) -> None:
-        claimed = self.repository.claim_next_test_task(
-            self.batch["task_batch_id"], "scheduler-a"
+        claimed = self.repository.claim_next_test_task(self.batch["task_batch_id"], "scheduler-a")
+        result = TaskWorker(self.repository, lambda task: {"run_id": "run-after-claim"}).run_task(
+            claimed["task_id"], lease_owner="scheduler-a"
         )
-        result = TaskWorker(
-            self.repository, lambda task: {"run_id": "run-after-claim"}
-        ).run_task(claimed["task_id"], lease_owner="scheduler-a")
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["result_refs"]["run_id"], "run-after-claim")
 

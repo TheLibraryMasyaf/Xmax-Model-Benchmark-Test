@@ -41,31 +41,46 @@ class FeishuHumanDatasetImporter:
                 attachments = fields.get(field)
                 if not isinstance(attachments, list) or not attachments:
                     skipped.append(
-                        {"record_id": record_id, "field": field, "reason": "missing_video"}
+                        {
+                            "record_id": record_id,
+                            "field": field,
+                            "reason": "missing_video",
+                        }
                     )
                     continue
                 first = attachments[0]
                 if not isinstance(first, dict):
                     skipped.append(
-                        {"record_id": record_id, "field": field, "reason": "invalid_attachment"}
+                        {
+                            "record_id": record_id,
+                            "field": field,
+                            "reason": "invalid_attachment",
+                        }
                     )
                     continue
                 token = first.get("file_token") or first.get("token")
                 if not token:
                     skipped.append(
-                        {"record_id": record_id, "field": field, "reason": "missing_token"}
+                        {
+                            "record_id": record_id,
+                            "field": field,
+                            "reason": "missing_token",
+                        }
                     )
                     continue
                 suffix = Path(first.get("name") or "video.mp4").suffix or ".mp4"
-                signal_id = "signal-" + content_hash(
-                    {
-                        "app_token": app_token,
-                        "table_id": table_id,
-                        "record_id": record_id,
-                        "field": field,
-                        "token": token,
-                    }
-                )[:16]
+                signal_id = (
+                    "signal-"
+                    + content_hash(
+                        {
+                            "app_token": app_token,
+                            "table_id": table_id,
+                            "record_id": record_id,
+                            "field": field,
+                            "token": token,
+                        }
+                    )[:16]
+                )
                 destination = self._download_root / record_id / f"{signal_id}{suffix}"
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 try:

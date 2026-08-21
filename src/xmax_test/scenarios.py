@@ -25,9 +25,7 @@ def load_scenario_pack(path: str | Path) -> dict[str, Any]:
         "scenarios": list,
     }.items():
         if not isinstance(pack.get(key), expected):
-            raise ScenarioPackError(
-                f"Scenario Pack field {key} must be {expected.__name__}"
-            )
+            raise ScenarioPackError(f"Scenario Pack field {key} must be {expected.__name__}")
 
     scenario_ids: set[str] = set()
     for index, scenario in enumerate(pack["scenarios"]):
@@ -35,29 +33,25 @@ def load_scenario_pack(path: str | Path) -> dict[str, Any]:
             raise ScenarioPackError(f"scenarios[{index}] must be an object")
         scenario_id = scenario.get("scenario_id")
         if not isinstance(scenario_id, str) or not scenario_id:
-            raise ScenarioPackError(
-                f"scenarios[{index}].scenario_id must be a non-empty string"
-            )
+            raise ScenarioPackError(f"scenarios[{index}].scenario_id must be a non-empty string")
         if scenario_id in scenario_ids:
             raise ScenarioPackError(f"duplicate scenario_id: {scenario_id}")
         scenario_ids.add(scenario_id)
         _validate_tags(pack["tag_definitions"], scenario_id, scenario.get("tags"))
         modes = scenario.get("supported_modes", [])
-        if not isinstance(modes, list) or not modes or any(
-            mode not in {"offline", "realtime"} for mode in modes
+        if (
+            not isinstance(modes, list)
+            or not modes
+            or any(mode not in {"offline", "realtime"} for mode in modes)
         ):
-            raise ScenarioPackError(
-                f"scenario {scenario_id} requires valid supported_modes"
-            )
+            raise ScenarioPackError(f"scenario {scenario_id} requires valid supported_modes")
     return pack
 
 
 def validate_benchmark_scenario_references(
     benchmark: dict[str, Any], scenario_pack: dict[str, Any]
 ) -> None:
-    scenarios = {
-        item["scenario_id"]: item for item in scenario_pack.get("scenarios", [])
-    }
+    scenarios = {item["scenario_id"]: item for item in scenario_pack.get("scenarios", [])}
     tag_definitions = scenario_pack.get("tag_definitions", {})
     for rule in benchmark.get("scene_weight_rules", []):
         rule_id = rule.get("rule_id", "<unknown>")
@@ -80,9 +74,7 @@ def validate_benchmark_scenario_references(
 
         if len(referenced_scenarios) == 1 and referenced_modes:
             scenario_id = next(iter(referenced_scenarios))
-            unsupported = referenced_modes - set(
-                scenarios[scenario_id].get("supported_modes", [])
-            )
+            unsupported = referenced_modes - set(scenarios[scenario_id].get("supported_modes", []))
             if unsupported:
                 raise ScenarioPackError(
                     f"rule {rule_id} uses modes not supported by {scenario_id}: "
@@ -90,22 +82,16 @@ def validate_benchmark_scenario_references(
                 )
 
 
-def _validate_tags(
-    definitions: dict[str, Any], scenario_id: str, tags: Any
-) -> None:
+def _validate_tags(definitions: dict[str, Any], scenario_id: str, tags: Any) -> None:
     if not isinstance(tags, dict):
         raise ScenarioPackError(f"scenario {scenario_id} tags must be an object")
     for tag, value in tags.items():
         definition = definitions.get(tag)
         if not isinstance(definition, dict):
-            raise ScenarioPackError(
-                f"scenario {scenario_id} uses undefined tag: {tag}"
-            )
+            raise ScenarioPackError(f"scenario {scenario_id} uses undefined tag: {tag}")
         values = definition.get("values", [])
         if value not in values:
-            raise ScenarioPackError(
-                f"scenario {scenario_id} has invalid {tag} value: {value}"
-            )
+            raise ScenarioPackError(f"scenario {scenario_id} has invalid {tag} value: {value}")
 
 
 def _conditions(when: Any, rule_id: str) -> list[dict[str, Any]]:
@@ -138,6 +124,5 @@ def _validate_rule_tag(
     invalid = [value for value in values if value not in allowed]
     if invalid:
         raise ScenarioPackError(
-            f"rule {rule_id} uses invalid values for {tag}: "
-            + ", ".join(map(str, invalid))
+            f"rule {rule_id} uses invalid values for {tag}: " + ", ".join(map(str, invalid))
         )

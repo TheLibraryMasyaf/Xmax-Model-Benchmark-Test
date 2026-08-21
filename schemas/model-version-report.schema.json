@@ -17,6 +17,7 @@
     "p1_ties",
     "p2_regressions",
     "scene_results",
+    "criterion_results",
     "audit"
   ],
   "properties": {
@@ -65,6 +66,34 @@
           "mode": {"enum": ["offline", "realtime"]},
           "score_summary": {"$ref": "#/$defs/scoreDelta"},
           "items": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "criterion_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "dimension_id",
+          "criterion_id",
+          "baseline",
+          "candidate",
+          "delta_points",
+          "baseline_assessable_count",
+          "candidate_assessable_count"
+        ],
+        "properties": {
+          "dimension_id": {"type": ["string", "null"]},
+          "criterion_id": {"type": "string"},
+          "criterion_name": {"type": "string"},
+          "baseline": {"type": ["number", "null"]},
+          "candidate": {"type": ["number", "null"]},
+          "delta_points": {"type": ["number", "null"]},
+          "baseline_assessable_count": {"type": "integer", "minimum": 0},
+          "candidate_assessable_count": {"type": "integer", "minimum": 0},
+          "classification": {"type": "string"},
           "evidence_ids": {"type": "array", "items": {"type": "string"}}
         },
         "additionalProperties": true

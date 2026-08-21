@@ -7,13 +7,13 @@ Case import then evaluate without writing remote; score-only write-back.
 
 from __future__ import annotations
 
-import json
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.cli import Composition, _execute_run_request
@@ -22,7 +22,7 @@ from xmax_test.feishu.client import FakeFeishuSyncClient
 from xmax_test.generation.offline.rest_adapter import FakeOfflineTaskTransport
 from xmax_test.generation.offline.rtc_adapter import FakeRtcAdapter
 from xmax_test.generation.offline.session_api import FakeSessionApiClient
-from xmax_test.storage.sqlite import SqliteMetadataRepository
+from xmax_test.pipeline.manifests import build_batch_manifest
 from xmax_test.tasks import TaskWorker
 from xmax_test.tasks.runtime import PipelineTaskRuntime
 
@@ -32,7 +32,11 @@ FEISHU_JSON = {
     "$schema": "../schemas/feishu-config.schema.json",
     "connection": {"provider": "fake", "identity": "fake"},
     "base": {"url": "https://fake.feishu.cn/base/app", "app_token": "app"},
-    "tables": {"feed_data": "tbl-feed", "prompt_data": "tbl-prompt", "case_data": "tbl-case"},
+    "tables": {
+        "feed_data": "tbl-feed",
+        "prompt_data": "tbl-prompt",
+        "case_data": "tbl-case",
+    },
     "field_projection": {
         "case_data": {
             "case_number": "case编号",
@@ -62,7 +66,12 @@ FEISHU_JSON = {
 IMPORT_CONFIG = {
     "import_request_id": "e2e-import",
     "source": {"kind": "feishu_case_data", "base_token": "app", "table_id": "tbl-case"},
-    "selector": {"selector_id": "e2e", "state": "request", "entity_type": "source_record", "match": {"filters": {}}},
+    "selector": {
+        "selector_id": "e2e",
+        "state": "request",
+        "entity_type": "source_record",
+        "match": {"filters": {}},
+    },
     "field_mapping": {
         "case_number": "case编号",
         "result_attachment": "case文件",
@@ -73,7 +82,11 @@ IMPORT_CONFIG = {
         "generation_mode": None,
         "operation_recipe_id": None,
     },
-    "mode_resolution": {"order": ["explicit_field", "fixed_default"], "fixed_default": "offline", "on_unresolved": "error"},
+    "mode_resolution": {
+        "order": ["explicit_field", "fixed_default"],
+        "fixed_default": "offline",
+        "on_unresolved": "error",
+    },
     "download": {"result_video": True, "feed_and_prompt_inputs": True},
     "validation": {"media": True, "content_hash": True, "required_case_context": True},
     "imported_run_status": "completed",
@@ -86,7 +99,14 @@ class FakeProbe:
         if path.stat().st_size == 0:
             raise ValidationError("cannot decode")
         return {
-            "streams": [{"codec_type": "video", "width": 704, "height": 1280, "avg_frame_rate": "24/1"}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "width": 704,
+                    "height": 1280,
+                    "avg_frame_rate": "24/1",
+                }
+            ],
             "format": {"format_name": "mp4", "duration": "8.0"},
         }
 
@@ -116,6 +136,17 @@ class AllDimensionJudge:
         }
 
     def evaluate(self, context):
+        criterion_results = [
+            {
+                "criterion_id": item["criterion_id"],
+                "verdict": "ok",
+                "score": self._bank.score,
+                "confidence": 0.9,
+                "assessable": True,
+                "evidence": [{"description": "e2e metric"}],
+            }
+            for item in context.get("dimension_contract", {}).get("criteria", [])
+        ]
         return [
             {
                 "dimension_id": self._dimension,
@@ -124,6 +155,7 @@ class AllDimensionJudge:
                 "confidence": 0.9,
                 "assessable": True,
                 "evidence": [{"description": "e2e metric"}],
+                "criterion_results": criterion_results,
             }
         ]
 
@@ -137,6 +169,7 @@ class FakeRunE2ETestBase(unittest.TestCase):
             json.dumps(FEISHU_JSON, ensure_ascii=False), encoding="utf-8"
         )
         self.bank = ScoreBank(2.0)
+        self.evaluation_batches_by_model = {}
         self.fake_feishu = FakeFeishuSyncClient(existing_records={"tbl-case": []})
         self.project_config = {
             "project_id": "e2e",
@@ -168,9 +201,7 @@ class FakeRunE2ETestBase(unittest.TestCase):
             "feishu_sync": self.fake_feishu,
             "judges": judges,
         }
-        self.composition = Composition(
-            root, project_config=self.project_config, inject=self.inject
-        )
+        self.composition = Composition(root, project_config=self.project_config, inject=self.inject)
         self.root = root
 
     def tearDown(self) -> None:
@@ -255,6 +286,15 @@ class FakeRunE2ETestBase(unittest.TestCase):
             run = adapter.run_case(case)
             self.composition.database.set_run_batch_id(run["run_id"], batch_id)
             runs.append(run)
+        self.composition.database.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="run_batch",
+                item_entity_type="generation_run",
+                item_ids=[run["run_id"] for run in runs],
+                producer_stage_run_id="stage-e2e",
+                batch_id=batch_id,
+            )
+        )
         return runs
 
     def evaluate_runs(self, runs: list[dict]) -> dict:
@@ -262,7 +302,9 @@ class FakeRunE2ETestBase(unittest.TestCase):
         for run in runs:
             preprocess.build(run)
         orchestrator = self.composition.evaluation_orchestrator()
-        return orchestrator.evaluate_runs(runs)
+        summary = orchestrator.evaluate_runs(runs)
+        self.evaluation_batches_by_model[runs[0]["model_id"]] = summary["evaluation_batch_id"]
+        return summary
 
     def report(
         self,
@@ -275,6 +317,14 @@ class FakeRunE2ETestBase(unittest.TestCase):
             comparison_id="model-update-e2e",
             baseline_model_version=baseline_model_version,
             candidate_model_version=candidate_model_version,
+            baseline_run_batch_id="runs-baseline",
+            candidate_run_batch_id=(
+                "runs-baseline"
+                if candidate_model_version == baseline_model_version
+                else "runs-candidate"
+            ),
+            baseline_evaluation_batch_id=self.evaluation_batches_by_model[baseline_model_version],
+            candidate_evaluation_batch_id=self.evaluation_batches_by_model[candidate_model_version],
             requested_scene_ids=requested_scene_ids,
             template_path=ROOT / "report-templates" / "model-version-update-report.md",
             output_directory=self.root / "var" / "reports" / "model-version-updates",
@@ -296,9 +346,7 @@ class FullPipelineTests(FakeRunE2ETestBase):
         )
         self.assertEqual(summary["errors"], [], summary)
         self.assertEqual(summary["counts"], {"completed": len(plan["cases"])})
-        tasks = self.composition.database.list_test_tasks(
-            task_batch_id=plan["task_batch_id"]
-        )
+        tasks = self.composition.database.list_test_tasks(task_batch_id=plan["task_batch_id"])
         self.assertTrue(all(task["result_refs"].get("run_id") for task in tasks))
         self.assertTrue(all(task["result_refs"].get("evaluation_id") for task in tasks))
         self.assertEqual(len(self.fake_feishu._tables["tbl-case"]), len(plan["cases"]))
@@ -310,12 +358,14 @@ class FullPipelineTests(FakeRunE2ETestBase):
             "request_id": "sync-scope-e2e",
             "stages": ["generate", "preprocess", "evaluate", "sync", "reconcile"],
             "stage_inputs": {
-                "generate": [{
-                    "selector_id": "sync-scope-plan",
-                    "state": "request",
-                    "entity_type": "test_plan",
-                    "match": {"ids": [plan["plan_id"]]},
-                }]
+                "generate": [
+                    {
+                        "selector_id": "sync-scope-plan",
+                        "state": "request",
+                        "entity_type": "test_plan",
+                        "match": {"ids": [plan["plan_id"]]},
+                    }
+                ]
             },
             "dependency_policy": "explicit_only",
             "missing_input_policy": "error",
@@ -399,6 +449,8 @@ class FullPipelineTests(FakeRunE2ETestBase):
         self.assertEqual(set(manifest["item_ids"]), {item["evaluation_id"] for item in results})
         self.assertEqual(manifest["metadata"]["execution_mode"], "streaming")
         self.assertTrue(manifest["metadata"]["streamed_during_generation"])
+        self.assertEqual(manifest["metadata"]["score_source"], "criterion_results")
+        self.assertTrue(manifest["metadata"]["aggregate"]["criterion_summary"])
 
         # Resume reuses completed generation, preprocessing and evaluation.
         args.resume = True
@@ -433,9 +485,7 @@ class FullPipelineTests(FakeRunE2ETestBase):
             baseline, evaluations=selected, policy="full"
         )
         self.assertEqual(sync["errors"], [])
-        outcome = self.composition.feishu_reconcile().reconcile(
-            evaluations=selected
-        )
+        outcome = self.composition.feishu_reconcile().reconcile(evaluations=selected)
         self.assertTrue(outcome["ok"], outcome)
 
         # Model-update report (single model -> not comparable, still emitted).
@@ -459,6 +509,15 @@ class FullPipelineTests(FakeRunE2ETestBase):
             run = adapter.run_case(case)
             self.composition.database.set_run_batch_id(run["run_id"], "runs-candidate")
             candidate.append(run)
+        self.composition.database.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="run_batch",
+                item_entity_type="generation_run",
+                item_ids=[run["run_id"] for run in candidate],
+                producer_stage_run_id="stage-e2e",
+                batch_id="runs-candidate",
+            )
+        )
         self.assertEqual(
             [r["case_number"] for r in baseline], [r["case_number"] for r in candidate]
         )
@@ -480,7 +539,9 @@ class FullPipelineTests(FakeRunE2ETestBase):
         self.assertEqual(result["status"], "complete")
         self.assertGreater(result["p2_count"], 0)
         report_json = json.loads(
-            (self.root / "var" / "reports" / "model-version-updates" / "model-update-e2e.json").read_text(encoding="utf-8")
+            (
+                self.root / "var" / "reports" / "model-version-updates" / "model-update-e2e.json"
+            ).read_text(encoding="utf-8")
         )
         for bucket in ("p0_improvements", "p1_ties", "p2_regressions"):
             self.assertIn(bucket, report_json)
@@ -535,9 +596,7 @@ class GenerateOnlyTests(FakeRunE2ETestBase):
         runs = self.generate_plan(plan, "x2.0", "runs-gen-only")
         self.assertTrue(runs)
         # No evaluation side effects.
-        self.assertEqual(
-            len(self.composition.database.list_evaluation_results()), 0
-        )
+        self.assertEqual(len(self.composition.database.list_evaluation_results()), 0)
 
 
 class EvaluateOnlyTests(FakeRunE2ETestBase):
@@ -570,9 +629,7 @@ class ImportThenEvaluateTests(FakeRunE2ETestBase):
         self.fake_feishu._tables["tbl-case"] = [record]
 
         services = self.composition.ingest_service()
-        outcome = services["importer"].import_results(
-            IMPORT_CONFIG, feishu_client=self.fake_feishu
-        )
+        outcome = services["importer"].import_results(IMPORT_CONFIG, feishu_client=self.fake_feishu)
         self.assertEqual(outcome.status, "completed", outcome.errors)
         self.assertEqual(outcome.imported, 1)
 

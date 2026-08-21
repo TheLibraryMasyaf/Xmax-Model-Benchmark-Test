@@ -164,26 +164,20 @@ class OpenAiCompatibleProvider:
             metadata={
                 "model_fallback_attempts": attempted,
                 "input_mode": input_mode,
-                "media_roles": [
-                    item.get("role", "unknown") for item in (media_inputs or [])
-                ] if input_mode == "direct_media" else [],
+                "media_roles": [item.get("role", "unknown") for item in (media_inputs or [])]
+                if input_mode == "direct_media"
+                else [],
             },
         )
 
-    def _direct_media_content(
-        self, media_inputs: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _direct_media_content(self, media_inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         content: list[dict[str, Any]] = []
         for item in media_inputs:
             role = str(item.get("role") or "unknown")
             kind = str(item.get("kind") or "")
-            content.append(
-                {"type": "text", "text": f"[INPUT_ROLE:{role}]"}
-            )
+            content.append({"type": "text", "text": f"[INPUT_ROLE:{role}]"})
             if kind == "text":
-                content.append(
-                    {"type": "text", "text": str(item.get("text") or "")}
-                )
+                content.append({"type": "text", "text": str(item.get("text") or "")})
                 continue
             url = item.get("url")
             path_value = item.get("path")
@@ -206,9 +200,7 @@ class OpenAiCompatibleProvider:
                             },
                         },
                         **{
-                            key: value
-                            for key, value in self._video_options.items()
-                            if key != "fps"
+                            key: value for key, value in self._video_options.items() if key != "fps"
                         },
                     }
                 )
@@ -293,8 +285,7 @@ def _is_free_tier_exhausted(status: int, body: str) -> bool:
     error = payload.get("error")
     sources = [payload, error] if isinstance(error, dict) else [payload]
     return any(
-        str(source.get("code") or "").lower()
-        == "allocationquota.freetieronly"
+        str(source.get("code") or "").lower() == "allocationquota.freetieronly"
         for source in sources
     )
 

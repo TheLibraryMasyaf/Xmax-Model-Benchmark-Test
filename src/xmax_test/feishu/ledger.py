@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 from ..hashing import content_hash
-from ..time import utc_now
 
 
 class SyncLedger:
@@ -43,7 +42,11 @@ class SyncLedger:
         raise KeyError(f"no ledger entry for {entity_type}/{entity_id}@{destination}")
 
     def mark_synced(
-        self, entity_type: str, entity_id: str, destination: str, feishu_record_id: str | None = None
+        self,
+        entity_type: str,
+        entity_id: str,
+        destination: str,
+        feishu_record_id: str | None = None,
     ) -> None:
         self._repository.update_sync_ledger(
             entity_type,
@@ -64,9 +67,7 @@ class SyncLedger:
         )
 
     def pending(self, entity_type: str | None = None) -> list[dict[str, Any]]:
-        return self._repository.list_sync_ledger(
-            entity_type=entity_type, sync_status="pending"
-        )
+        return self._repository.list_sync_ledger(entity_type=entity_type, sync_status="pending")
 
     def pending_for_entity(self, entity_type: str, entity_id: str) -> bool:
         return any(

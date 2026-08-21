@@ -12,7 +12,7 @@ from typing import Any
 from ..errors import ContractError
 from ..hashing import content_hash
 from .gates import HardGateEvaluator
-from .weights import resolve_scene_weights, WeightResolution
+from .weights import resolve_scene_weights
 
 
 class JudgmentFusion:
@@ -34,8 +34,11 @@ class JudgmentFusion:
         score_schema = self._score_schema(benchmark, mode)
         profile = self._profile_for_mode(benchmark, mode)
 
-        dimension_scores = self._merge_dimensions(judgments)
-        gate_result = self._gates.evaluate(benchmark, dimension_scores, runtime_facts)
+        criterion_scores = self._merge_criteria(benchmark, judgments, mode)
+        dimension_scores = self._derive_dimensions(benchmark, criterion_scores, mode)
+        gate_result = self._gates.evaluate(
+            benchmark, dimension_scores, runtime_facts, criterion_scores
+        )
         assessable = {
             dimension_id
             for dimension_id, item in dimension_scores.items()
@@ -80,10 +83,9 @@ class JudgmentFusion:
             "scenario_score": scenario["score"],
             "case_score_percent": case_score,
             "score_display_format": "percentage",
+            "criterion_results": self._criterion_results(criterion_scores),
             "dimension_results": self._dimension_results(dimension_scores),
-            "weight_resolution": self._weight_resolution_payload(
-                canonical, scenario, test_case
-            ),
+            "weight_resolution": self._weight_resolution_payload(canonical, scenario, test_case),
             "applied_gate_ids": gate_result["applied_gate_ids"],
             "final_verdict": gate_result["final_verdict"],
             "no_automated_judge_dimensions": sorted(
@@ -96,7 +98,25 @@ class JudgmentFusion:
             "coverage": {
                 "assessable_dimensions": sorted(assessable),
                 "judged_dimensions": sorted(dimension_scores),
-                "dimension_count": len(benchmark.get("dimensions", [])),
+                "dimension_count": len(dimension_scores),
+                "assessable_criteria": sorted(
+                    criterion_id
+                    for criterion_id, item in criterion_scores.items()
+                    if item.get("assessable")
+                ),
+                "unassessable_criteria": sorted(
+                    criterion_id
+                    for criterion_id, item in criterion_scores.items()
+                    if item.get("coverage_status") == "unassessable"
+                ),
+                "uncovered_criteria": sorted(
+                    criterion_id
+                    for criterion_id, item in criterion_scores.items()
+                    if item.get("coverage_status") == "uncovered"
+                ),
+                "criterion_count": len(criterion_scores),
+                "canonical_missing_dimensions": canonical.get("missing_dimensions", []),
+                "scenario_missing_dimensions": scenario.get("missing_dimensions", []),
             },
         }
 
@@ -135,14 +155,10 @@ class JudgmentFusion:
             "excluded_dimensions": list(scenario_resolution.excluded_dimensions),
             "rule_excluded_dimensions": list(scenario_resolution.rule_excluded_dimensions),
             "canonical_profile_id": (
-                canonical_resolution.base_profile_id
-                if canonical_resolution is not None
-                else None
+                canonical_resolution.base_profile_id if canonical_resolution is not None else None
             ),
             "canonical_weights": (
-                canonical_resolution.effective_weights
-                if canonical_resolution is not None
-                else {}
+                canonical_resolution.effective_weights if canonical_resolution is not None else {}
             ),
         }
 
@@ -154,11 +170,17 @@ class JudgmentFusion:
             {
                 "dimension_id": dimension_id,
                 "score": item.get("score"),
+                "score_percent": item.get("score_percent"),
                 "assessable": item.get("assessable", False),
+                "applicable": item.get("applicable", True),
                 "judges": item.get("judges", []),
                 "judge_versions": item.get("judge_versions", []),
                 "confidence": item.get("confidence"),
                 "evidence": item.get("evidence", []),
+                "criterion_count": item.get("criterion_count", 0),
+                "assessable_criterion_count": item.get("assessable_criterion_count", 0),
+                "coverage_complete": item.get("coverage_complete", False),
+                "criterion_results": item.get("criterion_results", []),
             }
             for dimension_id, item in sorted(dimension_scores.items())
         ]
@@ -181,43 +203,174 @@ class JudgmentFusion:
                 return profile
         raise ContractError(f"no weight profile {profile_id!r} for mode {mode}")
 
-    def _merge_dimensions(
-        self, judgments: list[dict[str, Any]]
+    @staticmethod
+    def _criterion_results(
+        criterion_scores: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [criterion_scores[item] for item in sorted(criterion_scores)]
+
+    def _merge_criteria(
+        self,
+        benchmark: dict[str, Any],
+        judgments: list[dict[str, Any]],
+        mode: str,
     ) -> dict[str, dict[str, Any]]:
-        """Merge multi-judge outputs per dimension (primary first, then mean)."""
+        """Fuse Judge output at criterion level; dimension scores are ignored."""
+
+        contracts: dict[str, tuple[str, str]] = {}
+        for dimension in benchmark.get("dimensions", []):
+            modes = dimension.get("applicable_modes", [])
+            if mode not in modes and "both" not in modes:
+                continue
+            for criterion in dimension.get("criteria", []):
+                criterion_id = criterion.get("criterion_id")
+                if criterion_id:
+                    contracts[criterion_id] = (
+                        dimension["dimension_id"],
+                        criterion.get("name", ""),
+                    )
 
         grouped: dict[str, list[dict[str, Any]]] = {}
+        submitted: set[str] = set()
         for judgment in judgments:
-            dimension_id = judgment.get("dimension_id")
-            if not dimension_id or judgment.get("status") == "no_automated_judge":
+            if judgment.get("status") == "no_automated_judge":
                 continue
-            grouped.setdefault(dimension_id, []).append(judgment)
-        merged: dict[str, dict[str, Any]] = {}
-        for dimension_id, items in grouped.items():
-            scores = [
-                item["score"] for item in items if isinstance(item.get("score"), (int, float))
-            ]
-            merged[dimension_id] = {
-                "dimension_id": dimension_id,
-                "score": sum(scores) / len(scores) if scores else None,
-                "assessable": bool(scores),
-                "judges": [item.get("judge_id") for item in items],
-                "judge_versions": sorted(
+            entries = list(judgment.get("criterion_results") or [])
+            # Read-only compatibility for old specialized records that already
+            # named a criterion. Dimension-only legacy scores are never spread
+            # across criteria.
+            if not entries and judgment.get("criterion_id"):
+                entries = [{**judgment, "criterion_id": judgment["criterion_id"]}]
+            for entry in entries:
+                criterion_id = entry.get("criterion_id")
+                if criterion_id not in contracts:
+                    continue
+                submitted.add(criterion_id)
+                grouped.setdefault(criterion_id, []).append(
                     {
-                        f"{item.get('judge_id')}@{item.get('judge_version')}"
-                        for item in items
+                        **entry,
+                        "judge_id": judgment.get("judge_id"),
+                        "judge_version": judgment.get("judge_version"),
                     }
-                ),
+                )
+
+        merged: dict[str, dict[str, Any]] = {}
+        for criterion_id, (dimension_id, criterion_name) in contracts.items():
+            items = grouped.get(criterion_id, [])
+            scored = [
+                item
+                for item in items
+                if item.get("assessable") is True and isinstance(item.get("score"), (int, float))
+            ]
+            scores = [float(item["score"]) for item in scored]
+            explicitly_not_applicable = bool(items) and all(
+                item.get("applicable") is False for item in items
+            )
+            score = _mean(scores)
+            coverage_status = (
+                "not_applicable"
+                if explicitly_not_applicable
+                else (
+                    "assessed"
+                    if scores
+                    else ("unassessable" if criterion_id in submitted else "uncovered")
+                )
+            )
+            evidence = [
+                {
+                    **entry,
+                    "judge_id": item.get("judge_id"),
+                    "judge_version": item.get("judge_version"),
+                }
+                for item in items
+                for entry in item.get("evidence", [])
+            ]
+            judges = sorted({str(item.get("judge_id")) for item in items if item.get("judge_id")})
+            judge_versions = sorted(
+                {
+                    f"{item.get('judge_id')}@{item.get('judge_version')}"
+                    for item in items
+                    if item.get("judge_id")
+                }
+            )
+            merged[criterion_id] = {
+                "dimension_id": dimension_id,
+                "criterion_id": criterion_id,
+                "criterion_name": criterion_name,
+                "score": score,
+                "score_percent": round(score / 2 * 100, 2) if score is not None else None,
+                "assessable": bool(scores),
+                "applicable": not explicitly_not_applicable,
+                "coverage_status": coverage_status,
+                "judges": judges,
+                "judge_versions": judge_versions,
                 "confidence": _mean(
                     [
-                        item["confidence"]
-                        for item in items
+                        float(item["confidence"])
+                        for item in scored
                         if isinstance(item.get("confidence"), (int, float))
                     ]
                 ),
-                "evidence": [e for item in items for e in item.get("evidence", [])],
+                "evidence": evidence,
+                "judge_score_count": len(scores),
             }
         return merged
+
+    def _derive_dimensions(
+        self,
+        benchmark: dict[str, Any],
+        criterion_scores: dict[str, dict[str, Any]],
+        mode: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Deterministically derive each dimension from applicable criteria."""
+
+        results: dict[str, dict[str, Any]] = {}
+        for dimension in benchmark.get("dimensions", []):
+            modes = dimension.get("applicable_modes", [])
+            if mode not in modes and "both" not in modes:
+                continue
+            criteria = [
+                criterion_scores[item["criterion_id"]]
+                for item in dimension.get("criteria", [])
+                if item.get("criterion_id") in criterion_scores
+            ]
+            applicable_criteria = [item for item in criteria if item.get("applicable", True)]
+            assessable = [
+                item for item in applicable_criteria if isinstance(item.get("score"), (int, float))
+            ]
+            dimension_applicable = bool(applicable_criteria)
+            coverage_complete = dimension_applicable and len(assessable) == len(applicable_criteria)
+            # A missing or unassessable criterion is not an N/A exclusion. A
+            # dimension may only receive its full profile weight when every
+            # applicable criterion was assessed. This prevents one easy
+            # criterion from being inflated to represent the entire dimension.
+            score = (
+                _mean([float(item["score"]) for item in assessable]) if coverage_complete else None
+            )
+            results[dimension["dimension_id"]] = {
+                "dimension_id": dimension["dimension_id"],
+                "score": score,
+                "score_percent": round(score / 2 * 100, 2) if score is not None else None,
+                "assessable": coverage_complete,
+                "applicable": dimension_applicable,
+                "coverage_complete": coverage_complete,
+                "judges": sorted({judge for item in criteria for judge in item.get("judges", [])}),
+                "judge_versions": sorted(
+                    {version for item in criteria for version in item.get("judge_versions", [])}
+                ),
+                "confidence": _mean(
+                    [
+                        float(item["confidence"])
+                        for item in assessable
+                        if isinstance(item.get("confidence"), (int, float))
+                    ]
+                ),
+                "evidence": [entry for item in criteria for entry in item.get("evidence", [])],
+                "criterion_count": len(applicable_criteria),
+                "assessable_criterion_count": len(assessable),
+                "criterion_results": criteria,
+            }
+        return results
 
     def _weighted_score(
         self,
@@ -231,19 +384,29 @@ class JudgmentFusion:
         scene_tags: dict[str, Any],
         include_shadow: bool,
     ) -> dict[str, Any]:
-        assessable_intersection = assessable & set(profile.get("weights", {}))
-        if not assessable_intersection:
-            # No assessable dimensions: do not fabricate a misleading total.
-            return {"score": None, "resolution": None}
         resolution = resolve_scene_weights(
             profile,
             rules,
             mode=mode,
             scenario_id=scenario_id,
             scene_tags=scene_tags,
-            assessable_dimensions=assessable_intersection,
+            # Preserve the approved profile denominator. Only explicit scene
+            # rule exclusions are removed; missing Judge coverage never causes
+            # the remaining dimensions to be renormalized to 100%.
+            assessable_dimensions={
+                dimension_id
+                for dimension_id in profile.get("weights", {})
+                if dimension_scores.get(dimension_id, {}).get("applicable", True)
+            },
             include_shadow_rules=include_shadow,
         )
+        missing_dimensions = sorted(set(resolution.effective_weights) - assessable)
+        if missing_dimensions:
+            return {
+                "score": None,
+                "resolution": resolution,
+                "missing_dimensions": missing_dimensions,
+            }
         total = 0.0
         for dimension_id, weight in resolution.effective_weights.items():
             item = dimension_scores.get(dimension_id, {})
@@ -251,7 +414,11 @@ class JudgmentFusion:
             if isinstance(score, (int, float)):
                 total += (score / 2.0) * weight
         score = round(total * 100, 2) if resolution.effective_weights else None
-        return {"score": score, "resolution": resolution}
+        return {
+            "score": score,
+            "resolution": resolution,
+            "missing_dimensions": [],
+        }
 
 
 def _mean(values: list[float]) -> float | None:

@@ -58,4 +58,7 @@ class ManifestResultsImporter:
 
     @staticmethod
     def snapshot(config: dict[str, Any]) -> dict[str, Any]:
-        return {"kind": "stage_manifest", "manifest_uri": config.get("source", {}).get("manifest_uri")}
+        return {
+            "kind": "stage_manifest",
+            "manifest_uri": config.get("source", {}).get("manifest_uri"),
+        }

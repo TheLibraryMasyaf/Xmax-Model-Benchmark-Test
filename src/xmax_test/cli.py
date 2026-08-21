@@ -10,23 +10,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from .benchmark import BenchmarkContractError, load_benchmark_contract
-from .config import env_secret, load_config, load_dotenv, redact, secret_file
+from .benchmark import load_benchmark_contract
+from .config import env_secret, load_config, redact, secret_file
 from .context import ContextChecker
 from .errors import (
-    ConfigError,
     EXIT_APPROVAL_REQUIRED,
     EXIT_EXTERNAL_FAILURE,
     EXIT_INPUT_ERROR,
     EXIT_INTERNAL,
     EXIT_MISSING_DEPENDENCY,
     EXIT_PARTIAL,
+    ConfigError,
     XmaxTestError,
 )
-from .scenarios import ScenarioPackError, load_scenario_pack
+from .scenarios import load_scenario_pack
 from .storage.artifacts import ArtifactStore
 from .storage.migrations import migrate
 from .storage.sqlite import SqliteMetadataRepository
@@ -38,6 +39,7 @@ REQUIRED_PROJECT_FILES = (
     "README.md",
     "report-templates/README.md",
     "report-templates/model-version-update-report.md",
+    "report-templates/single-version-evaluation-report.md",
     "RUNBOOK.md",
     "BENCHMARK.md",
     "config/asset-sources.example.json",
@@ -56,8 +58,9 @@ REQUIRED_PROJECT_FILES = (
     "config/run-request.example.json",
     "config/run-task-allocation.example.json",
     "config/run-sync-scores-only.example.json",
+    "config/run-smoke-5x5.example.json",
+    "config/single-version-report.example.json",
     "config/scenarios.json",
-    "config/scenarios.example.json",
     "docs/architecture.md",
     "docs/data-contracts.md",
     "docs/decisions.md",
@@ -71,6 +74,7 @@ REQUIRED_PROJECT_FILES = (
     "docs/scene-weighting.md",
     "docs/storage.md",
     "docs/version-reporting.md",
+    "docs/single-version-reporting.md",
     "schemas/benchmark.schema.json",
     "schemas/batch-manifest.schema.json",
     "schemas/asset-sources.schema.json",
@@ -81,6 +85,8 @@ REQUIRED_PROJECT_FILES = (
     "schemas/judge-registry.schema.json",
     "schemas/interaction-profiles.schema.json",
     "schemas/model-version-report.schema.json",
+    "schemas/single-version-report-request.schema.json",
+    "schemas/single-version-report.schema.json",
     "schemas/operation-recipes.schema.json",
     "schemas/project-config.schema.json",
     "schemas/pipeline-selector.schema.json",
@@ -126,14 +132,20 @@ class Composition:
                     base_dir=self.PACKAGE_ROOT,
                 )
                 # Example paths are relative to the package (project) root.
-                self.project = {key: value for key, value in example.items() if not key.startswith("_")}
+                self.project = {
+                    key: value for key, value in example.items() if not key.startswith("_")
+                }
 
         self.database = SqliteMetadataRepository(
             self.project.get("database_path", str(self.root / "var" / "xmax-test.sqlite3")),
             clock=self.clock,
         )
-        self.artifacts = ArtifactStore(self.project.get("artifact_root", str(self.root / "var" / "artifacts")))
-        self.manifest_root = Path(self.project.get("manifest_root", str(self.root / "var" / "manifests")))
+        self.artifacts = ArtifactStore(
+            self.project.get("artifact_root", str(self.root / "var" / "artifacts"))
+        )
+        self.manifest_root = Path(
+            self.project.get("manifest_root", str(self.root / "var" / "manifests"))
+        )
         self.manifest_root.mkdir(parents=True, exist_ok=True)
 
         benchmark_path = self._path("benchmark_path", "BENCHMARK.md")
@@ -197,9 +209,7 @@ class Composition:
         judges_path = self.root / "config" / "judges.json"
         enabled = []
         if judges_path.is_file():
-            data = load_config(
-                judges_path, "judge-registry.schema.json", base_dir=self.root
-            )
+            data = load_config(judges_path, "judge-registry.schema.json", base_dir=self.root)
             enabled = [j for j in data.get("judges", []) if j.get("enabled")]
         for judge in enabled:
             entrypoint = judge.get("entrypoint", "")
@@ -214,6 +224,7 @@ class Composition:
                         judge_id=judge["judge_id"],
                         version=judge["version"],
                         supported_dimensions=judge.get("supported_dimensions", []),
+                        supported_criteria=judge.get("supported_criteria", []),
                         supported_modes=judge.get("supported_modes", ["offline", "realtime"]),
                         max_retries=int(judge.get("max_retries", 2)),
                         calibration_path=(
@@ -223,9 +234,7 @@ class Composition:
                             else judge.get("calibration", {}).get("path")
                         ),
                         max_examples_per_dimension=int(
-                            judge.get("calibration", {}).get(
-                                "max_examples_per_dimension", 2
-                            )
+                            judge.get("calibration", {}).get("max_examples_per_dimension", 2)
                         ),
                     )
                 )
@@ -249,15 +258,12 @@ class Composition:
 
         if judge is None:
             path = self.root / "config" / "judges.json"
-            data = load_config(
-                path, "judge-registry.schema.json", base_dir=self.root
-            )
+            data = load_config(path, "judge-registry.schema.json", base_dir=self.root)
             judge = next(
                 (
                     item
                     for item in data.get("judges", [])
-                    if item.get("enabled")
-                    and item.get("kind") in {"mlmm", "mlmm_cli"}
+                    if item.get("enabled") and item.get("kind") in {"mlmm", "mlmm_cli"}
                 ),
                 None,
             )
@@ -271,16 +277,13 @@ class Composition:
             provider_config = {
                 **self.project.get("codex", {}),
                 **provider_config,
-                "binary": entrypoint
-                or self.project.get("codex", {}).get("binary", "codex"),
+                "binary": entrypoint or self.project.get("codex", {}).get("binary", "codex"),
             }
         if provider_name == "codex_cli":
             return CodexCliProvider(
                 binary=provider_config.get("binary", "codex"),
                 timeout_s=int(
-                    provider_config.get(
-                        "timeout_seconds", judge.get("timeout_seconds", 300)
-                    )
+                    provider_config.get("timeout_seconds", judge.get("timeout_seconds", 300))
                 ),
                 sandbox=provider_config.get("sandbox", "read-only"),
                 model=provider_config.get("model"),
@@ -296,32 +299,22 @@ class Composition:
                 api_key_env=provider_config.get("api_key_env"),
                 credential_csv=credential_csv,
                 api_key_csv_field=provider_config.get("api_key_csv_field", "apiKey"),
-                endpoint_csv_field=provider_config.get(
-                    "endpoint_csv_field", "openAiCompatible"
-                ),
+                endpoint_csv_field=provider_config.get("endpoint_csv_field", "openAiCompatible"),
                 timeout_s=int(
-                    provider_config.get(
-                        "timeout_seconds", judge.get("timeout_seconds", 300)
-                    )
+                    provider_config.get("timeout_seconds", judge.get("timeout_seconds", 300))
                 ),
                 extra_headers=provider_config.get("extra_headers", {}),
-                response_format_type=provider_config.get(
-                    "response_format_type", "json_schema"
-                ),
+                response_format_type=provider_config.get("response_format_type", "json_schema"),
                 request_options=provider_config.get("request_options", {}),
                 direct_media=provider_config.get("direct_media", False),
                 video_options=provider_config.get("video_options", {}),
                 image_options=provider_config.get("image_options", {}),
-                max_base64_bytes=int(
-                    provider_config.get("max_base64_bytes", 10_000_000)
-                ),
+                max_base64_bytes=int(provider_config.get("max_base64_bytes", 10_000_000)),
             )
         if provider_name == "python_plugin":
             provider_entrypoint = provider_config.get("entrypoint", "")
             if ":" not in provider_entrypoint:
-                raise ConfigError(
-                    "python_plugin MLLM provider requires module:object entrypoint"
-                )
+                raise ConfigError("python_plugin MLLM provider requires module:object entrypoint")
             module_name, object_name = provider_entrypoint.split(":", 1)
             provider_class = getattr(importlib.import_module(module_name), object_name)
             return provider_class(**provider_config.get("kwargs", {}))
@@ -340,7 +333,9 @@ class Composition:
         path = self.root / "config" / "feishu.json"
         if path.is_file():
             return load_config(path, "feishu-config.schema.json")
-        return load_config(self.root / "config" / "feishu.example.json", "feishu-config.schema.json")
+        return load_config(
+            self.root / "config" / "feishu.example.json", "feishu-config.schema.json"
+        )
 
     # ------------------------------------------------------------------
     def offline_adapter(self, *, run_batch_id: str, model_id: str) -> Any:
@@ -355,9 +350,16 @@ class Composition:
         rtc = self.inject.get("rtc")
         if transport is not None or session_api is not None or rtc is not None:
             return build_offline_adapter(
-                run_repo, self.artifacts, self._media_validator(), run_repo,
-                transport=transport, session_api=session_api, rtc=rtc,
-                model_id=model_id, run_batch_id=run_batch_id, clock=self.clock,
+                run_repo,
+                self.artifacts,
+                self._media_validator(),
+                run_repo,
+                transport=transport,
+                session_api=session_api,
+                rtc=rtc,
+                model_id=model_id,
+                run_batch_id=run_batch_id,
+                clock=self.clock,
             )
         api_key = self.xmax_api_key()
         if not api_key:
@@ -371,14 +373,19 @@ class Composition:
             fps=self.project.get("xmax_offline_fps"),
         )
         return OfflineGenerationAdapter(
-            run_repo, self.artifacts, self._media_validator(), run_repo,
-            backend="rest", transport=transport, result_source=FakeResultSource(transport),
-            model_id=model_id, run_batch_id=run_batch_id, clock=self.clock,
+            run_repo,
+            self.artifacts,
+            self._media_validator(),
+            run_repo,
+            backend="rest",
+            transport=transport,
+            result_source=FakeResultSource(transport),
+            model_id=model_id,
+            run_batch_id=run_batch_id,
+            clock=self.clock,
         )
 
-    def realtime_controller(
-        self, *, run_batch_id: str, model_id: str, headed: bool = False
-    ) -> Any:
+    def realtime_controller(self, *, run_batch_id: str, model_id: str, headed: bool = False) -> Any:
         from .generation.realtime.controller import RealtimeController
 
         harness = self.inject.get("realtime_harness")
@@ -394,8 +401,12 @@ class Composition:
             )
 
         return RealtimeController(
-            self.database, self.artifacts, harness=harness, clock=self.clock,
-            model_id=model_id, run_batch_id=run_batch_id,
+            self.database,
+            self.artifacts,
+            harness=harness,
+            clock=self.clock,
+            model_id=model_id,
+            run_batch_id=run_batch_id,
             validator=self._media_validator() if harness is not None else None,
         )
 
@@ -453,7 +464,9 @@ class Composition:
         from .assets.sources import build_source
 
         def factory(item: dict) -> Any:
-            return build_source(item, client_factory=lambda kind: self.feishu_client(read_only=True))
+            return build_source(
+                item, client_factory=lambda kind: self.feishu_client(read_only=True)
+            )
 
         return factory
 
@@ -463,8 +476,15 @@ class Composition:
 
         registry = AssetRegistry(self.database, self.artifacts, self._media_validator())
         download_dir = download_dir or self.root / "var" / "downloads"
-        runner = SourceRunner(registry, self.asset_source_factory(download_dir), download_dir, clock=self.clock)
-        importer = ImportService(self.database, registry, self.recipes, download_dir, clock=self.clock)
+        runner = SourceRunner(
+            registry,
+            self.asset_source_factory(download_dir),
+            download_dir,
+            clock=self.clock,
+        )
+        importer = ImportService(
+            self.database, registry, self.recipes, download_dir, clock=self.clock
+        )
         return {"registry": registry, "runner": runner, "importer": importer}
 
     def _media_validator(self) -> Any:
@@ -513,6 +533,11 @@ class Composition:
             self.scenario_pack,
             schema,
         )
+
+    def single_version_reporting_service(self) -> Any:
+        from .reporting.single_version import SingleVersionReportService
+
+        return SingleVersionReportService(self.database, self.benchmark, self.scenario_pack)
 
     def score_schema(self) -> dict[str, Any]:
         return _score_schema_of(self.benchmark)
@@ -563,7 +588,31 @@ def cmd_db_check(composition: Composition, args: argparse.Namespace) -> int:
     from .storage.migrations import applied_migrations
 
     versions = sorted(applied_migrations(composition.database._conn))
-    _emit(args, "db.check", {"migrations": versions, "ok": bool(versions)})
+    current_benchmark = str(composition.benchmark.get("benchmark_version", ""))
+    evaluation_versions: dict[str, int] = {}
+    legacy_evaluation_ids: list[str] = []
+    for result in composition.database.list_evaluation_results():
+        version = str(result.get("benchmark_version") or "unknown")
+        evaluation_versions[version] = evaluation_versions.get(version, 0) + 1
+        if version != current_benchmark:
+            legacy_evaluation_ids.append(str(result.get("evaluation_id", "")))
+    _emit(
+        args,
+        "db.check",
+        {
+            "migrations": versions,
+            "ok": bool(versions),
+            "current_benchmark_version": current_benchmark,
+            "evaluation_versions": evaluation_versions,
+            "legacy_evaluation_count": len(legacy_evaluation_ids),
+            "legacy_evaluation_ids": sorted(legacy_evaluation_ids),
+            "legacy_action": (
+                "keep immutable; replay an exact Run Batch under the current Benchmark"
+                if legacy_evaluation_ids
+                else None
+            ),
+        },
+    )
     return 0 if versions else EXIT_INPUT_ERROR
 
 
@@ -580,14 +629,16 @@ def cmd_artifacts_verify(composition: Composition, args: argparse.Namespace) -> 
 
 def cmd_artifacts_gc(composition: Composition, args: argparse.Namespace) -> int:
     entries = composition.artifacts.gc(dry_run=args.dry_run)
-    _emit(args, "artifacts.gc", {"deleted": sum(1 for e in entries if e["deleted"]), "entries": entries})
+    _emit(
+        args,
+        "artifacts.gc",
+        {"deleted": sum(1 for e in entries if e["deleted"]), "entries": entries},
+    )
     return 0
 
 
 def cmd_context_check(composition: Composition, args: argparse.Namespace) -> int:
-    request = load_config(
-        Path(args.request), "run-request.schema.json", base_dir=composition.root
-    )
+    request = load_config(Path(args.request), "run-request.schema.json", base_dir=composition.root)
     checker = ContextChecker(composition.root)
     checker.check_run_request(request)
     summary = checker.summary()
@@ -596,9 +647,7 @@ def cmd_context_check(composition: Composition, args: argparse.Namespace) -> int
 
 
 def cmd_run(composition: Composition, args: argparse.Namespace) -> int:
-    request = load_config(
-        Path(args.request), "run-request.schema.json", base_dir=composition.root
-    )
+    request = load_config(Path(args.request), "run-request.schema.json", base_dir=composition.root)
     checked_request = {
         **request,
         "dry_run": bool(args.dry_run or request.get("dry_run")),
@@ -624,9 +673,7 @@ def cmd_run(composition: Composition, args: argparse.Namespace) -> int:
     return _execute_run_request(composition, request, args)
 
 
-def _contract_fingerprints(
-    composition: Composition, request: dict[str, Any]
-) -> dict[str, str]:
+def _contract_fingerprints(composition: Composition, request: dict[str, Any]) -> dict[str, str]:
     """Bind stage reuse to the exact benchmark, judges and Feishu projection."""
 
     from .hashing import content_hash
@@ -643,7 +690,10 @@ def _contract_fingerprints(
     for name, path in candidates.items():
         if path.is_file():
             result[name] = content_hash(
-                {"path": str(path.resolve()), "content": path.read_text(encoding="utf-8")}
+                {
+                    "path": str(path.resolve()),
+                    "content": path.read_text(encoding="utf-8"),
+                }
             )
     return result
 
@@ -675,9 +725,7 @@ def _execute_run_request(
             composition, request, stream_state
         )
     if "evaluate" in stages:
-        executors[PipelineStage.EVALUATE] = _evaluate_executor(
-            composition, request, stream_state
-        )
+        executors[PipelineStage.EVALUATE] = _evaluate_executor(composition, request, stream_state)
     if "report" in stages:
         executors[PipelineStage.REPORT] = _report_executor(composition, request, args)
     if "sync" in stages:
@@ -686,7 +734,11 @@ def _execute_run_request(
         executors[PipelineStage.RECONCILE] = _reconcile_executor(composition, request)
 
     orchestrator = PipelineOrchestrator(
-        composition.database, manifest_store, selectors, executors, clock=composition.clock
+        composition.database,
+        manifest_store,
+        selectors,
+        executors,
+        clock=composition.clock,
     )
     try:
         summary = orchestrator.run(
@@ -724,7 +776,9 @@ def _ingest_executor(composition: Composition, request: dict[str, Any], args: ar
         result = StageExecutionResult(status="completed", output_refs=[], batch_manifests=[])
         if existing:
             config = load_config(composition.root / existing, "existing-results.schema.json")
-            outcome = services["importer"].import_results(config, feishu_client=composition.feishu_client(read_only=True))
+            outcome = services["importer"].import_results(
+                config, feishu_client=composition.feishu_client(read_only=True)
+            )
             if outcome.run_batch_id:
                 from .pipeline.manifests import build_batch_manifest
 
@@ -732,7 +786,12 @@ def _ingest_executor(composition: Composition, request: dict[str, Any], args: ar
                     build_batch_manifest(
                         entity_type="run_batch",
                         item_entity_type="generation_run",
-                        item_ids=[r["run_id"] for r in composition.database.list_runs(run_batch_id=outcome.run_batch_id)],
+                        item_ids=[
+                            r["run_id"]
+                            for r in composition.database.list_runs(
+                                run_batch_id=outcome.run_batch_id
+                            )
+                        ],
                         producer_stage_run_id=req.stage_run_id,
                     )
                 )
@@ -768,9 +827,13 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
     def execute(req: StageExecutionRequest) -> StageExecutionResult:
         builder = composition.plan_builder()
         plan_request = {
-            "asset_batch_ids": [ref.entity_id for ref in req.input_refs if ref.entity_type == "asset_batch"],
+            "asset_batch_ids": [
+                ref.entity_id for ref in req.input_refs if ref.entity_type == "asset_batch"
+            ],
             "model_id": composition.project.get("default_model", "x2.0"),
-            "repeat_count": request.get("repeat_count", composition.project.get("default_repeats", 5)),
+            "repeat_count": request.get(
+                "repeat_count", composition.project.get("default_repeats", 5)
+            ),
             "generation_modes": request.get("generation_modes", ["offline"]),
             "generation_mode_overrides": request.get("generation_mode_overrides", []),
             "filters": request.get("filters", {}),
@@ -787,7 +850,9 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
         }
         if args.dry_run:
             preview = builder.preview(plan_request)
-            return StageExecutionResult(status="completed", output_refs=[], metadata={"preview": preview})
+            return StageExecutionResult(
+                status="completed", output_refs=[], metadata={"preview": preview}
+            )
         plan = builder.build(plan_request)
         from .pipeline.manifests import build_batch_manifest
 
@@ -797,7 +862,10 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
             item_ids=plan["task_ids"],
             producer_stage_run_id=req.stage_run_id,
             batch_id=plan["task_batch_id"],
-            metadata={"plan_id": plan["plan_id"], "allocation": plan["metadata"]["allocation"]},
+            metadata={
+                "plan_id": plan["plan_id"],
+                "allocation": plan["metadata"]["allocation"],
+            },
         )
         return StageExecutionResult(
             status="completed",
@@ -820,10 +888,23 @@ def _generate_executor(
 
     def execute(req: StageExecutionRequest) -> StageExecutionResult:
         if req.dry_run:
-            return StageExecutionResult(status="completed", output_refs=[], metadata={"dry_run": True})
+            return StageExecutionResult(
+                status="completed", output_refs=[], metadata={"dry_run": True}
+            )
         plan_ref = next((ref for ref in req.input_refs if ref.entity_type == "test_plan"), None)
         if plan_ref is None:
-            return StageExecutionResult(status="error", output_refs=[], errors=[{"code": "xmax.missing_input", "message": "generate requires a test_plan", "stage": "generate", "retryable": False}])
+            return StageExecutionResult(
+                status="error",
+                output_refs=[],
+                errors=[
+                    {
+                        "code": "xmax.missing_input",
+                        "message": "generate requires a test_plan",
+                        "stage": "generate",
+                        "retryable": False,
+                    }
+                ],
+            )
         plan = composition.database.get_test_plan(plan_ref.entity_id)
         model_id = composition.project.get("default_model", "x2.0")
         batch_id = f"runs-{plan.get('plan_hash', '')[:12]}"
@@ -835,9 +916,7 @@ def _generate_executor(
         # upload transport is unavailable or misconfigured. This prevents a
         # batch-wide storm of identical submit_failure rows.
         if any(case.get("generation_mode") == "offline" for case in cases):
-            offline_adapter = composition.offline_adapter(
-                run_batch_id=batch_id, model_id=model_id
-            )
+            offline_adapter = composition.offline_adapter(run_batch_id=batch_id, model_id=model_id)
             offline_adapter.preflight()
 
         def generate_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -845,9 +924,7 @@ def _generate_executor(
             if req.resume:
                 from .planning.builder import generation_signature
 
-                candidate_signature = case.get(
-                    "generation_signature"
-                ) or generation_signature(case)
+                candidate_signature = case.get("generation_signature") or generation_signature(case)
                 existing = [
                     run
                     for run in composition.database.list_runs(
@@ -859,9 +936,7 @@ def _generate_executor(
                 ]
                 matching = []
                 for run in existing:
-                    old_signature = run.get("metrics", {}).get(
-                        "generation_signature"
-                    )
+                    old_signature = run.get("metrics", {}).get("generation_signature")
                     if not old_signature:
                         try:
                             old_signature = generation_signature(
@@ -885,19 +960,16 @@ def _generate_executor(
                     realtime_controller = composition.realtime_controller(
                         run_batch_id=batch_id, model_id=model_id
                     )
-                return realtime_controller.run_case(
-                    case, composition.realtime_case_config(case)
-                )
+                return realtime_controller.run_case(case, composition.realtime_case_config(case))
             if offline_adapter is None:
                 offline_adapter = composition.offline_adapter(
                     run_batch_id=batch_id, model_id=model_id
                 )
             return offline_adapter.run_case(case)
 
-        streaming = (
-            request.get("execution_mode", "streaming") == "streaming"
-            and "preprocess" in request.get("stages", [])
-        )
+        streaming = request.get(
+            "execution_mode", "streaming"
+        ) == "streaming" and "preprocess" in request.get("stages", [])
         state = stream_state if stream_state is not None else {}
         errors: list[dict[str, Any]] = []
         metadata: dict[str, Any] = {"execution_mode": "batch"}
@@ -926,30 +998,30 @@ def _generate_executor(
                 and "sync" in request.get("stages", [])
                 and request.get("sync_policy", "none") != "none"
             )
-            sync_service = (
-                composition.feishu_sync_service() if inline_sync_enabled else None
-            )
+            sync_service = composition.feishu_sync_service() if inline_sync_enabled else None
             judge_config_path = composition.root / "config" / "judges.json"
             judge_config = (
                 json.loads(judge_config_path.read_text(encoding="utf-8"))
                 if judge_config_path.is_file()
                 else {}
             )
-            evaluation_batch_id = "eval-stream-" + content_hash(
-                {
-                    "plan_id": plan.get("plan_id"),
-                    "benchmark_version": composition.benchmark.get("benchmark_version"),
-                    "judge_config": judge_config,
-                    "preprocessor_version": PROCESSOR_VERSION,
-                }
-            )[:12]
+            evaluation_batch_id = (
+                "eval-stream-"
+                + content_hash(
+                    {
+                        "plan_id": plan.get("plan_id"),
+                        "benchmark_version": composition.benchmark.get("benchmark_version"),
+                        "judge_config": judge_config,
+                        "preprocessor_version": PROCESSOR_VERSION,
+                        "stage_run_id": req.stage_run_id,
+                    }
+                )[:12]
+            )
 
             def on_generated(run: dict[str, Any]) -> None:
                 composition.database.set_run_batch_id(run["run_id"], batch_id)
 
-            def evaluate_one(
-                run: dict[str, Any], preprocess: dict[str, Any]
-            ) -> dict[str, Any]:
+            def evaluate_one(run: dict[str, Any], preprocess: dict[str, Any]) -> dict[str, Any]:
                 existing = evaluation_repository.list_evaluation_results(  # type: ignore[union-attr]
                     run_id=run["run_id"],
                     evaluation_batch_id=evaluation_batch_id,
@@ -960,9 +1032,7 @@ def _generate_executor(
                     run, evaluation_batch_id, preprocess=preprocess
                 )
 
-            def sync_one(
-                run: dict[str, Any], evaluation: dict[str, Any]
-            ) -> dict[str, Any]:
+            def sync_one(run: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
                 return sync_service.sync_case_run(  # type: ignore[union-attr]
                     run,
                     evaluation,
@@ -977,9 +1047,7 @@ def _generate_executor(
                     sync_run=sync_one if inline_sync_enabled else None,
                     on_generated=on_generated,
                     queue_size=int(request.get("pipeline_queue_size", 4)),
-                    circuit_breaker_threshold=int(
-                        request.get("circuit_breaker_threshold", 3)
-                    ),
+                    circuit_breaker_threshold=int(request.get("circuit_breaker_threshold", 3)),
                 )
                 outcome = coordinator.run(cases)
             finally:
@@ -1066,9 +1134,22 @@ def _preprocess_executor(
             )
         service = composition.preprocess_service()
         preprocess_ids = []
-        run_batch_ref = next((ref for ref in req.input_refs if ref.entity_type == "run_batch"), None)
+        run_batch_ref = next(
+            (ref for ref in req.input_refs if ref.entity_type == "run_batch"), None
+        )
         if run_batch_ref is None:
-            return StageExecutionResult(status="error", output_refs=[], errors=[{"code": "xmax.missing_input", "message": "preprocess requires a run_batch", "stage": "preprocess", "retryable": False}])
+            return StageExecutionResult(
+                status="error",
+                output_refs=[],
+                errors=[
+                    {
+                        "code": "xmax.missing_input",
+                        "message": "preprocess requires a run_batch",
+                        "stage": "preprocess",
+                        "retryable": False,
+                    }
+                ],
+            )
         streamed = bool(
             stream_state
             and stream_state.get("active")
@@ -1076,9 +1157,7 @@ def _preprocess_executor(
         )
         errors: list[dict[str, Any]] = []
         if streamed:
-            preprocess_ids = [
-                item["preprocess_id"] for item in stream_state.get("preprocess", [])
-            ]
+            preprocess_ids = [item["preprocess_id"] for item in stream_state.get("preprocess", [])]
             errors = list(stream_state.get("errors", {}).get("preprocess", []))
         else:
             for run in composition.database.list_runs(run_batch_id=run_batch_ref.entity_id):
@@ -1122,6 +1201,7 @@ def _evaluate_executor(
     stream_state: dict[str, Any] | None = None,
 ):
     from .contracts import PipelineStage
+    from .evaluation.aggregation import aggregate_evaluation_results
     from .pipeline.manifests import build_batch_manifest
     from .pipeline.models import StageExecutionRequest, StageExecutionResult
 
@@ -1133,12 +1213,26 @@ def _evaluate_executor(
                 metadata={"dry_run": True, "evaluate": "validated_only"},
             )
         orchestrator = composition.evaluation_orchestrator()
-        run_batch_ref = next((ref for ref in req.input_refs if ref.entity_type == "run_batch"), None)
+        run_batch_ref = next(
+            (ref for ref in req.input_refs if ref.entity_type == "run_batch"), None
+        )
         preprocess_batch_ref = next(
-            (ref for ref in req.input_refs if ref.entity_type == "preprocess_batch"), None
+            (ref for ref in req.input_refs if ref.entity_type == "preprocess_batch"),
+            None,
         )
         if run_batch_ref is None or preprocess_batch_ref is None:
-            return StageExecutionResult(status="error", output_refs=[], errors=[{"code": "xmax.missing_input", "message": "evaluate requires both run_batch and preprocess_batch", "stage": "evaluate", "retryable": False}])
+            return StageExecutionResult(
+                status="error",
+                output_refs=[],
+                errors=[
+                    {
+                        "code": "xmax.missing_input",
+                        "message": "evaluate requires both run_batch and preprocess_batch",
+                        "stage": "evaluate",
+                        "retryable": False,
+                    }
+                ],
+            )
         streamed = bool(
             stream_state
             and stream_state.get("active")
@@ -1148,6 +1242,9 @@ def _evaluate_executor(
             results = list(stream_state.get("evaluations", []))
             errors = list(stream_state.get("errors", {}).get("evaluate", []))
             evaluation_batch_id = stream_state["evaluation_batch_id"]
+            runs = composition.database.list_runs(run_batch_id=run_batch_ref.entity_id)
+            results = orchestrator.finalize_batch_context(runs, results)
+            aggregate = aggregate_evaluation_results(results)
             manifest = build_batch_manifest(
                 entity_type="evaluation_batch",
                 item_entity_type="evaluation_result",
@@ -1155,9 +1252,11 @@ def _evaluate_executor(
                 producer_stage_run_id=req.stage_run_id,
                 batch_id=evaluation_batch_id,
                 metadata={
+                    **stream_state.get("metadata", {}),
                     "execution_mode": "streaming",
                     "streamed_during_generation": True,
-                    **stream_state.get("metadata", {}),
+                    "score_source": "criterion_results",
+                    "aggregate": aggregate,
                 },
             )
             return StageExecutionResult(
@@ -1177,7 +1276,18 @@ def _evaluate_executor(
             preprocess_by_run[item["run_id"]] = item
         missing = [run["run_id"] for run in runs if run["run_id"] not in preprocess_by_run]
         if missing:
-            return StageExecutionResult(status="error", output_refs=[], errors=[{"code": "xmax.missing_input", "message": f"preprocess_batch does not cover runs: {missing}", "stage": "evaluate", "retryable": False}])
+            return StageExecutionResult(
+                status="error",
+                output_refs=[],
+                errors=[
+                    {
+                        "code": "xmax.missing_input",
+                        "message": f"preprocess_batch does not cover runs: {missing}",
+                        "stage": "evaluate",
+                        "retryable": False,
+                    }
+                ],
+            )
         summary = orchestrator.evaluate_runs(runs, preprocess_by_run)
         manifest = build_batch_manifest(
             entity_type="evaluation_batch",
@@ -1185,7 +1295,11 @@ def _evaluate_executor(
             item_ids=[r["evaluation_id"] for r in summary.get("results", [])],
             producer_stage_run_id=req.stage_run_id,
             batch_id=summary.get("evaluation_batch_id"),
-            metadata={"execution_mode": "batch"},
+            metadata={
+                "execution_mode": "batch",
+                "score_source": "criterion_results",
+                "aggregate": summary.get("aggregate", {}),
+            },
         )
         return StageExecutionResult(
             status="completed" if not summary.get("errors") else "partial",
@@ -1214,13 +1328,27 @@ def _report_executor(composition: Composition, request: dict[str, Any], args: ar
             comparison_id=comparison.get("comparison_id", "model-update"),
             baseline_model_version=comparison.get("baseline_model_version", ""),
             candidate_model_version=comparison.get("candidate_model_version", ""),
+            baseline_run_batch_id=comparison.get("baseline_run_batch_id", ""),
+            candidate_run_batch_id=comparison.get("candidate_run_batch_id", ""),
+            baseline_evaluation_batch_id=comparison.get("baseline_evaluation_batch_id", ""),
+            candidate_evaluation_batch_id=comparison.get("candidate_evaluation_batch_id", ""),
             requested_scene_ids=comparison.get("requested_scene_ids", []),
-            template_path=composition._path("report_template_path", "report-templates/model-version-update-report.md")
+            template_path=composition._path(
+                "report_template_path",
+                "report-templates/model-version-update-report.md",
+            )
             if "report_template_path" in comparison
-            else composition.root / comparison.get("report_template_path", "report-templates/model-version-update-report.md"),
-            output_directory=composition._path("report_output_directory", "var/reports/model-version-updates")
+            else composition.root
+            / comparison.get(
+                "report_template_path",
+                "report-templates/model-version-update-report.md",
+            ),
+            output_directory=composition._path(
+                "report_output_directory", "var/reports/model-version-updates"
+            )
             if "report_output_directory" in comparison
-            else composition.root / comparison.get("report_output_directory", "var/reports/model-version-updates"),
+            else composition.root
+            / comparison.get("report_output_directory", "var/reports/model-version-updates"),
         )
         return StageExecutionResult(status="completed", output_refs=[], metadata=result)
 
@@ -1237,7 +1365,10 @@ def _sync_executor(composition: Composition, request: dict[str, Any], args: argp
             return StageExecutionResult(
                 status="completed",
                 output_refs=[],
-                metadata={"dry_run": True, "policy": request.get("sync_policy", "full")},
+                metadata={
+                    "dry_run": True,
+                    "policy": request.get("sync_policy", "full"),
+                },
             )
         policy = request.get("sync_policy", "full")
         service = composition.feishu_sync_service()
@@ -1254,31 +1385,39 @@ def _sync_executor(composition: Composition, request: dict[str, Any], args: argp
                         return StageExecutionResult(
                             status="error",
                             output_refs=[],
-                            errors=[{
-                                "code": "xmax.ambiguous_input",
-                                "message": (
-                                    f"multiple selected EvaluationResults for Run {item['run_id']}: "
-                                    f"{previous.get('evaluation_id')} and {item.get('evaluation_id')}"
-                                ),
-                                "stage": "sync",
-                                "retryable": False,
-                            }],
+                            errors=[
+                                {
+                                    "code": "xmax.ambiguous_input",
+                                    "message": (
+                                        f"multiple selected EvaluationResults for Run {item['run_id']}: "
+                                        f"{previous.get('evaluation_id')} and {item.get('evaluation_id')}"
+                                    ),
+                                    "stage": "sync",
+                                    "retryable": False,
+                                }
+                            ],
                         )
                     evaluations[item["run_id"]] = item
-                runs.extend(
-                    composition.database.get_run(item["run_id"]) for item in results
-                )
+                runs.extend(composition.database.get_run(item["run_id"]) for item in results)
             elif ref.entity_type == "run_batch":
-                manifest = composition.database.get_batch_manifest(
-                    "run_batch", ref.entity_id
-                )
+                manifest = composition.database.get_batch_manifest("run_batch", ref.entity_id)
                 runs.extend(
-                    composition.database.get_run(run_id)
-                    for run_id in manifest.get("item_ids", [])
+                    composition.database.get_run(run_id) for run_id in manifest.get("item_ids", [])
                 )
         runs = list({run["run_id"]: run for run in runs}.values())
         if not runs:
-            return StageExecutionResult(status="error", output_refs=[], errors=[{"code": "xmax.missing_input", "message": "sync selector resolved to no generation runs", "stage": "sync", "retryable": False}])
+            return StageExecutionResult(
+                status="error",
+                output_refs=[],
+                errors=[
+                    {
+                        "code": "xmax.missing_input",
+                        "message": "sync selector resolved to no generation runs",
+                        "stage": "sync",
+                        "retryable": False,
+                    }
+                ],
+            )
         summary = service.sync_case_runs(
             runs, evaluations=evaluations, policy=policy, dry_run=args.dry_run
         )
@@ -1320,23 +1459,21 @@ def _reconcile_executor(composition: Composition, request: dict[str, Any]):
                 output_refs=[],
                 metadata={"dry_run": True, "reconcile": "skipped in dry-run"},
             )
-        sync_ref = next(
-            (ref for ref in req.input_refs if ref.entity_type == "sync_batch"), None
-        )
+        sync_ref = next((ref for ref in req.input_refs if ref.entity_type == "sync_batch"), None)
         if sync_ref is None:
             return StageExecutionResult(
                 status="error",
                 output_refs=[],
-                errors=[{
-                    "code": "xmax.missing_input",
-                    "message": "reconcile requires a sync_batch",
-                    "stage": "reconcile",
-                    "retryable": False,
-                }],
+                errors=[
+                    {
+                        "code": "xmax.missing_input",
+                        "message": "reconcile requires a sync_batch",
+                        "stage": "reconcile",
+                        "retryable": False,
+                    }
+                ],
             )
-        sync_manifest = composition.database.get_batch_manifest(
-            "sync_batch", sync_ref.entity_id
-        )
+        sync_manifest = composition.database.get_batch_manifest("sync_batch", sync_ref.entity_id)
         selected = {
             item["run_id"]: item
             for evaluation_id in sync_manifest.get("metadata", {}).get(
@@ -1352,7 +1489,16 @@ def _reconcile_executor(composition: Composition, request: dict[str, Any]):
             status="completed" if outcome.get("ok") else "partial",
             output_refs=[],
             metadata={"reconcile": outcome},
-            errors=[] if outcome.get("ok") else [{"code": "xmax.conflict", "message": "reconcile differences found", "stage": "reconcile", "retryable": True}],
+            errors=[]
+            if outcome.get("ok")
+            else [
+                {
+                    "code": "xmax.conflict",
+                    "message": "reconcile differences found",
+                    "stage": "reconcile",
+                    "retryable": True,
+                }
+            ],
         )
 
     return _stage_wrapper(PipelineStage.RECONCILE, execute)
@@ -1393,7 +1539,9 @@ def cmd_ingest_assets(composition: Composition, args: argparse.Namespace) -> int
 def cmd_ingest_results(composition: Composition, args: argparse.Namespace) -> int:
     services = composition.ingest_service()
     config = load_config(composition.root / args.config, "existing-results.schema.json")
-    outcome = services["importer"].import_results(config, feishu_client=composition.feishu_client(read_only=True))
+    outcome = services["importer"].import_results(
+        config, feishu_client=composition.feishu_client(read_only=True)
+    )
     data = outcome.to_dict()
     _emit(args, "ingest.results", data, ok=outcome.status in {"completed", "skipped"})
     return 0 if outcome.status in {"completed", "skipped"} else EXIT_PARTIAL
@@ -1414,9 +1562,7 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
         "generation_mode_overrides": request.get("generation_mode_overrides", []),
         "filters": request.get("filters", {}),
         "seed": request.get("seed"),
-        "combination_selection": request.get(
-            "combination_selection", {"strategy": "cartesian"}
-        ),
+        "combination_selection": request.get("combination_selection", {"strategy": "cartesian"}),
         "generation_config": {
             "quality": composition.project.get("xmax_offline_quality", "hd"),
             "fps": composition.project.get("xmax_offline_fps", 24),
@@ -1438,7 +1584,9 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
             batch_id=data["task_batch_id"],
             metadata={"plan_id": data["plan_id"]},
         )
-        ManifestStore(composition.manifest_root, composition.database).save_batch_manifest(task_manifest)
+        ManifestStore(composition.manifest_root, composition.database).save_batch_manifest(
+            task_manifest
+        )
     _emit(args, f"plan.{args.action}", data)
     return 0
 
@@ -1546,7 +1694,10 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
     from .pipeline.manifests import build_batch_manifest
 
     manifest = build_batch_manifest(
-        entity_type="run_batch", item_entity_type="generation_run", item_ids=run_ids, producer_stage_run_id="cli-generate"
+        entity_type="run_batch",
+        item_entity_type="generation_run",
+        item_ids=run_ids,
+        producer_stage_run_id="cli-generate",
     )
     composition.database.save_batch_manifest(manifest)
     _emit(args, "generate.offline", {"run_batch_id": batch_id, "run_ids": run_ids})
@@ -1575,16 +1726,17 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
             if existing:
                 run_ids.append(existing[0]["run_id"])
                 continue
-        run = controller.run_case(
-            case, composition.realtime_case_config(case, headed=args.headed)
-        )
+        run = controller.run_case(case, composition.realtime_case_config(case, headed=args.headed))
         run_ids.append(run["run_id"])
     for run_id in run_ids:
         composition.database.set_run_batch_id(run_id, batch_id)
     from .pipeline.manifests import build_batch_manifest
 
     manifest = build_batch_manifest(
-        entity_type="run_batch", item_entity_type="generation_run", item_ids=run_ids, producer_stage_run_id="cli-generate-rt"
+        entity_type="run_batch",
+        item_entity_type="generation_run",
+        item_ids=run_ids,
+        producer_stage_run_id="cli-generate-rt",
     )
     composition.database.save_batch_manifest(manifest)
     _emit(args, "generate.realtime", {"run_batch_id": batch_id, "run_ids": run_ids})
@@ -1606,14 +1758,22 @@ def cmd_preprocess(composition: Composition, args: argparse.Namespace) -> int:
         producer_stage_run_id="cli-preprocess",
     )
     composition.database.save_batch_manifest(manifest)
-    _emit(args, "preprocess", {"run_batch_id": args.run_batch_id, "preprocess_batch_id": manifest["batch_id"], "preprocess_ids": preprocess_ids})
+    _emit(
+        args,
+        "preprocess",
+        {
+            "run_batch_id": args.run_batch_id,
+            "preprocess_batch_id": manifest["batch_id"],
+            "preprocess_ids": preprocess_ids,
+        },
+    )
     return 0
 
 
 def cmd_evaluate(composition: Composition, args: argparse.Namespace) -> int:
     orchestrator = composition.evaluation_orchestrator()
     runs = composition.database.list_runs(run_batch_id=args.run_batch_id)
-    summary = orchestrator.evaluate_runs(runs)
+    summary = orchestrator.evaluate_runs(runs, resume=args.resume)
     _emit(args, "evaluate", summary, ok=not summary.get("errors"))
     return 0 if not summary.get("errors") else EXIT_PARTIAL
 
@@ -1638,7 +1798,9 @@ def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
             from .pipeline.selectors import SelectorResolver
 
             selector = json.loads(selector_path.read_text(encoding="utf-8"))
-            frozen = SelectorResolver(composition.database, composition.manifest_root).resolve(selector)
+            frozen = SelectorResolver(composition.database, composition.manifest_root).resolve(
+                selector
+            )
             entity_type = frozen["entity_type"]
             for entity_id in frozen["resolved_entity_ids"]:
                 if entity_type == "evaluation_batch":
@@ -1678,14 +1840,25 @@ def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
         runs,
         evaluations=evaluations,
         policy=args.policy,
-        dry_run=args.action == "dry-run" or args.dry_run,
+        dry_run=args.action == "dry-run",
     )
     _emit(args, "sync", summary, ok=not summary["errors"])
     return 0 if not summary["errors"] else EXIT_PARTIAL
 
 
 def cmd_reconcile(composition: Composition, args: argparse.Namespace) -> int:
-    outcome = composition.feishu_reconcile().reconcile(run_batch_id=args.sync_batch_id)
+    if args.sync_batch_id:
+        manifest = composition.database.get_batch_manifest("sync_batch", args.sync_batch_id)
+        selected = {
+            item["run_id"]: item
+            for evaluation_id in manifest.get("metadata", {}).get("selected_evaluation_ids", [])
+            for item in [composition.database.get_evaluation_result(evaluation_id)]
+        }
+        outcome = composition.feishu_reconcile().reconcile(
+            run_ids=manifest.get("item_ids", []), evaluations=selected
+        )
+    else:
+        outcome = composition.feishu_reconcile().reconcile(run_batch_id=args.run_batch_id)
     _emit(args, "reconcile", outcome, ok=outcome.get("ok", False))
     return 0 if outcome.get("ok") else EXIT_PARTIAL
 
@@ -1722,16 +1895,39 @@ def _guess_entity_type(batch_id: str) -> str:
 
 
 def cmd_report(composition: Composition, args: argparse.Namespace) -> int:
-    request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    if args.action == "single-version":
+        request = load_config(
+            composition.root / args.request,
+            "single-version-report-request.schema.json",
+            base_dir=composition.root,
+        )
+        result = composition.single_version_reporting_service().generate(
+            report_id=request["report_id"],
+            model_version=request["model_version"],
+            run_batch_id=request["run_batch_id"],
+            evaluation_batch_id=request["evaluation_batch_id"],
+            requested_scene_ids=request.get("requested_scene_ids"),
+            output_directory=composition.root
+            / request.get("output_directory", "var/reports/single-version"),
+        )
+        _emit(args, "report.single-version", result)
+        return 0
+    request = json.loads((composition.root / args.request).read_text(encoding="utf-8"))
     comparison = request.get("comparison", {})
     service = composition.reporting_service()
     result = service.generate(
         comparison_id=comparison.get("comparison_id", "model-update"),
         baseline_model_version=comparison.get("baseline_model_version", ""),
         candidate_model_version=comparison.get("candidate_model_version", ""),
+        baseline_run_batch_id=comparison.get("baseline_run_batch_id", ""),
+        candidate_run_batch_id=comparison.get("candidate_run_batch_id", ""),
+        baseline_evaluation_batch_id=comparison.get("baseline_evaluation_batch_id", ""),
+        candidate_evaluation_batch_id=comparison.get("candidate_evaluation_batch_id", ""),
         requested_scene_ids=comparison.get("requested_scene_ids", []),
-        template_path=composition.root / comparison.get("report_template_path", "report-templates/model-version-update-report.md"),
-        output_directory=composition.root / comparison.get("report_output_directory", "var/reports/model-version-updates"),
+        template_path=composition.root
+        / comparison.get("report_template_path", "report-templates/model-version-update-report.md"),
+        output_directory=composition.root
+        / comparison.get("report_output_directory", "var/reports/model-version-updates"),
     )
     _emit(args, "report.model-update", result)
     return 0
@@ -1741,7 +1937,11 @@ def cmd_judges(composition: Composition, args: argparse.Namespace) -> int:
     if args.action == "list":
         data = {
             "judges": [
-                {"judge_id": item.judge_id, "version": item.version, "manifest": item.manifest}
+                {
+                    "judge_id": item.judge_id,
+                    "version": item.version,
+                    "manifest": item.manifest,
+                }
                 for item in sorted(
                     [item for item in composition.judges._judges.values()],
                     key=lambda i: (i.judge_id, i.version),
@@ -1750,7 +1950,7 @@ def cmd_judges(composition: Composition, args: argparse.Namespace) -> int:
         }
     elif args.action == "check":
         data = {"ok": True, "message": "judge registry loaded"}
-    else:
+    elif args.action == "run":
         context = json.loads((composition.root / args.context).read_text(encoding="utf-8"))
         registered = composition.judges.get(args.judge_id, args.version)
         judgments = registered.plugin.evaluate(context)
@@ -1759,6 +1959,19 @@ def cmd_judges(composition: Composition, args: argparse.Namespace) -> int:
             "version": args.version,
             "judgments": judgments,
         }
+    elif args.action == "promote":
+        from .judges.releases import JudgeReleaseService
+
+        validation = json.loads((composition.root / args.validation).read_text(encoding="utf-8"))
+        data = JudgeReleaseService(composition.database).promote(
+            args.judge_id, args.version, validation
+        )
+    else:
+        from .judges.releases import JudgeReleaseService
+
+        data = JudgeReleaseService(composition.database).rollback(
+            args.judge_id, args.version, args.reason
+        )
     _emit(args, f"judges.{args.action}", data)
     return 0
 
@@ -1789,9 +2002,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    p = subparsers.add_parser("project-check", help="verify the required project scaffold")
+    p = subparsers.add_parser("project-check", help="verify required project files")
 
-    p = subparsers.add_parser("benchmark-check", help="validate the contract embedded in BENCHMARK.md")
+    p = subparsers.add_parser(
+        "benchmark-check", help="validate the contract embedded in BENCHMARK.md"
+    )
     p.add_argument("--path", type=Path, default=None)
     p.add_argument("--scenario-pack", type=Path, default=None)
 
@@ -1853,7 +2068,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_run.add_argument("--task-id", required=True)
     task_run.add_argument("--lease-owner", required=True)
     task_run.add_argument("--lease-seconds", type=int, default=900)
-    task_run.add_argument("--sync-policy", choices=["none", "score_only", "metadata_only", "attachments_only", "full"], default="full")
+    task_run.add_argument(
+        "--sync-policy",
+        choices=["none", "score_only", "metadata_only", "attachments_only", "full"],
+        default="full",
+    )
     task_run.add_argument("--no-reconcile", action="store_true")
     task_run.add_argument("--headed", action="store_true")
     task_run.add_argument("--resume", action="store_true")
@@ -1868,14 +2087,17 @@ def build_parser() -> argparse.ArgumentParser:
     worker_run.add_argument("--lease-owner", required=True)
     worker_run.add_argument("--lease-seconds", type=int, default=900)
     worker_run.add_argument("--max-tasks", type=int)
-    worker_run.add_argument("--sync-policy", choices=["none", "score_only", "metadata_only", "attachments_only", "full"], default="full")
+    worker_run.add_argument(
+        "--sync-policy",
+        choices=["none", "score_only", "metadata_only", "attachments_only", "full"],
+        default="full",
+    )
     worker_run.add_argument("--no-reconcile", action="store_true")
     worker_run.add_argument("--headed", action="store_true")
     worker_run.add_argument("--budget-approved", action="store_true")
 
     p = subparsers.add_parser("preprocess", help="build preprocessing evidence")
     p.add_argument("--run-batch-id", required=True)
-    p.add_argument("--resume", action="store_true")
 
     p = subparsers.add_parser("evaluate", help="evaluate a completed run batch")
     p.add_argument("--run-batch-id", required=True)
@@ -1895,10 +2117,21 @@ def build_parser() -> argparse.ArgumentParser:
     partition_parser = sub.add_parser("partition")
     partition_parser.add_argument("--output", required=True)
     partition_parser.add_argument("--repartition", action="store_true")
+    override_parser = sub.add_parser("apply-overrides")
+    override_parser.add_argument("--signal-id", action="append", default=[])
+    challenger_parser = sub.add_parser("build-challenger")
+    challenger_parser.add_argument("--judge-id", required=True)
+    challenger_parser.add_argument("--version", required=True)
+    challenger_parser.add_argument("--route", choices=["cv", "mlmm", "fusion"], required=True)
+    challenger_parser.add_argument("--train", required=True)
+    challenger_parser.add_argument("--output-directory", default="var/learning/challengers")
+    challenger_parser.add_argument("--trainer-entrypoint")
+    challenger_parser.add_argument("--base-version")
 
     p = subparsers.add_parser("report", help="generate reports")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("model-update").add_argument("--request", required=True)
+    sub.add_parser("single-version").add_argument("--request", required=True)
 
     p = subparsers.add_parser("sync", help="feishu sync")
     sub = p.add_subparsers(dest="action", required=True)
@@ -1909,11 +2142,11 @@ def build_parser() -> argparse.ArgumentParser:
         selector_group.add_argument("--evaluation-batch-id")
         selector_group.add_argument("--run-batch-id")
         sync_parser.add_argument("--policy", default="full")
-        sync_parser.add_argument("--resume", action="store_true")
-        sync_parser.add_argument("--dry-run", action="store_true")
 
     p = subparsers.add_parser("reconcile", help="feishu reconcile")
-    p.add_argument("--sync-batch-id")
+    reconcile_selector = p.add_mutually_exclusive_group()
+    reconcile_selector.add_argument("--sync-batch-id")
+    reconcile_selector.add_argument("--run-batch-id")
 
     p = subparsers.add_parser("stage", help="stage inspection")
     sub = p.add_subparsers(dest="action", required=True)
@@ -1931,6 +2164,14 @@ def build_parser() -> argparse.ArgumentParser:
     judge_run.add_argument("--judge-id", required=True)
     judge_run.add_argument("--version", required=True)
     judge_run.add_argument("--context", required=True)
+    judge_promote = sub.add_parser("promote")
+    judge_promote.add_argument("--judge-id", required=True)
+    judge_promote.add_argument("--version", required=True)
+    judge_promote.add_argument("--validation", required=True)
+    judge_rollback = sub.add_parser("rollback")
+    judge_rollback.add_argument("--judge-id", required=True)
+    judge_rollback.add_argument("--version", required=True)
+    judge_rollback.add_argument("--reason", required=True)
 
     p = subparsers.add_parser("replay", help="replay old runs with new benchmark")
     sub = p.add_subparsers(dest="action", required=True)
@@ -1978,10 +2219,29 @@ def main(argv: list[str] | None = None) -> int:
             raise AssertionError(f"unhandled command: {args.command}")
         return handler(composition, args)
     except XmaxTestError as exc:
-        _emit(args, getattr(args, "command", "xmax"), {"errors": [exc.to_dict()]}, ok=False)
+        _emit(
+            args,
+            getattr(args, "command", "xmax"),
+            {"errors": [exc.to_dict()]},
+            ok=False,
+        )
         return exc.exit_code
     except Exception as exc:  # pragma: no cover - defensive
-        _emit(args, getattr(args, "command", "xmax"), {"errors": [{"code": "xmax.internal", "message": str(exc), "stage": "general", "retryable": False}]}, ok=False)
+        _emit(
+            args,
+            getattr(args, "command", "xmax"),
+            {
+                "errors": [
+                    {
+                        "code": "xmax.internal",
+                        "message": str(exc),
+                        "stage": "general",
+                        "retryable": False,
+                    }
+                ]
+            },
+            ok=False,
+        )
         return EXIT_INTERNAL
     finally:
         composition.close()
@@ -2071,11 +2331,17 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
             if proposal:
                 proposal_id = f"proposal-{item['signal_id']}"
                 proposal_service.propose(
-                    {**proposal, "proposal_id": proposal_id, "source_signal_id": item["signal_id"]}
+                    {
+                        **proposal,
+                        "proposal_id": proposal_id,
+                        "source_signal_id": item["signal_id"],
+                    }
                 )
             normalized.append(item["signal_id"])
 
-        def normalize_one(signal: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        def normalize_one(
+            signal: dict[str, Any],
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
             return signal, normalizer.normalize(signal, composition.benchmark)
 
         if args.workers == 1:
@@ -2112,9 +2378,54 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
                             }
                         )
 
-        data = {"normalized": len(normalized), "signal_ids": normalized, "errors": errors}
+        data = {
+            "normalized": len(normalized),
+            "signal_ids": normalized,
+            "errors": errors,
+        }
         _emit(args, "human.normalize", data, ok=not errors)
         return 0 if not errors else EXIT_PARTIAL
+
+    if args.action == "apply-overrides":
+        from .feedback.overrides import HumanOverrideService
+
+        requested = set(args.signal_id)
+        signals = composition.database.list_human_signals()
+        if requested:
+            signals = [item for item in signals if item.get("signal_id") in requested]
+        service = HumanOverrideService(composition.database)
+        applied = []
+        errors = []
+        for signal in signals:
+            try:
+                applied.append(service.apply_signal(signal))
+            except Exception as exc:
+                errors.append(
+                    {
+                        "code": "xmax.human_override_failed",
+                        "message": f"{signal.get('signal_id')}: {exc}",
+                        "stage": "feedback",
+                        "retryable": False,
+                    }
+                )
+        data = {"applied": len(applied), "overrides": applied, "errors": errors}
+        _emit(args, "human.apply-overrides", data, ok=not errors)
+        return 0 if not errors else EXIT_PARTIAL
+
+    if args.action == "build-challenger":
+        from .feedback.training import HumanLearningService
+
+        data = HumanLearningService(composition.database).build_challenger(
+            judge_id=args.judge_id,
+            version=args.version,
+            route_kind=args.route,
+            train_path=composition.root / args.train,
+            output_directory=composition.root / args.output_directory,
+            trainer_entrypoint=args.trainer_entrypoint,
+            base_version=args.base_version,
+        )
+        _emit(args, "human.build-challenger", data)
+        return 0
 
     from .feedback.router import LearningRouter
 
@@ -2151,17 +2462,14 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
         partition_path = output.with_name(f"{output.stem}.{partition}{suffix}")
         partition_path.write_text(
             "".join(
-                json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
-                for item in packets
+                json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in packets
             ),
             encoding="utf-8",
         )
         partition_outputs[partition] = str(partition_path)
     data = {
         "exported": len(candidates),
-        "partition_counts": {
-            key: len(value) for key, value in packets_by_partition.items()
-        },
+        "partition_counts": {key: len(value) for key, value in packets_by_partition.items()},
         "excluded": excluded,
         "output": str(output),
         "partition_outputs": partition_outputs,
@@ -2175,7 +2483,12 @@ def _replay_run(composition: Composition, args: argparse.Namespace) -> int:
     from .evaluation.replay import ReplayService
 
     runs = composition.database.list_runs(run_batch_id=args.run_batch_id)
-    service = ReplayService(composition.database, composition.evaluation_orchestrator(), composition.artifacts, clock=composition.clock)
+    service = ReplayService(
+        composition.database,
+        composition.evaluation_orchestrator(),
+        composition.artifacts,
+        clock=composition.clock,
+    )
     data = service.replay_runs(runs)
     _emit(args, "replay.run", data)
     return 0
@@ -2191,9 +2504,7 @@ def _release_action(composition: Composition, args: argparse.Namespace) -> int:
         holdout_results = payload if isinstance(payload, list) else payload.get("results", [])
         data = service.validate(holdout_results=holdout_results, threshold=args.threshold)
     elif args.action == "promote":
-        validation = json.loads(
-            (composition.root / args.validation).read_text(encoding="utf-8")
-        )
+        validation = json.loads((composition.root / args.validation).read_text(encoding="utf-8"))
         data = service.promote(validation, operator=args.operator)
     else:
         data = service.rollback(args.previous_version, operator=args.operator)
@@ -2205,14 +2516,20 @@ _HANDLERS: dict[str, Callable[[Composition, argparse.Namespace], int]] = {
     "project-check": cmd_project_check,
     "benchmark-check": cmd_benchmark_check,
     "db": lambda c, a: cmd_db_migrate(c, a) if a.action == "migrate" else cmd_db_check(c, a),
-    "artifacts": lambda c, a: cmd_artifacts_verify(c, a) if a.action == "verify" else cmd_artifacts_gc(c, a),
+    "artifacts": lambda c, a: (
+        cmd_artifacts_verify(c, a) if a.action == "verify" else cmd_artifacts_gc(c, a)
+    ),
     "context-check": cmd_context_check,
     "run": cmd_run,
-    "ingest": lambda c, a: cmd_ingest_assets(c, a) if a.action == "assets" else cmd_ingest_results(c, a),
+    "ingest": lambda c, a: (
+        cmd_ingest_assets(c, a) if a.action == "assets" else cmd_ingest_results(c, a)
+    ),
     "plan": cmd_plan,
     "task": cmd_task,
     "worker": cmd_worker,
-    "generate": lambda c, a: cmd_generate_offline(c, a) if a.action == "offline" else cmd_generate_realtime(c, a),
+    "generate": lambda c, a: (
+        cmd_generate_offline(c, a) if a.action == "offline" else cmd_generate_realtime(c, a)
+    ),
     "preprocess": cmd_preprocess,
     "evaluate": cmd_evaluate,
     "report": cmd_report,

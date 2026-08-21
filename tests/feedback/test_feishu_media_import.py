@@ -50,9 +50,7 @@ class FeishuHumanImportTests(unittest.TestCase):
         client = FakeFeishuSyncClient(existing_records=records)
         media = CapturingMediaImporter()
         with tempfile.TemporaryDirectory() as directory:
-            importer = FeishuHumanDatasetImporter(
-                client, media, download_root=Path(directory)
-            )
+            importer = FeishuHumanDatasetImporter(client, media, download_root=Path(directory))
             result = importer.import_source(
                 {
                     "source_id": "human",
@@ -64,7 +62,10 @@ class FeishuHumanImportTests(unittest.TestCase):
                 }
             )
         self.assertEqual(result["candidate_samples"], 2)
-        self.assertEqual({item["attachment_token"] for item in media.records}, {"old-first", "new-first"})
+        self.assertEqual(
+            {item["attachment_token"] for item in media.records},
+            {"old-first", "new-first"},
+        )
         self.assertTrue(all(item["raw_text"] == "新版的肢体问题减少" for item in media.records))
         self.assertNotIn("新版模型Prompt生成成功率", media.records[0])
 

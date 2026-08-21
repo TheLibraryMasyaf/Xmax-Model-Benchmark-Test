@@ -9,6 +9,8 @@ Judge只输出分项Judgment，不感知最终权重。Fusion读取Benchmark和S
 - Canonical Score：固定Profile，跨场景对比。
 - Scenario Score：按场景规则调整，评估具体使用场景。
 
+细则层当前等权：每个维度先计算`sum(可评细则分) / (2 × 可评细则数)`，再应用维度场景权重。场景权重不会改变维度内部细则分。未来如需细则权重，必须发布新Benchmark/Score Schema并Replay，不得在报告器或Judge里临时加权。
+
 ## 2. 合同
 
 Benchmark合同包含：

@@ -45,9 +45,7 @@ class CodexCliProvider:
             raise MissingDependencyError(f"codex binary not found: {self._binary}")
         with tempfile.TemporaryDirectory(prefix="xmax-mlmm-codex-") as directory:
             schema_path = Path(directory) / "output.schema.json"
-            schema_path.write_text(
-                json.dumps(output_schema, ensure_ascii=False), encoding="utf-8"
-            )
+            schema_path.write_text(json.dumps(output_schema, ensure_ascii=False), encoding="utf-8")
             command = [
                 self._binary,
                 "exec",
@@ -78,9 +76,7 @@ class CodexCliProvider:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise ExternalServiceError(f"codex exec failed: {exc}") from exc
         if result.returncode != 0:
-            raise ExternalServiceError(
-                f"codex exited {result.returncode}: {result.stderr[-500:]}"
-            )
+            raise ExternalServiceError(f"codex exited {result.returncode}: {result.stderr[-500:]}")
         raw_text = result.stdout.strip()
         try:
             payload = json.loads(raw_text)

@@ -22,7 +22,7 @@
 
 ## 5. Judge Pack
 
-文件：`config/judges.json`。列出已部署的CV、Codex、Metric和Fusion Judge。每项满足Judge Manifest；禁用项不参与覆盖率。
+文件：`config/judges.json`。列出已部署的CV、MLLM、Metric和Fusion Judge。每项满足Judge Manifest；禁用项不参与覆盖率。MLLM Provider可为OpenAI兼容API、Codex CLI或Python插件，评分层不依赖具体供应商。
 
 插件代码可以安装在独立Python环境或服务中，但必须提供稳定entrypoint、版本和fake测试替身。
 

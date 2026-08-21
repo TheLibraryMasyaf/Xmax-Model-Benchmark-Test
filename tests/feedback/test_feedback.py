@@ -11,16 +11,18 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.errors import ContractError
 from xmax_test.feedback.importer import HumanSignalImporter
-from xmax_test.feedback.normalizer import CodexNormalizer, RuleNormalizer
+from xmax_test.feedback.normalizer import MlmmHumanNormalizer, RuleNormalizer
+from xmax_test.feedback.overrides import HumanOverrideService
 from xmax_test.feedback.proposals import DimensionProposalService
 from xmax_test.feedback.router import LearningRouter
+from xmax_test.feedback.training import HumanLearningService
+from xmax_test.judges.mlmm.base import MlmmResponse
 from xmax_test.judges.releases import JudgeReleaseService
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 
@@ -72,9 +74,7 @@ class ImporterTests(FeedbackTestBase):
         self.assertTrue(outcome["errors"])
 
     def test_import_rejects_invalid_context(self) -> None:
-        outcome = self.importer.import_records(
-            [self.signal("ok", review_context="guessed")]
-        )
+        outcome = self.importer.import_records([self.signal("ok", review_context="guessed")])
         self.assertEqual(outcome["imported"], 0)
         self.assertTrue(outcome["errors"])
 
@@ -97,23 +97,34 @@ class ImporterTests(FeedbackTestBase):
 
 
 class NormalizerTests(FeedbackTestBase):
-    @patch("xmax_test.feedback.normalizer.which", return_value="/usr/bin/codex")
-    @patch("xmax_test.feedback.normalizer.subprocess.run")
-    def test_codex_normalizer_cannot_rewrite_raw_text(self, run, _which) -> None:
-        run.return_value.returncode = 0
-        run.return_value.stderr = ""
-        run.return_value.stdout = json.dumps(
-            {
-                "mapping_status": "existing",
-                "normalized_labels": [
-                    {"dimension_id": "C2", "confidence": 0.9, "rationale": "matched"}
-                ],
-                "raw_text": "malicious rewrite",
-                "dimension_proposal": None,
-            }
-        )
+    def test_provider_normalizer_cannot_rewrite_raw_text(self) -> None:
+        class Provider:
+            provider_id = "fake"
+
+            def complete_json(self, **_kwargs):
+                payload = {
+                    "mapping_status": "existing",
+                    "normalized_labels": [
+                        {
+                            "dimension_id": "C2",
+                            "confidence": 0.9,
+                            "rationale": "matched",
+                            "polarity": "positive",
+                            "severity": "mild",
+                        }
+                    ],
+                    "raw_text": "malicious rewrite",
+                    "dimension_proposal": None,
+                }
+                return MlmmResponse(
+                    payload=payload,
+                    raw_text=json.dumps(payload),
+                    provider_id=self.provider_id,
+                    model="fake",
+                )
+
         raw = self.signal("原始人工评价")
-        normalized = CodexNormalizer().normalize(raw, self.benchmark)
+        normalized = MlmmHumanNormalizer(Provider()).normalize(raw, self.benchmark)
         self.assertEqual(normalized["raw_text"], "原始人工评价")
         self.assertTrue(normalized["learning_permission"])
 
@@ -194,7 +205,9 @@ class RouterTests(FeedbackTestBase):
         self.assertTrue(candidates)
         self.assertEqual(candidates[0]["data_partition"], "train")
 
-    def test_export_packet_contains_supervision_but_holdout_is_not_trainable(self) -> None:
+    def test_export_packet_contains_supervision_but_holdout_is_not_trainable(
+        self,
+    ) -> None:
         signal = {
             **self._existing_signal(),
             "data_partition": "holdout",
@@ -210,14 +223,79 @@ class RouterTests(FeedbackTestBase):
         )
         self.assertEqual(packets[0]["evidence_refs"]["result_asset_id"], "asset-result")
         schema = json.loads(
-            (ROOT / "schemas" / "learning-candidate.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (ROOT / "schemas" / "learning-candidate.schema.json").read_text(encoding="utf-8")
         )
         Draft202012Validator(schema).validate(packets[0])
 
 
 class OverrideTests(FeedbackTestBase):
+    def test_mlmm_challenger_is_train_only_and_registered_as_shadow(self) -> None:
+        train_path = Path(self.directory.name) / "learning.train.jsonl"
+        packet = {
+            "route_kind": "mlmm",
+            "data_partition": "train",
+            "training_eligible": True,
+            "dimension_id": "C2",
+            "signal_id": "signal-1",
+            "supervision": {"raw_text": "边界错误", "label": {"polarity": "negative"}},
+        }
+        train_path.write_text(json.dumps(packet, ensure_ascii=False) + "\n", encoding="utf-8")
+        result = HumanLearningService(self.repository).build_challenger(
+            judge_id="mlmm-main",
+            version="human-cal-1",
+            route_kind="mlmm",
+            train_path=train_path,
+            output_directory=Path(self.directory.name) / "challengers",
+        )
+        self.assertEqual(result["status"], "shadow")
+        self.assertTrue(Path(result["training"]["artifact_uri"]).is_file())
+        self.assertEqual(
+            self.repository.get_judge_release("mlmm-main", "human-cal-1")["status"],
+            "shadow",
+        )
+
+    def test_human_override_is_idempotent_and_original_ai_result_is_preserved(
+        self,
+    ) -> None:
+        evaluation = {
+            "evaluation_id": "eval-human",
+            "evaluation_batch_id": "eval-batch",
+            "run_id": "run-human",
+            "benchmark_version": "0.2.0-draft",
+            "scenario_pack_version": "0.1.0-draft",
+            "score_schema_version": "2.0.0",
+            "criterion_results": [],
+            "dimension_results": [],
+            "weight_resolution": {},
+            "case_score_percent": 40.0,
+            "canonical_score": 40.0,
+            "scenario_score": 40.0,
+            "applied_gate_ids": [],
+            "final_verdict": None,
+        }
+        self.repository.save_evaluation_result(evaluation)
+        signal = {
+            "signal_id": "human-score-1",
+            "sample_id": "sample-human",
+            "source_type": "evaluation_feedback",
+            "review_context": "ai_assisted",
+            "evaluation_id": "eval-human",
+            "human_score_percent": 75.0,
+            "raw_text": "人工评为75%",
+            "annotations": {},
+        }
+        self.repository.append_human_signal(signal)
+        service = HumanOverrideService(self.repository)
+        first = service.apply_signal(signal)
+        second = service.apply_signal(signal)
+        self.assertEqual(first["override_id"], second["override_id"])
+        self.assertTrue(second["reused"])
+        self.assertEqual(service.effective_result(evaluation)["effective_case_score_percent"], 75.0)
+        self.assertEqual(
+            self.repository.get_evaluation_result("eval-human")["case_score_percent"],
+            40.0,
+        )
+
     def test_single_override_does_not_hot_update_judge(self) -> None:
         """Recording one human signal never changes the judge champion state."""
         self.importer.import_records(
@@ -229,9 +307,85 @@ class OverrideTests(FeedbackTestBase):
         service = JudgeReleaseService(self.repository)
         with self.assertRaises(ContractError):
             service.promote("video-quality", "1.0.0", validation={"valid": False})
-        # Valid validation allows explicit promotion (not a hot update).
-        outcome = service.promote("video-quality", "1.0.0", validation={"valid": True})
+        # Valid Holdout evidence can promote an explicitly built shadow.
+        self.repository.record_judge_release(
+            "video-quality",
+            "1.0.0",
+            "shadow",
+            {"judge_id": "video-quality", "version": "1.0.0", "status": "shadow"},
+        )
+        outcome = service.promote(
+            "video-quality",
+            "1.0.0",
+            validation={"valid": True, "data_partition": "holdout"},
+        )
         self.assertEqual(outcome["status"], "champion")
+
+    def test_criterion_override_recomputes_scores_without_mutating_ai(self) -> None:
+        criteria = [
+            {
+                "dimension_id": "C2",
+                "criterion_id": "C2.1",
+                "score": 0.0,
+                "assessable": True,
+                "applicable": True,
+            },
+            {
+                "dimension_id": "C2",
+                "criterion_id": "C2.2",
+                "score": 2.0,
+                "assessable": True,
+                "applicable": True,
+            },
+        ]
+        evaluation = {
+            "evaluation_id": "eval-criteria",
+            "evaluation_batch_id": "eval-batch",
+            "run_id": "run-criteria",
+            "benchmark_version": "0.2.0-draft",
+            "criterion_results": criteria,
+            "dimension_results": [
+                {
+                    "dimension_id": "C2",
+                    "score": 1.0,
+                    "criterion_results": criteria,
+                }
+            ],
+            "weight_resolution": {
+                "effective_weights": {"C2": 1.0},
+                "canonical_weights": {"C2": 1.0},
+            },
+            "case_score_percent": 50.0,
+            "canonical_score": 50.0,
+            "scenario_score": 50.0,
+        }
+        self.repository.save_evaluation_result(evaluation)
+        signal = {
+            "signal_id": "human-criteria-1",
+            "evaluation_id": "eval-criteria",
+            "annotations": {"criterion_scores": {"C2.1": 2.0}},
+            "raw_text": "C2.1应为2分",
+        }
+        self.repository.append_human_signal(signal)
+        service = HumanOverrideService(self.repository)
+        service.apply_signal(signal)
+
+        effective = service.effective_result(evaluation)
+        self.assertEqual(effective["effective_case_score_percent"], 100.0)
+        self.assertEqual(effective["canonical_score"], 100.0)
+        self.assertEqual(effective["dimension_results"][0]["score"], 2.0)
+        self.assertEqual(
+            self.repository.get_evaluation_result("eval-criteria")["case_score_percent"],
+            50.0,
+        )
+
+        typo = {
+            "signal_id": "human-criteria-typo",
+            "evaluation_id": "eval-criteria",
+            "annotations": {"criterion_scores": {"C2.99": 2.0}},
+        }
+        with self.assertRaises(ContractError):
+            service.apply_signal(typo)
 
 
 if __name__ == "__main__":

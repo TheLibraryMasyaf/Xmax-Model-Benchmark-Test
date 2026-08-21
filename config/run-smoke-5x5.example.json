@@ -1,0 +1,18 @@
+{
+  "$schema": "../schemas/run-request.schema.json",
+  "request_id": "configure-5x5-smoke",
+  "stages": ["ingest", "plan", "generate", "preprocess", "evaluate"],
+  "stage_inputs": {},
+  "dependency_policy": "explicit_only",
+  "missing_input_policy": "error",
+  "sync_policy": "none",
+  "benchmark_path": "BENCHMARK.md",
+  "scenario_pack_path": "config/scenarios.json",
+  "generation_modes": ["offline", "realtime"],
+  "execution_mode": "streaming",
+  "pipeline_queue_size": 2,
+  "repeat_count": 1,
+  "dry_run": true,
+  "filters": {"feed_limit": 5, "prompt_limit": 5},
+  "manifest_directory": "var/manifests"
+}

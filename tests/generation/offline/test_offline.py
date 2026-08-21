@@ -29,7 +29,14 @@ class FakeProbe:
         if self._corrupt or path.stat().st_size == 0:
             raise ValidationError("cannot decode")
         return {
-            "streams": [{"codec_type": "video", "width": 704, "height": 1280, "avg_frame_rate": "24/1"}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "width": 704,
+                    "height": 1280,
+                    "avg_frame_rate": "24/1",
+                }
+            ],
             "format": {"format_name": "mp4", "duration": "8.0"},
         }
 
@@ -67,7 +74,9 @@ class OfflineTestBase(unittest.TestCase):
             (self.artifacts.resolve(f"artifact://assets/{asset_id}/source.bin")).parent.mkdir(
                 parents=True, exist_ok=True
             )
-            (self.artifacts.resolve(f"artifact://assets/{asset_id}/source.bin")).write_bytes(b"x" * 8)
+            (self.artifacts.resolve(f"artifact://assets/{asset_id}/source.bin")).write_bytes(
+                b"x" * 8
+            )
 
     def image_case(self) -> dict:
         return {
@@ -82,7 +91,10 @@ class OfflineTestBase(unittest.TestCase):
             "operation_recipe_version": "0.1.0",
             "edited_video_asset_id": "feed-a",
             "expected_audio_source_asset_id": "feed-a",
-            "api_asset_bindings": {"refVideoPath": "feed_video", "refImagePath": "prompt_image"},
+            "api_asset_bindings": {
+                "refVideoPath": "feed_video",
+                "refImagePath": "prompt_image",
+            },
         }
 
     def video_case(self) -> dict:
@@ -98,7 +110,10 @@ class OfflineTestBase(unittest.TestCase):
             "operation_recipe_version": "0.1.0",
             "edited_video_asset_id": "prompt-vid",
             "expected_audio_source_asset_id": "prompt-vid",
-            "api_asset_bindings": {"refVideoPath": "prompt_video", "refImagePath": "feed_capture"},
+            "api_asset_bindings": {
+                "refVideoPath": "prompt_video",
+                "refImagePath": "feed_capture",
+            },
         }
 
     def adapter(self, **kwargs):
@@ -185,22 +200,24 @@ class RestBindingTests(OfflineTestBase):
             },
         )
 
-    def test_image_reference_binds_feed_as_video_and_prompt_image_as_image(self) -> None:
+    def test_image_reference_binds_feed_as_video_and_prompt_image_as_image(
+        self,
+    ) -> None:
         transport = FakeOfflineTaskTransport()
         adapter = self.adapter(transport=transport)
         run = adapter.run_case(self.image_case())
         self.assertEqual(run["status"], "completed")
         from xmax_test.hashing import sha256_bytes
 
-        self.assertEqual(
-            run["result_asset_id"], f"asset_{sha256_bytes(b'fake-result-video')[:16]}"
-        )
+        self.assertEqual(run["result_asset_id"], f"asset_{sha256_bytes(b'fake-result-video')[:16]}")
         submitted = transport.submitted_payloads[-1]
-        self.assertEqual(submitted["refVideoPath"], f"https://assets.example.invalid/sha-feed-a")
+        self.assertEqual(submitted["refVideoPath"], "https://assets.example.invalid/sha-feed-a")
         self.assertEqual(submitted["refImagePath"], "https://assets.example.invalid/sha-prompt-img")
         self.assertEqual(submitted["audioBaselineAssetId"], "feed-a")
 
-    def test_video_reference_binds_prompt_video_as_video_and_feed_capture_as_image(self) -> None:
+    def test_video_reference_binds_prompt_video_as_video_and_feed_capture_as_image(
+        self,
+    ) -> None:
         transport = FakeOfflineTaskTransport()
         adapter = self.adapter(transport=transport)
         run = adapter.run_case(self.video_case())
@@ -268,7 +285,6 @@ class RestFailureTests(OfflineTestBase):
     def test_duplicate_submission_is_protected(self) -> None:
         adapter = self.adapter()
         first = adapter.run_case(self.image_case())
-        submitted = adapter._transport.submitted_payloads
         # A second attempt creates a new run (new attempt) but never reuses
         # the same external task id.
         second = adapter.run_case(self.image_case())

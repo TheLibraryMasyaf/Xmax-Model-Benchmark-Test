@@ -1,5 +1,7 @@
 # CV Judge
 
+> `.venv-cv/`和`var/models/`是本机可重建的可选运行缓存，不是合同、Champion声明或仓库交付物。只有`config/judges.json`中`enabled=true`且`context-check`实际导入成功的Judge才属于当前评测链路；目录中存在权重文件不代表已经启用。
+
 本文只说明专项视觉模型的职责、插件规范、候选能力和学习方式；不决定最终评测维度。
 
 ## 1. Judge插件
@@ -31,15 +33,18 @@ Python插件实现 `xmax_test.judges.base.JudgePlugin`，manifest符合 `schemas
 
 ## 3. 标准输出
 
-CV Judge不能只返回一个裸分数，至少返回：
+CV Judge不能只返回一个维度裸分，必须在`criterion_results`中只列出它真正测量的Benchmark细则。至少返回：
 
+- `criterion_id`。
 - `assessable`。
-- `score`或原始指标。
+- 细则级`score`和原始指标。
 - `confidence`。
 - 时间段。
 - ROI、轨迹或关键点引用。
 - `raw_metrics`。
 - 失败原因或不适用原因。
+
+例如音频Judge只能提交O6.2/R7.3，不能用它的分数代表整个O6/R7；基础画质Judge当前只提交C9.1、C9.2或O6.1。Fusion把同一细则的多Judge结果合并后，再汇总维度。
 
 ## 4. 运行隔离
 

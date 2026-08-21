@@ -1,4 +1,4 @@
-"""In-memory Judge registry used by the scaffold and tests."""
+"""In-memory versioned Judge registry."""
 
 from __future__ import annotations
 
@@ -48,3 +48,10 @@ class JudgeRegistry:
                 matches.append(item)
         return sorted(matches, key=lambda item: (item.judge_id, item.version))
 
+    def manifests(self) -> list[dict[str, Any]]:
+        return [
+            dict(item.manifest)
+            for item in sorted(
+                self._judges.values(), key=lambda value: (value.judge_id, value.version)
+            )
+        ]

@@ -9,6 +9,7 @@
     "benchmark_version",
     "scenario_pack_version",
     "score_schema_version",
+    "criterion_results",
     "dimension_results",
     "weight_resolution",
     "case_score_percent"
@@ -20,7 +21,14 @@
     "benchmark_version": {"type": "string"},
     "scenario_pack_version": {"type": "string"},
     "score_schema_version": {"type": "string"},
-    "dimension_results": {"type": "array", "items": {"type": "object"}},
+    "criterion_results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/fused_criterion_result"}
+    },
+    "dimension_results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/derived_dimension_result"}
+    },
     "canonical_score": {"type": ["number", "null"]},
     "scenario_score": {"type": ["number", "null"]},
     "case_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
@@ -53,6 +61,67 @@
     },
     "applied_gate_ids": {"type": "array", "items": {"type": "string"}},
     "final_verdict": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "fused_criterion_result": {
+      "type": "object",
+      "required": [
+        "dimension_id",
+        "criterion_id",
+        "score",
+        "score_percent",
+        "assessable",
+        "applicable",
+        "coverage_status",
+        "judges",
+        "judge_versions",
+        "evidence"
+      ],
+      "properties": {
+        "dimension_id": {"type": "string"},
+        "criterion_id": {"type": "string"},
+        "criterion_name": {"type": "string"},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 2},
+        "score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "assessable": {"type": "boolean"},
+        "applicable": {"type": "boolean"},
+        "coverage_status": {"enum": ["assessed", "unassessable", "uncovered", "not_applicable"]},
+        "judges": {"type": "array", "items": {"type": "string"}},
+        "judge_versions": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "evidence": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": true
+    },
+    "derived_dimension_result": {
+      "type": "object",
+      "required": [
+        "dimension_id",
+        "score",
+        "score_percent",
+        "assessable",
+        "applicable",
+        "criterion_count",
+        "assessable_criterion_count",
+        "coverage_complete",
+        "criterion_results"
+      ],
+      "properties": {
+        "dimension_id": {"type": "string"},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 2},
+        "score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "assessable": {"type": "boolean"},
+        "applicable": {"type": "boolean"},
+        "criterion_count": {"type": "integer", "minimum": 0},
+        "assessable_criterion_count": {"type": "integer", "minimum": 0},
+        "coverage_complete": {"type": "boolean"},
+        "criterion_results": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/fused_criterion_result"}
+        }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

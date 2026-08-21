@@ -24,16 +24,28 @@ class JudgeReleaseService:
         self._repository = repository
         self._clock = clock
 
-    def promote(self, judge_id: str, version: str, validation: dict[str, Any] | None = None) -> dict[str, Any]:
+    def promote(
+        self, judge_id: str, version: str, validation: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Promote a judge version to Champion after validation."""
 
-        if validation is not None and not validation.get("valid"):
+        if validation is None:
+            raise ContractError(
+                f"cannot promote judge {judge_id}@{version} without Holdout validation"
+            )
+        if not validation.get("valid"):
             raise ContractError(f"cannot promote judge {judge_id}@{version}: validation failed")
+        if validation.get("data_partition") not in {None, "holdout"}:
+            raise ContractError("judge promotion validation must use the holdout partition")
+        current = self._repository.get_judge_release(judge_id, version)
+        if current is None or current.get("status") != "shadow":
+            raise ContractError(f"judge {judge_id}@{version} must exist in shadow before promotion")
         self._repository.record_judge_release(
             judge_id,
             version,
             "champion",
             {
+                **current,
                 "validation": validation,
                 "action": "promote",
             },
@@ -52,7 +64,9 @@ class JudgeReleaseService:
         return {"judge_id": judge_id, "version": previous_version, "status": "champion"}
 
     def deprecate(self, judge_id: str, version: str) -> dict[str, Any]:
-        self._repository.record_judge_release(judge_id, version, "deprecated", {"action": "deprecate"})
+        self._repository.record_judge_release(
+            judge_id, version, "deprecated", {"action": "deprecate"}
+        )
         return {"judge_id": judge_id, "version": version, "status": "deprecated"}
 
     def state(self, judge_id: str, version: str) -> dict[str, Any] | None:

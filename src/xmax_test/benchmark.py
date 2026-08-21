@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 BEGIN = "<!-- XMAX-BENCHMARK-CONTRACT:BEGIN -->"
 END = "<!-- XMAX-BENCHMARK-CONTRACT:END -->"
 
@@ -46,9 +45,7 @@ def load_benchmark_contract(path: str | Path) -> dict[str, Any]:
         if key not in contract:
             raise BenchmarkContractError(f"missing BENCHMARK field: {key}")
         if not isinstance(contract[key], expected_type):
-            raise BenchmarkContractError(
-                f"BENCHMARK field {key} must be {expected_type.__name__}"
-            )
+            raise BenchmarkContractError(f"BENCHMARK field {key} must be {expected_type.__name__}")
 
     dimension_ids: set[str] = set()
     for index, dimension in enumerate(contract["dimensions"]):
@@ -79,17 +76,13 @@ def _assert_unique_ids(items: list[Any], key: str, collection: str) -> None:
             raise BenchmarkContractError(f"{collection}[{index}] must be an object")
         value = item.get(key)
         if not isinstance(value, str) or not value:
-            raise BenchmarkContractError(
-                f"{collection}[{index}].{key} must be a non-empty string"
-            )
+            raise BenchmarkContractError(f"{collection}[{index}].{key} must be a non-empty string")
         if value in seen:
             raise BenchmarkContractError(f"duplicate {key}: {value}")
         seen.add(value)
 
 
-def _validate_weight_references(
-    contract: dict[str, Any], dimension_ids: set[str]
-) -> None:
+def _validate_weight_references(contract: dict[str, Any], dimension_ids: set[str]) -> None:
     profiles: dict[str, dict[str, Any]] = {}
     for profile in contract["weight_profiles"]:
         profile_id = profile["profile_id"]
@@ -162,6 +155,5 @@ def _validate_weight_references(
             modes = profiles[profile_id].get("applicable_modes", [])
             if mode not in modes:
                 raise BenchmarkContractError(
-                    f"score schema {schema_id} maps {mode} to incompatible profile "
-                    f"{profile_id}"
+                    f"score schema {schema_id} maps {mode} to incompatible profile {profile_id}"
                 )

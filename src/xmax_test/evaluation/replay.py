@@ -9,9 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..hashing import content_hash
-from ..time import utc_now
-
 
 class ReplayService:
     def __init__(
@@ -49,8 +46,22 @@ class ReplayService:
                     "new_canonical_score": new_result.get("canonical_score"),
                     "old_scenario_score": old.get("scenario_score"),
                     "new_scenario_score": new_result.get("scenario_score"),
-                    "delta_canonical": _delta(old.get("canonical_score"), new_result.get("canonical_score")),
-                    "delta_scenario": _delta(old.get("scenario_score"), new_result.get("scenario_score")),
+                    "delta_canonical": _delta(
+                        old.get("canonical_score"), new_result.get("canonical_score")
+                    ),
+                    "delta_scenario": _delta(
+                        old.get("scenario_score"), new_result.get("scenario_score")
+                    ),
+                    "changed_dimensions": _changed_scores(
+                        old.get("dimension_results", []),
+                        new_result.get("dimension_results", []),
+                        "dimension_id",
+                    ),
+                    "changed_criteria": _changed_scores(
+                        old.get("criterion_results", []),
+                        new_result.get("criterion_results", []),
+                        "criterion_id",
+                    ),
                 }
             )
         return {
@@ -65,3 +76,22 @@ def _delta(old: Any, new: Any) -> float | None:
     if old is None or new is None:
         return None
     return round(float(new) - float(old), 2)
+
+
+def _changed_scores(
+    old_items: list[dict[str, Any]],
+    new_items: list[dict[str, Any]],
+    identifier: str,
+) -> list[dict[str, Any]]:
+    old = {item.get(identifier): item.get("score") for item in old_items}
+    new = {item.get(identifier): item.get("score") for item in new_items}
+    return [
+        {
+            identifier: item_id,
+            "old_score": old.get(item_id),
+            "new_score": new.get(item_id),
+            "delta": _delta(old.get(item_id), new.get(item_id)),
+        }
+        for item_id in sorted(set(old) | set(new))
+        if old.get(item_id) != new.get(item_id)
+    ]

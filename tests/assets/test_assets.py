@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,7 +28,12 @@ class FakeProbe:
     def __init__(self, facts: dict | None = None) -> None:
         self._facts = facts or {
             "streams": [
-                {"codec_type": "video", "width": 704, "height": 1280, "avg_frame_rate": "24/1"}
+                {
+                    "codec_type": "video",
+                    "width": 704,
+                    "height": 1280,
+                    "avg_frame_rate": "24/1",
+                }
             ],
             "format": {"format_name": "mov,mp4,m4a", "duration": "8.170000"},
         }
@@ -168,7 +172,7 @@ class LocalSourceTests(AssetTestBase):
         }
         source = LocalDirectorySource(self.descriptor(item))
         runner = self.make_runner(lambda cfg: source)
-        summary = runner.sync({"sources": [item]})
+        runner.sync({"sources": [item]})
         assets = self.repository.list_assets(kind="feed_video")
         self.assertEqual(len(assets), 1)
         self.assertEqual(assets[0]["status"], "invalid")
@@ -274,7 +278,10 @@ class BitableSourceTests(AssetTestBase):
                     "records": [
                         {
                             "record_id": "rec-2",
-                            "fields": {"素材": [{"file_token": "tok-b"}], "文字": "do it"},
+                            "fields": {
+                                "素材": [{"file_token": "tok-b"}],
+                                "文字": "do it",
+                            },
                         }
                     ],
                     "has_more": False,
@@ -304,7 +311,10 @@ class WikiSourceTests(AssetTestBase):
             bitable_pages=[
                 {
                     "records": [
-                        {"record_id": "rec-1", "fields": {"素材": [{"file_token": "tok-x"}]}}
+                        {
+                            "record_id": "rec-1",
+                            "fields": {"素材": [{"file_token": "tok-x"}]},
+                        }
                     ],
                     "has_more": False,
                     "page_token": None,
@@ -365,7 +375,12 @@ class BuildSourceTests(AssetTestBase):
         self.assertIsInstance(source, FeishuSheetSource)
 
     def test_unknown_kind_is_rejected(self) -> None:
-        item = {"source_id": "s", "kind": "mystery", "enabled": True, "asset_kind": "feed_video"}
+        item = {
+            "source_id": "s",
+            "kind": "mystery",
+            "enabled": True,
+            "asset_kind": "feed_video",
+        }
         with self.assertRaises(ContractError):
             build_source(item)
 

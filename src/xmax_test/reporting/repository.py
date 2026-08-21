@@ -21,3 +21,9 @@ class ReportRepository:
 
     def batch_manifest(self, entity_type: str, batch_id: str) -> dict[str, Any]:
         return self._repository.get_batch_manifest(entity_type, batch_id)
+
+    def human_signals(self) -> list[dict[str, Any]]:
+        return self._repository.list_human_signals()
+
+    def evaluation_overrides(self) -> list[dict[str, Any]]:
+        return self._repository.list_evaluation_overrides()

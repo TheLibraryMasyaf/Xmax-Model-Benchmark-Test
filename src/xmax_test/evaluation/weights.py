@@ -6,8 +6,9 @@ from a versioned Benchmark contract; it never asks an MLLM to invent weights.
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Collection, Mapping, Sequence
+from typing import Any
 
 
 class WeightResolutionError(ValueError):
@@ -48,9 +49,7 @@ def resolve_scene_weights(
     profile_version = _required_string(profile, "version", "weight profile")
     applicable_modes = profile.get("applicable_modes", [])
     if mode not in applicable_modes:
-        raise WeightResolutionError(
-            f"weight profile {profile_id} does not support mode {mode}"
-        )
+        raise WeightResolutionError(f"weight profile {profile_id} does not support mode {mode}")
 
     raw_weights = profile.get("weights")
     if not isinstance(raw_weights, Mapping) or not raw_weights:
@@ -61,9 +60,7 @@ def resolve_scene_weights(
         if not isinstance(dimension_id, str) or not dimension_id:
             raise WeightResolutionError("weight dimension IDs must be non-empty strings")
         if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
-            raise WeightResolutionError(
-                f"base weight for {dimension_id} must be a positive number"
-            )
+            raise WeightResolutionError(f"base weight for {dimension_id} must be a positive number")
         base[dimension_id] = float(value)
 
     maximum_multiplier = profile.get("maximum_rule_multiplier", 2.0)
@@ -124,9 +121,7 @@ def resolve_scene_weights(
         matched_versions.append(rule_version)
         exclusions = rule.get("exclude_dimensions", [])
         if not isinstance(exclusions, list):
-            raise WeightResolutionError(
-                f"rule {rule_id} exclude_dimensions must be an array"
-            )
+            raise WeightResolutionError(f"rule {rule_id} exclude_dimensions must be an array")
         for dimension_id in exclusions:
             _assert_known_dimension(dimension_id, base, rule_id)
             rule_excluded.add(dimension_id)
@@ -146,8 +141,7 @@ def resolve_scene_weights(
         unknown = included - set(weights)
         if unknown:
             raise WeightResolutionError(
-                "assessable dimensions missing from weight profile: "
-                + ", ".join(sorted(unknown))
+                "assessable dimensions missing from weight profile: " + ", ".join(sorted(unknown))
             )
 
     excluded = tuple(sorted(set(weights) - included))
@@ -200,14 +194,10 @@ def _apply_adjustments(
             raise WeightResolutionError(
                 f"rule {rule_id} override for {dimension_id} must be positive"
             )
-        weights[dimension_id] = min(
-            float(value), base[dimension_id] * maximum_multiplier
-        )
+        weights[dimension_id] = min(float(value), base[dimension_id] * maximum_multiplier)
 
 
-def _assert_known_dimension(
-    dimension_id: Any, base: Mapping[str, float], rule_id: str
-) -> None:
+def _assert_known_dimension(dimension_id: Any, base: Mapping[str, float], rule_id: str) -> None:
     if dimension_id not in base:
         raise WeightResolutionError(
             f"rule {rule_id} references dimension not in base profile: {dimension_id}"
@@ -229,14 +219,16 @@ def _rule_matches(
         raise WeightResolutionError("rule when.all and when.any must be arrays")
 
     all_match = all(
-        _condition_matches(
-            item, mode=mode, scenario_id=scenario_id, tags=tags
-        )
+        _condition_matches(item, mode=mode, scenario_id=scenario_id, tags=tags)
         for item in all_conditions
     )
-    any_match = True if not any_conditions else any(
-        _condition_matches(item, mode=mode, scenario_id=scenario_id, tags=tags)
-        for item in any_conditions
+    any_match = (
+        True
+        if not any_conditions
+        else any(
+            _condition_matches(item, mode=mode, scenario_id=scenario_id, tags=tags)
+            for item in any_conditions
+        )
     )
     return all_match and any_match
 
@@ -262,9 +254,7 @@ def _condition_matches(
 
     tag_name = condition.get("tag")
     if not isinstance(tag_name, str) or not tag_name:
-        raise WeightResolutionError(
-            "scene rule condition requires mode, scenario_id, or tag"
-        )
+        raise WeightResolutionError("scene rule condition requires mode, scenario_id, or tag")
     actual = tags.get(tag_name)
     if "equals" in condition:
         return actual == condition["equals"]

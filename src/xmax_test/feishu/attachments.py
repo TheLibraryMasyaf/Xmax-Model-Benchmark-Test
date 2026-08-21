@@ -119,9 +119,7 @@ def _safe_filename(filename: str) -> str:
 def _stage_upload(source: Path, artifacts: Any, sha: str, filename: str) -> Path:
     """Create a hash-verified upload alias inside the project artifact root."""
 
-    target = artifacts.resolve(
-        f"artifact://upload-staging/{sha[:16]}/{filename}"
-    )
+    target = artifacts.resolve(f"artifact://upload-staging/{sha[:16]}/{filename}")
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_file() and file_sha256(target) == sha:
         return target

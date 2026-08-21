@@ -18,7 +18,11 @@ from xmax_test.storage.sqlite import SqliteMetadataRepository
 FEISHU_CONFIG = {
     "connection": {"provider": "fake", "identity": "fake"},
     "base": {"url": "https://fake.feishu.cn/base/app", "app_token": "app"},
-    "tables": {"feed_data": "tbl-feed", "prompt_data": "tbl-prompt", "case_data": "tbl-case"},
+    "tables": {
+        "feed_data": "tbl-feed",
+        "prompt_data": "tbl-prompt",
+        "case_data": "tbl-case",
+    },
     "field_projection": {
         "case_data": {
             "case_number": "case编号",
@@ -56,7 +60,12 @@ class FeishuTestBase(unittest.TestCase):
         self.ledger = SyncLedger(self.repository)
         self.uploader = AttachmentUploader(self.client)
         self.service = FeishuSyncService(
-            self.client, self.ledger, self.uploader, FEISHU_CONFIG, self.repository, self.artifacts
+            self.client,
+            self.ledger,
+            self.uploader,
+            FEISHU_CONFIG,
+            self.repository,
+            self.artifacts,
         )
         self._seed_assets()
 
@@ -67,8 +76,10 @@ class FeishuTestBase(unittest.TestCase):
     def _seed_assets(self) -> None:
         for asset_id in ("result-a", "feed-a", "prompt-a"):
             kind = (
-                "result_video" if asset_id.startswith("result")
-                else "feed_video" if asset_id.startswith("feed")
+                "result_video"
+                if asset_id.startswith("result")
+                else "feed_video"
+                if asset_id.startswith("feed")
                 else "prompt_image"
             )
             self.repository.upsert_asset(
@@ -106,7 +117,11 @@ class FeishuTestBase(unittest.TestCase):
                 "model_id": model,
                 "mode": "offline",
                 "origin": "xmax_offline",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h",
+                },
                 "result_asset_id": result_asset,
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
@@ -181,7 +196,9 @@ class FullSyncTests(FeishuTestBase):
             self.service.sync_case_runs([first, second], policy="full")
         self.assertEqual(self.client._tables.get("tbl-case", []), [])
 
-    def test_upsert_without_echoed_record_id_is_resolved_before_attachments(self) -> None:
+    def test_upsert_without_echoed_record_id_is_resolved_before_attachments(
+        self,
+    ) -> None:
         original = self.client.upsert_record
 
         def no_id(app_token, table_id, record_id, fields):
@@ -201,9 +218,7 @@ class FullSyncTests(FeishuTestBase):
             {"name": item["field_name"], "type": item["type"]}
             for item in original(app_token, table_id)
         ]
-        summary = self.service.sync_case_runs(
-            [self.run_record()], policy="metadata_only"
-        )
+        summary = self.service.sync_case_runs([self.run_record()], policy="metadata_only")
         self.assertEqual(summary["errors"], [])
 
     def test_full_sync_creates_one_case_row_per_run_with_scaled_score(self) -> None:
@@ -236,7 +251,7 @@ class FullSyncTests(FeishuTestBase):
 
     def test_unreviewed_run_writes_empty_score(self) -> None:
         run = self.run_record(case_score=None)
-        summary = self.service.sync_case_runs([run], policy="full")
+        self.service.sync_case_runs([run], policy="full")
         fields = self.client._tables["tbl-case"][0]["fields"]
         self.assertIsNone(fields["case评分"])
         self.assertIsNone(fields["case说明"])
@@ -251,18 +266,20 @@ class FullSyncTests(FeishuTestBase):
 
     def test_wrong_bin_attachments_are_replaced_with_business_names(self) -> None:
         run = self.run_record(case_score=None)
-        self.client._tables["tbl-case"] = [{
-            "record_id": "rec-existing",
-            "fields": {
-                "case编号": run["case_number"],
-                "Xmax模型版本": run["model_id"],
-                "case评分": 0.9939,
-                "case说明": "已生成",
-                "case文件": [{"file_token": "old-result", "name": "source.bin"}],
-                "feed文件": [{"file_token": "old-feed", "name": "source.bin"}],
-                "prompt素材": [{"file_token": "old-prompt", "name": "source.bin"}],
-            },
-        }]
+        self.client._tables["tbl-case"] = [
+            {
+                "record_id": "rec-existing",
+                "fields": {
+                    "case编号": run["case_number"],
+                    "Xmax模型版本": run["model_id"],
+                    "case评分": 0.9939,
+                    "case说明": "已生成",
+                    "case文件": [{"file_token": "old-result", "name": "source.bin"}],
+                    "feed文件": [{"file_token": "old-feed", "name": "source.bin"}],
+                    "prompt素材": [{"file_token": "old-prompt", "name": "source.bin"}],
+                },
+            }
+        ]
         summary = self.service.sync_case_runs([run], policy="full")
         self.assertEqual(summary["errors"], [])
         fields = self.client._tables["tbl-case"][0]["fields"]
@@ -274,15 +291,17 @@ class FullSyncTests(FeishuTestBase):
         self.assertEqual(self.client.calls.count("remove_attachments"), 3)
 
     def test_same_asset_is_attached_to_each_repeat_row(self) -> None:
-        first = self.run_record(run_id="run-first", case_number="feed001_prompt001_01", case_score=None)
-        second = self.run_record(run_id="run-second", case_number="feed001_prompt001_02", case_score=None)
+        first = self.run_record(
+            run_id="run-first", case_number="feed001_prompt001_01", case_score=None
+        )
+        second = self.run_record(
+            run_id="run-second", case_number="feed001_prompt001_02", case_score=None
+        )
         summary = self.service.sync_case_runs([first, second], policy="full")
         self.assertEqual(summary["errors"], [])
         self.assertEqual(summary["created"], 2)
         self.assertEqual(len(self.client.uploads), 6)
-        self.assertEqual(
-            {item["record_id"] for item in self.client.uploads}, {"rec-1", "rec-2"}
-        )
+        self.assertEqual({item["record_id"] for item in self.client.uploads}, {"rec-1", "rec-2"})
 
     def test_video_reference_uploads_original_feed_and_actual_capture(self) -> None:
         run = self.run_record(case_score=None)
@@ -297,10 +316,7 @@ class FullSyncTests(FeishuTestBase):
 
         summary = self.service.sync_case_runs([run], policy="full")
         self.assertEqual(summary["errors"], [])
-        names = [
-            item["name"]
-            for item in self.client._tables["tbl-case"][0]["fields"]["feed文件"]
-        ]
+        names = [item["name"] for item in self.client._tables["tbl-case"][0]["fields"]["feed文件"]]
         self.assertEqual(names, ["feed001.mp4", "feed001_feed截图.jpg"])
 
     def test_selected_evaluation_writes_specific_case_description(self) -> None:
@@ -340,7 +356,7 @@ class FullSyncTests(FeishuTestBase):
 
     def test_same_payload_skips_second_sync(self) -> None:
         run = self.run_record(case_score=85.0)
-        first = self.service.sync_case_runs([run], policy="full")
+        self.service.sync_case_runs([run], policy="full")
         second = self.service.sync_case_runs([run], policy="full")
         self.assertEqual(second["created"], 0)
         self.assertEqual(second["skipped"], 1)
@@ -402,7 +418,7 @@ class PolicyTests(FeishuTestBase):
         ]
         run = self.run_record(case_score=66.0)
         run["prompt_text"] = "换装"
-        summary = self.service.sync_case_runs([run], policy="metadata_only")
+        self.service.sync_case_runs([run], policy="metadata_only")
         fields = self.client._tables["tbl-case"][0]["fields"]
         self.assertEqual(fields["prompt文字"], "换装")
         self.assertNotIn("case文件", fields)
@@ -435,8 +451,14 @@ class ReconcileTests(FeishuTestBase):
 
     def test_duplicate_keys_detected(self) -> None:
         self.client._tables["tbl-case"] = [
-            {"record_id": "r1", "fields": {"case编号": "feed001_prompt001_01", "Xmax模型版本": "x2.0"}},
-            {"record_id": "r2", "fields": {"case编号": "feed001_prompt001_01", "Xmax模型版本": "x2.0"}},
+            {
+                "record_id": "r1",
+                "fields": {"case编号": "feed001_prompt001_01", "Xmax模型版本": "x2.0"},
+            },
+            {
+                "record_id": "r2",
+                "fields": {"case编号": "feed001_prompt001_01", "Xmax模型版本": "x2.0"},
+            },
         ]
         self.run_record()
         outcome = ReconcileService(self.client, FEISHU_CONFIG, self.repository).reconcile()
@@ -459,14 +481,16 @@ class ReconcileTests(FeishuTestBase):
 
     def test_unselected_local_history_requires_blank_remote_score(self) -> None:
         run = self.run_record(case_score=99.39)
-        self.client._tables["tbl-case"] = [{
-            "record_id": "rec-existing",
-            "fields": {
-                "case编号": run["case_number"],
-                "Xmax模型版本": run["model_id"],
-                "case评分": 0.9939,
-            },
-        }]
+        self.client._tables["tbl-case"] = [
+            {
+                "record_id": "rec-existing",
+                "fields": {
+                    "case编号": run["case_number"],
+                    "Xmax模型版本": run["model_id"],
+                    "case评分": 0.9939,
+                },
+            }
+        ]
         outcome = ReconcileService(self.client, FEISHU_CONFIG, self.repository).reconcile(
             evaluations={}
         )

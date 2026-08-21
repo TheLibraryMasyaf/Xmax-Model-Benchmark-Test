@@ -20,6 +20,7 @@ class MlmmJudge:
         judge_id: str,
         version: str,
         supported_dimensions: list[str],
+        supported_criteria: list[str] | None = None,
         supported_modes: list[str],
         max_retries: int = 2,
         artifact_store: Any = None,
@@ -31,6 +32,7 @@ class MlmmJudge:
         self._judge_id = judge_id
         self._version = version
         self._supported_dimensions = list(supported_dimensions)
+        self._supported_criteria = list(supported_criteria or [])
         self._supported_modes = list(supported_modes)
         self._max_retries = max_retries
         self._artifacts = artifact_store
@@ -46,6 +48,7 @@ class MlmmJudge:
             "batch_dimensions": True,
             "provider_id": self._provider.provider_id,
             "supported_dimensions": self._supported_dimensions,
+            "supported_criteria": self._supported_criteria,
             "supported_modes": self._supported_modes,
             "required_inputs": ["feed_evidence", "prompt", "result_evidence"],
         }
@@ -60,12 +63,20 @@ class MlmmJudge:
                 }
             ]
         allowed = {item["dimension_id"]: item.get("version", "") for item in contracts}
+        criteria_by_dimension = {
+            item["dimension_id"]: [
+                criterion["criterion_id"]
+                for criterion in item.get("criteria", [])
+                if criterion.get("criterion_id")
+            ]
+            for item in contracts
+        }
         if not allowed:
             raise ValidationError("MLLM Judge requires at least one dimension contract")
         prompt = context.get("prompt", "")
         prompt = self._append_human_calibration(prompt, sorted(allowed))
         prompt_hash = sha256_text(prompt)
-        schema = _batch_output_schema(sorted(allowed))
+        schema = _batch_output_schema(criteria_by_dimension)
         response = None
         last_error: Exception | None = None
         for _attempt in range(1, self._max_retries + 2):
@@ -119,9 +130,7 @@ class MlmmJudge:
             raise ValidationError(f"MLLM omitted dimensions: {sorted(missing)}")
         return results
 
-    def _append_human_calibration(
-        self, prompt: str, dimension_ids: list[str]
-    ) -> str:
+    def _append_human_calibration(self, prompt: str, dimension_ids: list[str]) -> str:
         """Append anonymous Train-only human anchors to the blind-judge prompt.
 
         Calibration and Holdout packets are deliberately rejected here. Source,
@@ -194,7 +203,66 @@ class MlmmJudge:
         return stored["uri"]
 
 
-def _batch_output_schema(dimension_ids: list[str]) -> dict[str, Any]:
+def _batch_output_schema(criteria_by_dimension: dict[str, list[str]]) -> dict[str, Any]:
+    dimension_ids = sorted(criteria_by_dimension)
+
+    def judgment_schema(dimension_id: str) -> dict[str, Any]:
+        criterion_ids = criteria_by_dimension[dimension_id]
+        return {
+            "type": "object",
+            "required": [
+                "dimension_id",
+                "verdict",
+                "confidence",
+                "assessable",
+                "evidence",
+                "criterion_results",
+            ],
+            "properties": {
+                "dimension_id": {"const": dimension_id},
+                "verdict": {"type": "string"},
+                "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+                "assessable": {"type": "boolean"},
+                "evidence": {"type": "array", "items": _evidence_schema()},
+                "criterion_results": {
+                    "type": "array",
+                    "minItems": len(criterion_ids),
+                    "maxItems": len(criterion_ids),
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "criterion_id",
+                            "verdict",
+                            "score",
+                            "confidence",
+                            "assessable",
+                            "evidence",
+                        ],
+                        "properties": {
+                            "criterion_id": {"enum": criterion_ids},
+                            "verdict": {"type": "string"},
+                            "score": {
+                                "type": ["number", "null"],
+                                "minimum": 0,
+                                "maximum": 2,
+                            },
+                            "confidence": {
+                                "type": ["number", "null"],
+                                "minimum": 0,
+                                "maximum": 1,
+                            },
+                            "assessable": {"type": "boolean"},
+                            "evidence": {"type": "array", "items": _evidence_schema()},
+                            "raw_metrics": {"type": "object"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "raw_metrics": {"type": "object"},
+            },
+            "additionalProperties": False,
+        }
+
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -204,41 +272,22 @@ def _batch_output_schema(dimension_ids: list[str]) -> dict[str, Any]:
                 "type": "array",
                 "minItems": len(dimension_ids),
                 "maxItems": len(dimension_ids),
-                "items": {
-                    "type": "object",
-                    "required": [
-                        "dimension_id",
-                        "verdict",
-                        "score",
-                        "confidence",
-                        "assessable",
-                        "evidence",
-                    ],
-                    "properties": {
-                        "dimension_id": {"enum": dimension_ids},
-                        "verdict": {"type": "string"},
-                        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 2},
-                        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-                        "assessable": {"type": "boolean"},
-                        "evidence": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["description"],
-                                "properties": {
-                                    "description": {"type": "string"},
-                                    "start_s": {"type": "number"},
-                                    "end_s": {"type": "number"},
-                                    "region": {"type": ["string", "object", "null"]},
-                                },
-                                "additionalProperties": False,
-                            },
-                        },
-                        "raw_metrics": {"type": "object"},
-                    },
-                    "additionalProperties": False,
-                },
+                "items": {"oneOf": [judgment_schema(item) for item in dimension_ids]},
             }
+        },
+        "additionalProperties": False,
+    }
+
+
+def _evidence_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+            "description": {"type": "string"},
+            "start_s": {"type": "number"},
+            "end_s": {"type": "number"},
+            "region": {"type": ["string", "object", "null"]},
         },
         "additionalProperties": False,
     }

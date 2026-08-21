@@ -9,10 +9,19 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from xmax_test.contracts import PipelineStage, StageManifest
-from xmax_test.errors import ApprovalRequiredError, ContractError, MissingInputError, PartialCompletionError
+from xmax_test.contracts import PipelineStage
+from xmax_test.errors import (
+    ApprovalRequiredError,
+    ContractError,
+    MissingInputError,
+    PartialCompletionError,
+)
 from xmax_test.pipeline.dependencies import check_stage_inputs, raise_missing_inputs
-from xmax_test.pipeline.manifests import ManifestStore, build_batch_manifest, build_stage_manifest
+from xmax_test.pipeline.manifests import (
+    ManifestStore,
+    build_batch_manifest,
+    build_stage_manifest,
+)
 from xmax_test.pipeline.models import (
     StageExecutionRequest,
     StageExecutionResult,
@@ -71,13 +80,8 @@ class PipelineTestBase(unittest.TestCase):
         self.directory.cleanup()
 
     def orchestrator(self, stages: list[str]) -> PipelineOrchestrator:
-        executors = {
-            PipelineStage(stage): RecordingExecutor(stage, self.calls)
-            for stage in stages
-        }
-        return PipelineOrchestrator(
-            self.repository, self.manifest_store, self.selectors, executors
-        )
+        executors = {PipelineStage(stage): RecordingExecutor(stage, self.calls) for stage in stages}
+        return PipelineOrchestrator(self.repository, self.manifest_store, self.selectors, executors)
 
     def request(self, stages: list[str], **extra) -> dict:
         request: dict = {
@@ -149,7 +153,11 @@ class SelectorTests(PipelineTestBase):
                 "mode": "offline",
                 "origin": "xmax_offline",
                 "status": "completed",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h",
+                },
             }
         )
         frozen = self.selectors.resolve(
@@ -215,10 +223,7 @@ class OrchestratorTests(PipelineTestBase):
                 )
                 return super().execute(request)
 
-        executors = {
-            PipelineStage(stage): RecordingExecutor(stage, self.calls)
-            for stage in stages
-        }
+        executors = {PipelineStage(stage): RecordingExecutor(stage, self.calls) for stage in stages}
         executors[PipelineStage.SYNC] = CapturingSyncExecutor("sync", self.calls)
         orchestrator = PipelineOrchestrator(
             self.repository, self.manifest_store, self.selectors, executors
@@ -227,9 +232,7 @@ class OrchestratorTests(PipelineTestBase):
         summary = orchestrator.run(
             self.request(
                 stages,
-                stage_inputs={
-                    "plan": [self.selector("asset_batch", [asset_batch])]
-                },
+                stage_inputs={"plan": [self.selector("asset_batch", [asset_batch])]},
                 sync_policy="full",
             ),
             budget_approved=True,
@@ -258,10 +261,7 @@ class OrchestratorTests(PipelineTestBase):
             self.repository,
             self.manifest_store,
             self.selectors,
-            {
-                PipelineStage(stage): NoOutputExecutor(stage, self.calls)
-                for stage in stages
-            },
+            {PipelineStage(stage): NoOutputExecutor(stage, self.calls) for stage in stages},
         )
         summary = orchestrator.run(self.request(stages), dry_run=True)
         self.assertTrue(summary["ok"])
@@ -378,7 +378,6 @@ class OrchestratorTests(PipelineTestBase):
             stage = PipelineStage("evaluate")
 
             def execute(self, request: StageExecutionRequest) -> StageExecutionResult:
-                self_calls = self_calls  # placeholder to keep static checkers happy
                 return StageExecutionResult(status="completed", output_refs=[])
 
         # The orchestrator receives a real generate executor but a request

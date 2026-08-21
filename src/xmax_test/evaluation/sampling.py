@@ -75,6 +75,5 @@ def local_high_fps_timestamps(
     end = window["window_end_s"]
     count = window["sample_count"]
     return global_samples(end - start, count, cover_edges=True, fps=fps) and [
-        round(start + index * (end - start) / max(1, count - 1), 3)
-        for index in range(count)
+        round(start + index * (end - start) / max(1, count - 1), 3) for index in range(count)
     ]

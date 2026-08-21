@@ -7,7 +7,8 @@ actual generation/evaluation/sync implementation.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ..hashing import content_hash
 from ..time import utc_now
@@ -23,13 +24,16 @@ class TaskAllocator:
         created_at = self._clock.now() if self._clock else utc_now()
         tasks: list[dict[str, Any]] = []
         for allocation_index, case in enumerate(plan.get("cases", []), start=1):
-            task_id = "task-" + content_hash(
-                {
-                    "plan_hash": plan["plan_hash"],
-                    "case_id": case["case_id"],
-                    "allocation_index": allocation_index,
-                }
-            )[:16]
+            task_id = (
+                "task-"
+                + content_hash(
+                    {
+                        "plan_hash": plan["plan_hash"],
+                        "case_id": case["case_id"],
+                        "allocation_index": allocation_index,
+                    }
+                )[:16]
+            )
             tasks.append(
                 {
                     "task_id": task_id,
@@ -99,9 +103,7 @@ class TaskWorker:
         # Run transport/dependency checks before claiming even one task.  A
         # batch-wide infrastructure failure must leave every task untouched,
         # rather than manufacturing hundreds of per-Case error rows.
-        self._preflight(
-            self._repository.list_test_tasks(task_batch_id=task_batch_id)
-        )
+        self._preflight(self._repository.list_test_tasks(task_batch_id=task_batch_id))
         processed: list[str] = []
         errors: list[dict[str, Any]] = []
         while max_tasks is None or len(processed) < max_tasks:
@@ -127,9 +129,7 @@ class TaskWorker:
         if callable(preflight):
             preflight(tasks)
 
-    def _execute_claimed(
-        self, task: dict[str, Any], lease_owner: str
-    ) -> dict[str, Any]:
+    def _execute_claimed(self, task: dict[str, Any], lease_owner: str) -> dict[str, Any]:
         try:
             result_refs = self._execute_task(task) or {}
             return self._repository.update_test_task(

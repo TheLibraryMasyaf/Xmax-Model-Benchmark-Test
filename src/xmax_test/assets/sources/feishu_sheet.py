@@ -11,9 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from xmax_test.errors import ContractError
-from xmax_test.hashing import file_sha256
 from xmax_test.assets.models import DownloadResult, RemoteAsset
+from xmax_test.errors import ContractError
+
 from .base import BaseSource
 
 
@@ -29,9 +29,7 @@ class FeishuSheetSource(BaseSource):
         self._mapping = descriptor.config.get("field_mapping", {})
 
     def list_assets(self, query: dict[str, Any] | None = None) -> list[RemoteAsset]:
-        meta = self._client.get_sheet_meta(
-            self._spreadsheet_token, self._sheet_id, self._range
-        )
+        meta = self._client.get_sheet_meta(self._spreadsheet_token, self._sheet_id, self._range)
         if meta.get("truncated"):
             raise ContractError(
                 f"sheet {self._sheet_id} response truncated; cannot report a "
@@ -39,8 +37,7 @@ class FeishuSheetSource(BaseSource):
             )
         if meta.get("has_more"):
             raise ContractError(
-                f"sheet {self._sheet_id} has more rows; range must cover the "
-                "full effective area"
+                f"sheet {self._sheet_id} has more rows; range must cover the full effective area"
             )
         rows = meta.get("rows", [])
         row_indices = meta.get("row_indices", [])
@@ -69,7 +66,9 @@ class FeishuSheetSource(BaseSource):
                         metadata={
                             "kind": asset_kind or self.asset_kind,
                             "row_index": int(row_index),
-                            "col_index": col_indices[col_offset] if col_offset < len(col_indices) else col_offset,
+                            "col_index": col_indices[col_offset]
+                            if col_offset < len(col_indices)
+                            else col_offset,
                             "value": value if isinstance(value, str) else "",
                         },
                     )

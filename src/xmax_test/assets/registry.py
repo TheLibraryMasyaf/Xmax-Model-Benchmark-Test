@@ -7,12 +7,10 @@ changed content always produces a new asset_id. Media validation decides
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from ..errors import ContractError, ValidationError
-from ..hashing import sha256_text
 from ..time import utc_now
 from .models import DownloadResult, RemoteAsset, remote_asset_dict
 from .validator import MediaValidator, sniff_mime
@@ -35,9 +33,7 @@ class AssetRegistry:
         self._validator = validator or MediaValidator()
         self._clock = clock
 
-    def register_download(
-        self, source: dict[str, Any], download: DownloadResult
-    ) -> dict[str, Any]:
+    def register_download(self, source: dict[str, Any], download: DownloadResult) -> dict[str, Any]:
         """Register one downloaded file as a content-addressed asset.
 
         Returns the asset record; ``None``-free idempotent path when the same
@@ -130,9 +126,7 @@ def _binding_key(binding: dict[str, Any]) -> tuple[str, str, str, str]:
 
         verification = self._artifacts.verify(asset["uri"], expected_sha256=asset["sha256"])
         try:
-            media = self._validator.validate(
-                self._artifacts.resolve(asset["uri"]), asset["kind"]
-            )
+            media = self._validator.validate(self._artifacts.resolve(asset["uri"]), asset["kind"])
             status = "ready"
         except ValidationError:
             status = "invalid"
@@ -230,7 +224,12 @@ class SourceRunner:
             except Exception as exc:
                 source_entry["failed"] = 1
                 summary["errors"].append(
-                    {"code": "xmax.external_failure", "message": str(exc), "stage": "ingest", "retryable": True}
+                    {
+                        "code": "xmax.external_failure",
+                        "message": str(exc),
+                        "stage": "ingest",
+                        "retryable": True,
+                    }
                 )
                 summary["sources"].append(source_entry)
                 continue
@@ -256,9 +255,7 @@ class SourceRunner:
                     else:
                         source_entry["registered"] += 1
                         summary["assets_registered"] += 1
-                    source_entry.setdefault("status_by_id", {})[
-                        remote.remote_key
-                    ] = asset["status"]
+                    source_entry.setdefault("status_by_id", {})[remote.remote_key] = asset["status"]
                 except Exception as exc:
                     source_entry["failed"] += 1
                     summary["errors"].append(

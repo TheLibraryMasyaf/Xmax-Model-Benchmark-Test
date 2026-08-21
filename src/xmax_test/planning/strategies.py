@@ -53,7 +53,7 @@ class StrategyRegistry:
             raise ContractError(f"unknown combination allocation strategy: {name}") from exc
 
     @classmethod
-    def defaults(cls) -> "StrategyRegistry":
+    def defaults(cls) -> StrategyRegistry:
         registry = cls()
         for strategy in (
             CartesianStrategy(),
@@ -187,7 +187,10 @@ class ExplicitPairsStrategy:
         missing: list[str] = []
         seen_requested: set[tuple[str, str]] = set()
         for pair in requested:
-            key = (str(pair.get("feed_asset_id", "")), str(pair.get("prompt_record_number", "")))
+            key = (
+                str(pair.get("feed_asset_id", "")),
+                str(pair.get("prompt_record_number", "")),
+            )
             if key in seen_requested:
                 raise ContractError(
                     f"explicit_pairs contains duplicate pair: {key[0]} + prompt record {key[1]}"

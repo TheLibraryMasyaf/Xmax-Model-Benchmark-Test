@@ -17,7 +17,7 @@ from typing import Any
 
 from ..errors import ContractError
 
-REPORTER_VERSION = "0.1.0"
+REPORTER_VERSION = "0.2.0-criterion-scores"
 PLACEHOLDER = re.compile(r"\{\{\s*(.*?)\s*\}\}")
 UNKNOWN_VALUE = "—"
 
@@ -69,6 +69,7 @@ def build_report_json(
             "baseline": comparison.get("overall", {}).get("baseline_stats", {"n": 0}),
             "candidate": comparison.get("overall", {}).get("candidate_stats", {"n": 0}),
         },
+        "criterion_results": comparison.get("overall", {}).get("criteria", []),
         "p0_improvements": classified.get("p0", []),
         "p1_ties": classified.get("p1", []),
         "p2_regressions": classified.get("p2", []),
@@ -101,9 +102,12 @@ def render_markdown(report: dict[str, Any], template_text: str) -> str:
         "requested_scenes": ", ".join(report.get("requested_scene_ids", [])),
         "comparability_conclusion": _comparability_conclusion(report),
         "top_drivers": report.get("top_drivers") or _bucket_ids(report.get("p0_improvements", [])),
-        "improvement_analysis": report.get("improvement_analysis") or _bucket_summary("明显改进", report.get("p0_improvements", [])),
-        "tie_analysis": report.get("tie_analysis") or _bucket_summary("持平", report.get("p1_ties", [])),
-        "regression_analysis": report.get("regression_analysis") or _bucket_summary("劣化", report.get("p2_regressions", [])),
+        "improvement_analysis": report.get("improvement_analysis")
+        or _bucket_summary("明显改进", report.get("p0_improvements", [])),
+        "tie_analysis": report.get("tie_analysis")
+        or _bucket_summary("持平", report.get("p1_ties", [])),
+        "regression_analysis": report.get("regression_analysis")
+        or _bucket_summary("劣化", report.get("p2_regressions", [])),
         "failures_and_skips": report.get("failures_and_skips") or "无",
         "blockers_or_none": report.get("blockers") or "无",
         "follow_up_scenes": report.get("follow_up_scenes") or "无",
@@ -119,8 +123,12 @@ def render_markdown(report: dict[str, Any], template_text: str) -> str:
         "details": "0",
         "n": "0",
         "score": _fmt(report.get("score_summary", {}).get("scenario", {}).get("candidate")),
-        "delta_points": _fmt(report.get("score_summary", {}).get("scenario", {}).get("delta_points")),
-        "delta_percent": _fmt(report.get("score_summary", {}).get("scenario", {}).get("delta_percent")),
+        "delta_points": _fmt(
+            report.get("score_summary", {}).get("scenario", {}).get("delta_points")
+        ),
+        "delta_percent": _fmt(
+            report.get("score_summary", {}).get("scenario", {}).get("delta_percent")
+        ),
         "conclusion": _direction(report),
         **_distribution_placeholders(report),
     }
@@ -129,11 +137,14 @@ def render_markdown(report: dict[str, Any], template_text: str) -> str:
     text = _render_scene_sections(text, report)
     text = _render_score_rows(text, report)
     text = _render_scene_coverage(text, report)
+    text = _render_criterion_rows(text, report)
     text = _render_item_rows(text, "p0", report.get("p0_improvements", []))
     text = _render_item_rows(text, "p1", report.get("p1_ties", []))
     text = _render_item_rows(text, "p2", report.get("p2_regressions", []))
     # Fill simple named placeholders (data or "未取得/不可比较").
-    text = PLACEHOLDER.sub(lambda match: str(map_.get(match.group(1), f"{{{{{match.group(1)}}}}}")), text)
+    text = PLACEHOLDER.sub(
+        lambda match: str(map_.get(match.group(1), f"{{{{{match.group(1)}}}}}")), text
+    )
     # Generic table-cell markers become the "未取得" dash.
     text = re.sub(r"\{\{\s*\.\.\.\s*\}\}", UNKNOWN_VALUE, text)
 
@@ -225,6 +236,25 @@ def _render_scene_coverage(text: str, report: dict[str, Any]) -> str:
     return pattern.sub("\n".join(rows) + "\n" if rows else "", text)
 
 
+def _render_criterion_rows(text: str, report: dict[str, Any]) -> str:
+    rows = []
+    for item in report.get("criterion_results", []):
+        rows.append(
+            f"| `{item.get('dimension_id', '')}` | `{item.get('criterion_id', '')}` | "
+            f"{item.get('criterion_name') or UNKNOWN_VALUE} | {_fmt(item.get('baseline'))} | "
+            f"{_fmt(item.get('candidate'))} | {_fmt(item.get('delta_points'))} | "
+            f"{item.get('baseline_assessable_count', 0)} | "
+            f"{item.get('candidate_assessable_count', 0)} | "
+            f"{item.get('classification', 'unclassified')} | "
+            f"{_fmt(item.get('evidence_ids', []))} |"
+        )
+    pattern = re.compile(
+        r"\| `\{\{ dimension \}\}` \| `\{\{ criterion_id \}\}`.*?\|\n",
+        re.DOTALL,
+    )
+    return pattern.sub("\n".join(rows) + "\n" if rows else "无可比较的细则结果\n", text)
+
+
 def _render_item_rows(text: str, bucket: str, items: list[dict[str, Any]]) -> str:
     if bucket == "p0":
         pattern = re.compile(r"\| 1 \| `\{\{ item \}\}`.*?\|\n", re.DOTALL)
@@ -294,7 +324,13 @@ def _direction(report: dict[str, Any]) -> str:
 
 def _score_delta(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
-        return {"baseline": None, "candidate": None, "delta_points": None, "delta_percent": None, "classification": "not_comparable"}
+        return {
+            "baseline": None,
+            "candidate": None,
+            "delta_points": None,
+            "delta_percent": None,
+            "classification": "not_comparable",
+        }
     return {
         "baseline": value.get("baseline"),
         "candidate": value.get("candidate"),
@@ -334,8 +370,16 @@ def _distribution_placeholders(report: dict[str, Any]) -> dict[str, Any]:
     for label in ("baseline", "candidate"):
         stats = report.get("distribution_stats", {}).get(label, {})
         for key in (
-            "n", "case_scores_percent", "mean", "median", "min", "max",
-            "stdev", "p25", "p75", "success_rate",
+            "n",
+            "case_scores_percent",
+            "mean",
+            "median",
+            "min",
+            "max",
+            "stdev",
+            "p25",
+            "p75",
+            "success_rate",
         ):
             value = stats.get(key)
             result[f"{label}_{key}"] = UNKNOWN_VALUE if value is None else value

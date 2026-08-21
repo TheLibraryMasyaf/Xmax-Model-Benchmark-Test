@@ -29,11 +29,7 @@ def normalize_record_page(data: Any, *, offset: int = 0) -> dict[str, Any]:
                 str(name): values[column] if column < len(values) else None
                 for column, name in enumerate(field_names)
             }
-            record_id = (
-                record_ids[index]
-                if index < len(record_ids)
-                else f"offset-{offset + index}"
-            )
+            record_id = record_ids[index] if index < len(record_ids) else f"offset-{offset + index}"
             records.append({"record_id": record_id, "fields": fields})
         has_more = bool(data.get("has_more", False))
     else:

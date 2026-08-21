@@ -16,4 +16,3 @@ class GenerationAdapter(Protocol):
 
     def cancel(self, run_id: str) -> dict[str, Any]:
         """Request cancellation without deleting run history."""
-

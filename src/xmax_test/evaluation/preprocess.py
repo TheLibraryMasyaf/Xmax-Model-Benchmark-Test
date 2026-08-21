@@ -49,9 +49,7 @@ class PreprocessService:
         """Build preprocess artifacts for one completed run."""
 
         if run.get("status") != "completed":
-            raise ContractError(
-                f"preprocess requires a completed run, got {run.get('status')}"
-            )
+            raise ContractError(f"preprocess requires a completed run, got {run.get('status')}")
         result_asset_id = run.get("result_asset_id")
         if not result_asset_id:
             raise ContractError(f"run {run['run_id']} has no result asset")
@@ -84,9 +82,7 @@ class PreprocessService:
             }
         )
 
-        existing = self._repository.find_preprocess_run(
-            input_hash, config_hash, PROCESSOR_VERSION
-        )
+        existing = self._repository.find_preprocess_run(input_hash, config_hash, PROCESSOR_VERSION)
         if existing is not None:
             return existing
 
@@ -153,9 +149,7 @@ class PreprocessService:
                 input_frames = []
             if not input_frames:
                 continue
-            evidence_groups.append(
-                {"role": role, "asset_id": asset_id, "frames": input_frames}
-            )
+            evidence_groups.append({"role": role, "asset_id": asset_id, "frames": input_frames})
             input_sheets.append(
                 self._contact_sheet.build(
                     run_id=run["run_id"],
@@ -232,9 +226,7 @@ class PreprocessService:
         duration_s = float(asset.get("media", {}).get("duration_s") or 1.0)
         timestamps = global_samples(duration_s, min(3, self._global_frame_count), cover_edges=True)
         if self._frame_extractor is not None and hasattr(self._frame_extractor, "extract_asset"):
-            return self._frame_extractor.extract_asset(
-                run["run_id"], asset, timestamps, role
-            )
+            return self._frame_extractor.extract_asset(run["run_id"], asset, timestamps, role)
         if not asset.get("media"):
             return []
         return [

@@ -11,10 +11,12 @@ from jsonschema import Draft202012Validator
 
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.errors import ContractError
-from xmax_test.reporting.classification import bucket_pairs, classify_pair, comparison_policy
+from xmax_test.pipeline.manifests import build_batch_manifest
+from xmax_test.reporting.classification import bucket_pairs, classify_pair
 from xmax_test.reporting.comparison import ModelComparisonService
 from xmax_test.reporting.renderer import render_markdown, template_hash
 from xmax_test.reporting.service import ModelUpdateReportService
+from xmax_test.reporting.single_version import SingleVersionReportService
 from xmax_test.scenarios import load_scenario_pack
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 
@@ -25,7 +27,10 @@ TEST_SCHEMA = {
     "version": "2.0.0",
     "status": "active",
     "dimensions": [],
-    "weight_profile_by_mode": {"offline": "generic-offline-0.1", "realtime": "generic-realtime-0.1"},
+    "weight_profile_by_mode": {
+        "offline": "generic-offline-0.1",
+        "realtime": "generic-realtime-0.1",
+    },
     "case_score_output": "scenario_score",
     "comparison_policy": {
         "improvement_min_delta": 5.0,
@@ -91,7 +96,11 @@ class ReportingTestBase(unittest.TestCase):
                     "model_id": model,
                     "mode": "offline",
                     "origin": "xmax_offline",
-                    "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                    "provenance": {
+                        "source_type": "t",
+                        "source_locator": "l",
+                        "source_hash": "h",
+                    },
                     "result_asset_id": "result-a",
                     "edited_video_asset_id": "feed-a",
                     "expected_audio_source_asset_id": "feed-a",
@@ -115,6 +124,46 @@ class ReportingTestBase(unittest.TestCase):
                     "final_verdict": None,
                 }
             )
+            self.repository.save_batch_manifest(
+                build_batch_manifest(
+                    entity_type="run_batch",
+                    item_entity_type="generation_run",
+                    item_ids=[run_id],
+                    producer_stage_run_id="stage-test",
+                    batch_id=f"batch-{model}",
+                )
+            )
+            self.repository.save_batch_manifest(
+                build_batch_manifest(
+                    entity_type="evaluation_batch",
+                    item_entity_type="evaluation_result",
+                    item_ids=[f"eval-{model}"],
+                    producer_stage_run_id="stage-test",
+                    batch_id=f"eval-batch-{model}",
+                )
+            )
+        for entity_type, batch_id, item_type in (
+            ("run_batch", "batch-x9.9", "generation_run"),
+            ("evaluation_batch", "eval-batch-x9.9", "evaluation_result"),
+        ):
+            self.repository.save_batch_manifest(
+                build_batch_manifest(
+                    entity_type=entity_type,
+                    item_entity_type=item_type,
+                    item_ids=[],
+                    producer_stage_run_id="stage-test",
+                    batch_id=batch_id,
+                )
+            )
+
+    @staticmethod
+    def selectors(baseline: str = "x2.0", candidate: str = "x2.1") -> dict:
+        return {
+            "baseline_run_batch_id": f"batch-{baseline}",
+            "candidate_run_batch_id": f"batch-{candidate}",
+            "baseline_evaluation_batch_id": f"eval-batch-{baseline}",
+            "candidate_evaluation_batch_id": f"eval-batch-{candidate}",
+        }
 
     def service(self) -> ModelUpdateReportService:
         return ModelUpdateReportService(
@@ -143,12 +192,21 @@ class ReportRepositoryProxy:
     def batch_manifest(self, entity_type: str, batch_id: str) -> dict:
         return self._repository.get_batch_manifest(entity_type, batch_id)
 
+    def human_signals(self) -> list[dict]:
+        return self._repository.list_human_signals()
+
+    def evaluation_overrides(self) -> list[dict]:
+        return self._repository.list_evaluation_overrides()
+
 
 class ComparisonTests(ReportingTestBase):
     def test_paired_samples_compute_dual_score_deltas(self) -> None:
-        compared = ModelComparisonService(self.repository, self.benchmark, self.pack, TEST_SCHEMA).compare(
+        compared = ModelComparisonService(
+            self.repository, self.benchmark, self.pack, TEST_SCHEMA
+        ).compare(
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
+            **self.selectors(),
             requested_scene_ids=["core-selfie-appearance"],
         )
         self.assertEqual(compared["status"], "complete")
@@ -159,9 +217,12 @@ class ComparisonTests(ReportingTestBase):
         self.assertEqual(overall["scenario"]["delta_points"], 20.0)
 
     def test_missing_pairs_are_not_comparable(self) -> None:
-        compared = ModelComparisonService(self.repository, self.benchmark, self.pack, TEST_SCHEMA).compare(
+        compared = ModelComparisonService(
+            self.repository, self.benchmark, self.pack, TEST_SCHEMA
+        ).compare(
             baseline_model_version="x2.0",
             candidate_model_version="x9.9",
+            **self.selectors(candidate="x9.9"),
             requested_scene_ids=["core-selfie-appearance"],
         )
         self.assertEqual(compared["status"], "not_comparable")
@@ -186,7 +247,11 @@ class ComparisonTests(ReportingTestBase):
                 "model_id": "x2.2",
                 "mode": "offline",
                 "origin": "xmax_offline",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h2"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h2",
+                },
                 "result_asset_id": "result-b",
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
@@ -210,11 +275,30 @@ class ComparisonTests(ReportingTestBase):
                 "final_verdict": None,
             }
         )
+        self.repository.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="run_batch",
+                item_entity_type="generation_run",
+                item_ids=["run-x2.2"],
+                producer_stage_run_id="stage-test",
+                batch_id="batch-x2.2",
+            )
+        )
+        self.repository.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="evaluation_batch",
+                item_entity_type="evaluation_result",
+                item_ids=["eval-x2.2"],
+                producer_stage_run_id="stage-test",
+                batch_id="eval-batch-x2.2",
+            )
+        )
         compared = ModelComparisonService(
             self.repository, self.benchmark, self.pack, TEST_SCHEMA
         ).compare(
             baseline_model_version="x2.0",
             candidate_model_version="x2.2",
+            **self.selectors(candidate="x2.2"),
             requested_scene_ids=["core-selfie-appearance"],
         )
         self.assertEqual(compared["status"], "not_comparable")
@@ -237,7 +321,14 @@ class ClassificationTests(ReportingTestBase):
         self.assertEqual(classify_delta(50.0, None), "unclassified")
 
     def test_new_hard_gate_failure_is_always_p2(self) -> None:
-        baseline = {"_evaluation": {"applied_gate_ids": [], "final_verdict": None, "canonical_score": 90.0, "scenario_score": 90.0}}
+        baseline = {
+            "_evaluation": {
+                "applied_gate_ids": [],
+                "final_verdict": None,
+                "canonical_score": 90.0,
+                "scenario_score": 90.0,
+            }
+        }
         candidate = {
             "_evaluation": {
                 "applied_gate_ids": ["invalid-result-block-score"],
@@ -246,7 +337,13 @@ class ClassificationTests(ReportingTestBase):
                 "scenario_score": 95.0,
             }
         }
-        pair = {"key": ("feed001_prompt001_01", "core-selfie-appearance", "offline"), "scene_id": "core-selfie-appearance", "mode": "offline", "baseline": baseline, "candidate": candidate}
+        pair = {
+            "key": ("feed001_prompt001_01", "core-selfie-appearance", "offline"),
+            "scene_id": "core-selfie-appearance",
+            "mode": "offline",
+            "baseline": baseline,
+            "candidate": candidate,
+        }
         classified = classify_pair(pair, TEST_SCHEMA["comparison_policy"])
         self.assertEqual(classified["classification"], "p2")
         self.assertTrue(classified["new_hard_gate_failure"])
@@ -258,15 +355,43 @@ class ClassificationTests(ReportingTestBase):
                 "key": ("a", "s1", "offline"),
                 "scene_id": "s1",
                 "mode": "offline",
-                "baseline": {"_evaluation": {"canonical_score": 50.0, "scenario_score": 50.0, "applied_gate_ids": [], "final_verdict": None}},
-                "candidate": {"_evaluation": {"canonical_score": 60.0, "scenario_score": 60.0, "applied_gate_ids": [], "final_verdict": None}},
+                "baseline": {
+                    "_evaluation": {
+                        "canonical_score": 50.0,
+                        "scenario_score": 50.0,
+                        "applied_gate_ids": [],
+                        "final_verdict": None,
+                    }
+                },
+                "candidate": {
+                    "_evaluation": {
+                        "canonical_score": 60.0,
+                        "scenario_score": 60.0,
+                        "applied_gate_ids": [],
+                        "final_verdict": None,
+                    }
+                },
             },
             {
                 "key": ("b", "s1", "offline"),
                 "scene_id": "s1",
                 "mode": "offline",
-                "baseline": {"_evaluation": {"canonical_score": 60.0, "scenario_score": 60.0, "applied_gate_ids": [], "final_verdict": None}},
-                "candidate": {"_evaluation": {"canonical_score": 50.0, "scenario_score": 50.0, "applied_gate_ids": [], "final_verdict": None}},
+                "baseline": {
+                    "_evaluation": {
+                        "canonical_score": 60.0,
+                        "scenario_score": 60.0,
+                        "applied_gate_ids": [],
+                        "final_verdict": None,
+                    }
+                },
+                "candidate": {
+                    "_evaluation": {
+                        "canonical_score": 50.0,
+                        "scenario_score": 50.0,
+                        "applied_gate_ids": [],
+                        "final_verdict": None,
+                    }
+                },
             },
         ]
         buckets = bucket_pairs(pairs, policy)
@@ -275,11 +400,32 @@ class ClassificationTests(ReportingTestBase):
 
 
 class RenderTests(ReportingTestBase):
+    def test_single_version_report_uses_exact_batches_and_has_criteria_section(
+        self,
+    ) -> None:
+        result = SingleVersionReportService(self.repository, self.benchmark, self.pack).generate(
+            report_id="single-x2.0",
+            model_version="x2.0",
+            run_batch_id="batch-x2.0",
+            evaluation_batch_id="eval-batch-x2.0",
+            output_directory=self.output,
+            requested_scene_ids=["core-selfie-appearance"],
+        )
+        payload = json.loads(Path(result["json_path"]).read_text(encoding="utf-8"))
+        schema = json.loads(
+            (ROOT / "schemas" / "single-version-report.schema.json").read_text(encoding="utf-8")
+        )
+        Draft202012Validator(schema).validate(payload)
+        markdown = Path(result["markdown_path"]).read_text(encoding="utf-8")
+        self.assertIn("## Criteria", markdown)
+        self.assertIn("## P0 recommendations", markdown)
+
     def test_full_report_writes_json_and_markdown_without_placeholders(self) -> None:
         result = self.service().generate(
             comparison_id="cmp-1",
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
+            **self.selectors(),
             requested_scene_ids=["core-selfie-appearance"],
             template_path=self.template,
             output_directory=self.output,
@@ -303,13 +449,17 @@ class RenderTests(ReportingTestBase):
         self.assertIn("p0_improvements", report)
         self.assertTrue(report["generation_config_hash"])
         self.assertIn("template_hash", report["audit"])
-        self.assertEqual(report["audit"]["template_hash"], template_hash(self.template.read_text(encoding="utf-8")))
+        self.assertEqual(
+            report["audit"]["template_hash"],
+            template_hash(self.template.read_text(encoding="utf-8")),
+        )
 
     def test_each_requested_scene_has_own_section(self) -> None:
         result = self.service().generate(
             comparison_id="cmp-2",
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
+            **self.selectors(),
             requested_scene_ids=["core-selfie-appearance"],
             template_path=self.template,
             output_directory=self.output,
@@ -327,6 +477,7 @@ class RenderTests(ReportingTestBase):
                 comparison_id="cmp-3",
                 baseline_model_version="x2.0",
                 candidate_model_version="x2.1",
+                **self.selectors(),
                 requested_scene_ids=["core-selfie-appearance"],
                 template_path=self.output / "missing.md",
                 output_directory=self.output,

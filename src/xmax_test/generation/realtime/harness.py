@@ -15,8 +15,14 @@ from ...errors import ExternalServiceError, MissingDependencyError
 
 class BrowserRealtimeHarness:
     def __init__(
-        self, project_root: Path, artifacts: Any, repository: Any,
-        *, api_key: str | None = None, timeout_s: int = 900, headed: bool = False,
+        self,
+        project_root: Path,
+        artifacts: Any,
+        repository: Any,
+        *,
+        api_key: str | None = None,
+        timeout_s: int = 900,
+        headed: bool = False,
     ) -> None:
         self._root = Path(project_root)
         self._artifacts = artifacts
@@ -52,7 +58,9 @@ class BrowserRealtimeHarness:
                 "reference_url": config.get("reference_url"),
                 "prompt": case.get("prompt_text", ""),
                 "model": case.get("model_id", "x2.0"),
-                "duration_s": config.get("duration_s", input_asset.get("media", {}).get("duration_s", 3)),
+                "duration_s": config.get(
+                    "duration_s", input_asset.get("media", {}).get("duration_s", 3)
+                ),
                 "tracks": config.get("tracks", []),
                 "base_url": config.get("base_url"),
                 "headed": config.get("headed", self._headed),
@@ -66,8 +74,12 @@ class BrowserRealtimeHarness:
                 environment["XMAX_API_KEY"] = self._api_key
             try:
                 completed = subprocess.run(
-                    command, cwd=self._root / "realtime-harness", capture_output=True,
-                    text=True, timeout=self._timeout, env=environment,
+                    command,
+                    cwd=self._root / "realtime-harness",
+                    capture_output=True,
+                    text=True,
+                    timeout=self._timeout,
+                    env=environment,
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise ExternalServiceError(f"realtime harness failed: {exc}") from exc

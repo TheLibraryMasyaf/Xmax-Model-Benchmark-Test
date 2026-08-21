@@ -15,6 +15,7 @@ class HardGateEvaluator:
         benchmark: dict[str, Any],
         dimension_scores: dict[str, dict[str, Any]],
         runtime_facts: dict[str, Any],
+        criterion_scores: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Evaluate all active gates and return applied gates + verdicts.
 
@@ -30,7 +31,7 @@ class HardGateEvaluator:
                 continue
             condition = gate.get("condition", {})
             action = gate.get("action", {})
-            if self._matches(condition, dimension_scores, runtime_facts):
+            if self._matches(condition, dimension_scores, runtime_facts, criterion_scores or {}):
                 applied.append(gate["gate_id"])
                 if action.get("type") == "block_score":
                     block_score = True
@@ -46,15 +47,23 @@ class HardGateEvaluator:
         condition: dict[str, Any],
         dimension_scores: dict[str, dict[str, Any]],
         runtime_facts: dict[str, Any],
+        criterion_scores: dict[str, dict[str, Any]],
     ) -> bool:
         dimension_id = condition.get("dimension_id")
+        criterion_id = condition.get("criterion_id")
+        if criterion_id:
+            criterion = criterion_scores.get(criterion_id)
+            if criterion is None:
+                return False
+            if dimension_id and criterion.get("dimension_id") != dimension_id:
+                return False
+            if "score_equals" in condition:
+                return criterion.get("score") == condition["score_equals"]
+            return True
         if dimension_id and dimension_id in dimension_scores:
             judgment = dimension_scores[dimension_id]
             if "score_equals" in condition:
                 if judgment.get("score") == condition["score_equals"]:
-                    return True
-            if "criterion_id" in condition:
-                if judgment.get("criterion_id") == condition["criterion_id"]:
                     return True
         for key, value in condition.items():
             if key in {"dimension_id", "criterion_id", "score_equals"}:

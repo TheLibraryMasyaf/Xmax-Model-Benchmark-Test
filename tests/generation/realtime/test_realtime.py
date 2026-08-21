@@ -7,7 +7,10 @@ import unittest
 from pathlib import Path
 
 from xmax_test.errors import ContractError
-from xmax_test.generation.realtime.controller import FakeRealtimeHarness, RealtimeController
+from xmax_test.generation.realtime.controller import (
+    FakeRealtimeHarness,
+    RealtimeController,
+)
 from xmax_test.generation.realtime.interactions import InteractionProfileResolver
 from xmax_test.storage.artifacts import ArtifactStore
 from xmax_test.storage.sqlite import SqliteMetadataRepository
@@ -21,9 +24,7 @@ class RealtimeTestBase(unittest.TestCase):
         self.repository = SqliteMetadataRepository(root / "db.sqlite3", clock=FixedClock())
         self.artifacts = ArtifactStore(root / "artifacts")
         self.clock = FixedClock()
-        self.controller = RealtimeController(
-            self.repository, self.artifacts, clock=self.clock
-        )
+        self.controller = RealtimeController(self.repository, self.artifacts, clock=self.clock)
 
     def tearDown(self) -> None:
         self.repository.close()
@@ -63,7 +64,13 @@ class RealtimeControllerTests(RealtimeTestBase):
                         "event_kind": "pointer_tracks",
                         "sample_fps": 30,
                         "segments": [
-                            {"start_ms": 0, "duration_ms": 1000, "from": [0, 0], "to": [1, 1], "fingers": 2}
+                            {
+                                "start_ms": 0,
+                                "duration_ms": 1000,
+                                "from": [0, 0],
+                                "to": [1, 1],
+                                "fingers": 2,
+                            }
                         ],
                     }
                 ]
@@ -88,7 +95,9 @@ class RealtimeControllerTests(RealtimeTestBase):
 
     def test_single_round_not_polluted_by_auto_loop(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock, fps=30)
-        controller = RealtimeController(self.repository, self.artifacts, harness=harness, clock=self.clock)
+        controller = RealtimeController(
+            self.repository, self.artifacts, harness=harness, clock=self.clock
+        )
         run = controller.run_case(self.case(), config={"duration_s": 1.0})
         # The harness only records one task_start/task_stop pair.
         raw = self.artifacts.read_bytes(run["raw_events_uri"]).decode("utf-8")
@@ -103,10 +112,18 @@ class RealtimeControllerTests(RealtimeTestBase):
 
     def test_tracks_frames_are_30fps_and_mapped_to_content_resolution(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock, fps=30)
-        controller = RealtimeController(self.repository, self.artifacts, harness=harness, clock=self.clock)
+        controller = RealtimeController(
+            self.repository, self.artifacts, harness=harness, clock=self.clock
+        )
         run = controller.run_case(
             self.case(),
-            config={"duration_s": 2.0, "content_width": 1280, "content_height": 720, "dom_width": 640, "dom_height": 360},
+            config={
+                "duration_s": 2.0,
+                "content_width": 1280,
+                "content_height": 720,
+                "dom_width": 640,
+                "dom_height": 360,
+            },
         )
         raw = self.artifacts.read_bytes(run["raw_events_uri"]).decode("utf-8")
         import json
@@ -125,14 +142,18 @@ class RealtimeControllerTests(RealtimeTestBase):
 
     def test_audio_is_explicitly_published_and_subscribed(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock)
-        controller = RealtimeController(self.repository, self.artifacts, harness=harness, clock=self.clock)
+        controller = RealtimeController(
+            self.repository, self.artifacts, harness=harness, clock=self.clock
+        )
         run = controller.run_case(self.case())
         self.assertEqual(run["metrics"]["audio"]["publish"], True)
         self.assertEqual(run["metrics"]["audio"]["subscribe"], True)
 
     def test_all_callbacks_have_timestamps(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock)
-        controller = RealtimeController(self.repository, self.artifacts, harness=harness, clock=self.clock)
+        controller = RealtimeController(
+            self.repository, self.artifacts, harness=harness, clock=self.clock
+        )
         run = controller.run_case(self.case())
         raw = self.artifacts.read_bytes(run["raw_events_uri"]).decode("utf-8")
         import json
@@ -144,9 +165,12 @@ class RealtimeControllerTests(RealtimeTestBase):
 
     def test_disconnect_reconnect_is_supported(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock)
-        controller = RealtimeController(self.repository, self.artifacts, harness=harness, clock=self.clock)
+        controller = RealtimeController(
+            self.repository, self.artifacts, harness=harness, clock=self.clock
+        )
         run = controller.run_case(
-            self.case(), config={"simulate_disconnect": True, "simulate_reconnect": True}
+            self.case(),
+            config={"simulate_disconnect": True, "simulate_reconnect": True},
         )
         raw = self.artifacts.read_bytes(run["raw_events_uri"]).decode("utf-8")
         import json
@@ -156,9 +180,7 @@ class RealtimeControllerTests(RealtimeTestBase):
         self.assertIn("disconnected", states)
         # Reconnect leads back to running and a new video_started event.
         self.assertEqual(states[-1], "running")
-        video_started = [
-            c for c in payload["callbacks"] if c.get("event") == "video_started"
-        ]
+        video_started = [c for c in payload["callbacks"] if c.get("event") == "video_started"]
         self.assertEqual(len(video_started), 2)
 
     def test_invalid_input_method_is_rejected(self) -> None:

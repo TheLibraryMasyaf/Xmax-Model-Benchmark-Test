@@ -33,9 +33,7 @@ def available_migrations() -> list[tuple[str, str, str]]:
 
 
 def applied_migrations(connection: Any) -> dict[str, str]:
-    rows = connection.execute(
-        "SELECT version, checksum FROM schema_migrations"
-    ).fetchall()
+    rows = connection.execute("SELECT version, checksum FROM schema_migrations").fetchall()
     return {row[0]: row[1] for row in rows}
 
 
@@ -64,8 +62,7 @@ def migrate(connection: Any, *, dry_run: bool = False) -> list[str]:
         if version in applied:
             if applied[version] != checksum:
                 raise ContractError(
-                    f"migration {version} content changed after it was applied; "
-                    "refusing to run"
+                    f"migration {version} content changed after it was applied; refusing to run"
                 )
             continue
         if dry_run:
@@ -73,10 +70,18 @@ def migrate(connection: Any, *, dry_run: bool = False) -> list[str]:
             continue
         with connection:
             connection.executescript(sql)
-            connection.execute(
-                "INSERT INTO schema_migrations(version, checksum, applied_at) "
-                "VALUES (?, ?, ?)",
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations"
+                "(version, checksum, applied_at) VALUES (?, ?, ?)",
                 (version, checksum, utc_now()),
             )
-        pending.append(version)
+            recorded = connection.execute(
+                "SELECT checksum FROM schema_migrations WHERE version = ?", (version,)
+            ).fetchone()
+            if recorded is None or recorded[0] != checksum:
+                raise ContractError(
+                    f"migration {version} was concurrently recorded with a different checksum"
+                )
+        if cursor.rowcount == 1:
+            pending.append(version)
     return pending

@@ -1,6 +1,6 @@
+import unittest
 from copy import deepcopy
 from pathlib import Path
-import unittest
 
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.evaluation.weights import resolve_scene_weights
@@ -21,14 +21,14 @@ class ScenarioPackTests(unittest.TestCase):
         validate_benchmark_scenario_references(self.benchmark, self.pack)
 
     def test_all_shadow_scene_rules_reproduce_declared_percentages(self) -> None:
-        profiles = {
-            item["profile_id"]: item for item in self.benchmark["weight_profiles"]
-        }
+        profiles = {item["profile_id"]: item for item in self.benchmark["weight_profiles"]}
         rules = self.benchmark["scene_weight_rules"]
         for rule in rules:
             with self.subTest(rule_id=rule["rule_id"]):
                 conditions = rule["when"]["all"]
-                scenario_id = next(item["scenario_id"] for item in conditions if "scenario_id" in item)
+                scenario_id = next(
+                    item["scenario_id"] for item in conditions if "scenario_id" in item
+                )
                 mode = next(item["mode"] for item in conditions if "mode" in item)
                 profile = profiles[rule["applicable_profile_ids"][0]]
                 result = resolve_scene_weights(
@@ -40,8 +40,7 @@ class ScenarioPackTests(unittest.TestCase):
                     include_shadow_rules=True,
                 )
                 expected = {
-                    key: value / 100
-                    for key, value in sorted(rule["weight_overrides"].items())
+                    key: value / 100 for key, value in sorted(rule["weight_overrides"].items())
                 }
                 self.assertEqual(result.effective_weights, expected)
                 self.assertEqual(
@@ -51,9 +50,7 @@ class ScenarioPackTests(unittest.TestCase):
 
     def test_unknown_scenario_reference_is_rejected(self) -> None:
         benchmark = deepcopy(self.benchmark)
-        benchmark["scene_weight_rules"][0]["when"]["all"][0][
-            "scenario_id"
-        ] = "missing-scene"
+        benchmark["scene_weight_rules"][0]["when"]["all"][0]["scenario_id"] = "missing-scene"
         with self.assertRaises(ScenarioPackError):
             validate_benchmark_scenario_references(benchmark, self.pack)
 

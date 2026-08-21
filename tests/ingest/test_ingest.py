@@ -24,7 +24,14 @@ class FakeProbe:
         if path.stat().st_size == 0:
             raise ContractError("empty")
         return {
-            "streams": [{"codec_type": "video", "width": 704, "height": 1280, "avg_frame_rate": "24/1"}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "width": 704,
+                    "height": 1280,
+                    "avg_frame_rate": "24/1",
+                }
+            ],
             "format": {"format_name": "mp4", "duration": "8.0"},
         }
 
@@ -52,8 +59,17 @@ class ImportTestBase(unittest.TestCase):
     def base_config(self, **extra) -> dict:
         config: dict = {
             "import_request_id": "import-1",
-            "source": {"kind": "feishu_case_data", "base_token": "app", "table_id": "tbl"},
-            "selector": {"selector_id": "s", "state": "request", "entity_type": "source_record", "match": {"filters": {}}},
+            "source": {
+                "kind": "feishu_case_data",
+                "base_token": "app",
+                "table_id": "tbl",
+            },
+            "selector": {
+                "selector_id": "s",
+                "state": "request",
+                "entity_type": "source_record",
+                "match": {"filters": {}},
+            },
             "field_mapping": {
                 "case_number": "case编号",
                 "result_attachment": "case文件",
@@ -62,9 +78,16 @@ class ImportTestBase(unittest.TestCase):
                 "prompt_text": "prompt文字",
                 "prompt_attachment": "prompt素材",
             },
-            "mode_resolution": {"order": ["explicit_field", "operation_recipe"], "on_unresolved": "error"},
+            "mode_resolution": {
+                "order": ["explicit_field", "operation_recipe"],
+                "on_unresolved": "error",
+            },
             "download": {"result_video": True, "feed_and_prompt_inputs": True},
-            "validation": {"media": True, "content_hash": True, "required_case_context": True},
+            "validation": {
+                "media": True,
+                "content_hash": True,
+                "required_case_context": True,
+            },
             "imported_run_status": "completed",
             "write_remote": False,
         }
@@ -109,11 +132,9 @@ class FeishuImportTests(ImportTestBase):
         self.assertIsNotNone(outcome.run_batch_id)
 
         assets = self.repository.list_assets()
-        self.assertEqual(len(assets), 4)  # result + feed + prompt + text
+        self.assertEqual(len(assets), 3)  # result + feed + prompt media
         kinds = sorted(asset["kind"] for asset in assets)
-        self.assertEqual(
-            kinds, ["feed_video", "prompt_image", "prompt_text", "result_video"]
-        )
+        self.assertEqual(kinds, ["feed_video", "prompt_image", "result_video"])
 
         runs = self.repository.list_runs(run_batch_id=outcome.run_batch_id)
         self.assertEqual(len(runs), 1)

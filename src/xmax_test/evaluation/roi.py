@@ -13,7 +13,9 @@ class RoiExtractor:
     def __init__(self, extractor: Any | None = None) -> None:
         self._extractor = extractor
 
-    def extract(self, frame: dict[str, Any], query: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def extract(
+        self, frame: dict[str, Any], query: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """Return ROIs for one frame.
 
         A real extractor (detector/tracker) can be injected; the default
@@ -39,5 +41,7 @@ class FakeRoiExtractor:
             }
         ]
 
-    def extract(self, frame: dict[str, Any], query: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def extract(
+        self, frame: dict[str, Any], query: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         return [dict(item, frame_index=frame.get("index", 0)) for item in self._rois]

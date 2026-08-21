@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import ContractError
+from ..feedback.overrides import HumanOverrideService
 from .attachments import media_extension
 
 VALID_POLICIES = ("none", "score_only", "metadata_only", "attachments_only", "full")
@@ -70,9 +71,7 @@ class FeishuSyncService:
             str(run.get("model_id", "")),
         )
         if policy == "score_only" and record is None:
-            raise ContractError(
-                f"score_only cannot create Case for {run.get('case_number', '')}"
-            )
+            raise ContractError(f"score_only cannot create Case for {run.get('case_number', '')}")
         return self._sync_one(
             app_token,
             table_id,
@@ -214,17 +213,13 @@ class FeishuSyncService:
         payload_hash = self._ledger.payload_hash({"fields": fields, "policy": policy})
         if record is not None and policy in {"score_only", "metadata_only", "full"}:
             current = record.get("fields", {})
-            metadata_matches = all(
-                current.get(key) == value for key, value in fields.items()
-            )
+            metadata_matches = all(current.get(key) == value for key, value in fields.items())
             attachments_complete = (
                 self._attachments_complete(record, run, case, projection)
                 if policy == "full"
                 else True
             )
-            if metadata_matches and (
-                policy != "full" or attachments_complete
-            ):
+            if metadata_matches and (policy != "full" or attachments_complete):
                 return {"action": "skipped"}
 
         if dry_run:
@@ -263,9 +258,7 @@ class FeishuSyncService:
                     projection,
                     record,
                 )
-            self._ledger.mark_synced(
-                "case_data", entity_id, destination, record_id
-            )
+            self._ledger.mark_synced("case_data", entity_id, destination, record_id)
         except Exception as exc:
             self._ledger.mark_error("case_data", entity_id, destination, str(exc))
             raise
@@ -277,7 +270,8 @@ class FeishuSyncService:
             return float(self._config["case_score"]["failed_run_value"])
         if evaluation is None:
             return None  # unreviewed -> empty
-        case_score = evaluation.get("case_score_percent")
+        effective = HumanOverrideService(self._repository).effective_result(evaluation)
+        case_score = effective.get("effective_case_score_percent")
         if case_score is None:
             return None
         if run.get("status") != "completed":
@@ -288,14 +282,13 @@ class FeishuSyncService:
         # internal 0-100 -> feishu 0-1
         return round(internal / 100.0, 4)
 
-    def _description(
-        self, run: dict[str, Any], evaluation: dict[str, Any] | None
-    ) -> str | None:
+    def _description(self, run: dict[str, Any], evaluation: dict[str, Any] | None) -> str | None:
         if run.get("status") == "error":
             return f"生成失败: {run.get('metrics', {}).get('failure_class', 'unknown')}"
         if evaluation:
             dimensions = [
-                item for item in evaluation.get("dimension_results", [])
+                item
+                for item in evaluation.get("dimension_results", [])
                 if item.get("assessable") and item.get("score") is not None
             ]
             dimensions.sort(key=lambda item: (float(item["score"]), item.get("dimension_id", "")))
@@ -313,9 +306,7 @@ class FeishuSyncService:
                     dimension_id = str(item.get("dimension_id") or "")
                     label = self._dimension_names.get(dimension_id, "")
                     heading = f"{dimension_id} {label}".strip()
-                    details.append(
-                        f"{heading}——{evidence}"
-                    )
+                    details.append(f"{heading}——{evidence}")
             if details:
                 return ("主要问题：" + "；".join(details))[:1000]
             verdict = str(evaluation.get("final_verdict") or "").strip()
@@ -374,9 +365,7 @@ class FeishuSyncService:
         fields = record.get("fields", {})
         for field, specs in self._attachment_specs(run, case, projection).items():
             expected = sorted(item["filename"] for item in specs)
-            actual = sorted(
-                str(item.get("name") or "") for item in (fields.get(field) or [])
-            )
+            actual = sorted(str(item.get("name") or "") for item in (fields.get(field) or []))
             if actual != expected:
                 return False
         return True
@@ -452,12 +441,12 @@ class FeishuSyncService:
         projection = self._config["field_projection"]["case_data"]
         missing = [name for name in projection.values() if name not in names]
         if missing:
-            raise ContractError(
-                f"feishu table {table_id} missing projected fields: {missing}"
-            )
+            raise ContractError(f"feishu table {table_id} missing projected fields: {missing}")
         self._table_structure_checked.add(table_id)
 
-    def _read_existing_records(self, app_token: str, table_id: str) -> dict[tuple[str, str], dict[str, Any]]:
+    def _read_existing_records(
+        self, app_token: str, table_id: str
+    ) -> dict[tuple[str, str], dict[str, Any]]:
         """Key by (case编号, Xmax模型版本) after full pagination."""
 
         projection = self._config["field_projection"]["case_data"]

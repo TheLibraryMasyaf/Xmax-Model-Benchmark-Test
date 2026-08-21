@@ -6,7 +6,7 @@
 
 根目录 `BENCHMARK.md` 是唯一标准入口。机器读取标记之间的JSON合同，人阅读其余Markdown说明。代码、Prompt和飞书列不得形成另一个独立标准副本。
 
-当前合同为`0.1.0-draft / shadow`，已从根目录当前版《XMAX场景化评测标准》录入，用于第一轮测试。23个维度、65条细则及暂定权重都可以执行Shadow评测，但不作为稳定正式榜单；首轮后用新版本调整并Replay，不能原地覆盖。
+当前合同为`0.2.0-draft / shadow`，已录入23个维度、65条细则及暂定权重。它可以执行Shadow评测，但不作为稳定正式榜单；首轮后用新版本调整并Replay，不能原地覆盖。运行`xmax-test db check`会按Benchmark版本列出历史Evaluation；非当前版本不得与当前批次混用，需要新口径时对明确Run Batch执行`replay run`。
 
 ## 2. 维度生命周期
 

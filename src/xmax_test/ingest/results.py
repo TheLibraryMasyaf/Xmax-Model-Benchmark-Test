@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..errors import ContractError, MissingInputError, NotFoundError
+from ..errors import ContractError, MissingInputError
 from ..hashing import content_hash
 from ..planning.recipes import RecipeResolver
 from ..time import utc_now
@@ -44,9 +44,7 @@ class ImportService:
         snapshot = self._snapshot(config, kind)
         source_hash = content_hash(snapshot)
 
-        prior = self._repository.get_result_import(
-            config.get("import_request_id", ""), source_hash
-        )
+        prior = self._repository.get_result_import(config.get("import_request_id", ""), source_hash)
         if prior is not None:
             outcome = ImportOutcome(
                 import_request_id=config.get("import_request_id", ""),
@@ -159,10 +157,6 @@ class ImportService:
             if prompt_download
             else None
         )
-        prompt_text_asset = None
-        if case.prompt_text:
-            prompt_text_asset = self._register_text(case.prompt_text, case.source_key)
-
         mode = self._resolve_mode(case, config)
         recipe = self._resolve_recipe(case, config)
         edited_video_asset_id, expected_audio_source_asset_id = self._resolve_edited_audio(
@@ -241,30 +235,6 @@ class ImportService:
             result,
         )
 
-    def _register_text(self, text: str, key: str) -> dict[str, Any]:
-        from ..hashing import sha256_text
-
-        sha = sha256_text(text)
-        existing = self._repository.find_asset_by_sha256(sha)
-        if existing is not None:
-            return existing
-        asset_id = f"asset_{sha[:16]}"
-        uri = f"artifact://assets/{asset_id}/prompt.txt"
-        asset = {
-            "asset_id": asset_id,
-            "kind": "prompt_text",
-            "uri": uri,
-            "sha256": sha,
-            "bytes": len(text.encode("utf-8")),
-            "mime_type": "text/plain",
-            "source": {"source_id": "existing-results", "source_kind": "import", "remote_key": key},
-            "status": "ready",
-            "media": {},
-            "metadata": {"text": text},
-            "created_at": utc_now(),
-        }
-        return self._repository.upsert_asset(asset)
-
     def _resolve_mode(self, case: Any, config: dict[str, Any]) -> str:
         order = config.get("mode_resolution", {}).get("order", ["explicit_field"])
         for step in order:
@@ -283,7 +253,9 @@ class ImportService:
         )
 
     def _resolve_recipe(self, case: Any, config: dict[str, Any]) -> dict[str, Any]:
-        recipe_id = case.operation_recipe_id or config.get("field_mapping", {}).get("operation_recipe_id")
+        recipe_id = case.operation_recipe_id or config.get("field_mapping", {}).get(
+            "operation_recipe_id"
+        )
         if recipe_id and isinstance(recipe_id, str) and recipe_id != "None":
             return self._recipes.recipe(recipe_id)
         if case.prompt_text:
@@ -323,7 +295,7 @@ class ImportService:
 
     @staticmethod
     def _prompt_kind(download: dict[str, Any]) -> str:
-        filename = (download.get("filename") or download.get("path") or "")
+        filename = download.get("filename") or download.get("path") or ""
         suffix = Path(filename).suffix.lower()
         if suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
             return "prompt_image"

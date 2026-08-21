@@ -11,11 +11,11 @@ from jsonschema import Draft202012Validator
 
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.errors import ContractError
+from xmax_test.evaluation.aggregation import aggregate_evaluation_results
 from xmax_test.evaluation.fusion import JudgmentFusion
 from xmax_test.evaluation.gates import HardGateEvaluator
 from xmax_test.evaluation.orchestrator import EvaluationOrchestrator
 from xmax_test.evaluation.preprocess import PreprocessService
-from xmax_test.judges.base import JudgePlugin
 from xmax_test.judges.registry import JudgeRegistry
 from xmax_test.judges.worker import JudgeWorker
 from xmax_test.planning.recipes import RecipeResolver
@@ -44,6 +44,17 @@ class MetricJudge:
         }
 
     def evaluate(self, context):
+        criteria = [
+            {
+                "criterion_id": item["criterion_id"],
+                "verdict": "ok",
+                "score": self._score,
+                "confidence": 0.9,
+                "assessable": True,
+                "evidence": [{"description": "metric fact"}],
+            }
+            for item in context.get("dimension_contract", {}).get("criteria", [])
+        ]
         return [
             {
                 "dimension_id": self._dimension,
@@ -52,6 +63,7 @@ class MetricJudge:
                 "confidence": 0.9,
                 "assessable": True,
                 "evidence": [{"description": "metric fact"}],
+                "criterion_results": criteria,
             }
         ]
 
@@ -120,7 +132,10 @@ class EvaluationTestBase(unittest.TestCase):
                 "expected_audio_source_asset_id": "feed-a",
                 "scenario_id": "core-selfie-appearance",
                 "scenario_pack_version": self.pack.get("version"),
-                "scene_tags": {"input_dimension": "自拍", "instruction_dimension": "修改主体"},
+                "scene_tags": {
+                    "input_dimension": "自拍",
+                    "instruction_dimension": "修改主体",
+                },
             },
             "plan-1",
         )
@@ -135,7 +150,11 @@ class EvaluationTestBase(unittest.TestCase):
                 "model_id": "x2.0",
                 "mode": mode,
                 "origin": "xmax_offline",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h",
+                },
                 "result_asset_id": "result-asset",
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
@@ -161,6 +180,146 @@ class EvaluationTestBase(unittest.TestCase):
 
 
 class FusionTests(EvaluationTestBase):
+    def test_dimension_score_is_derived_from_criteria_not_judge_top_level(self) -> None:
+        judgments = [
+            {
+                "dimension_id": "C1",
+                "judge_id": "metric",
+                "judge_version": "1",
+                "verdict": "misleading-top-level",
+                "score": 0.0,
+                "confidence": 0.9,
+                "assessable": True,
+                "evidence": [],
+                "criterion_results": [
+                    {
+                        "criterion_id": "C1.1",
+                        "verdict": "good",
+                        "score": 2.0,
+                        "confidence": 0.9,
+                        "assessable": True,
+                        "evidence": [],
+                    },
+                    {
+                        "criterion_id": "C1.2",
+                        "verdict": "bad",
+                        "score": 0.0,
+                        "confidence": 0.9,
+                        "assessable": True,
+                        "evidence": [],
+                    },
+                ],
+            }
+        ]
+        result = JudgmentFusion().fuse(
+            self.benchmark,
+            self.pack,
+            {"generation_mode": "offline", "scenario_id": None, "scene_tags": {}},
+            judgments,
+            {},
+        )
+        c1 = next(item for item in result["dimension_results"] if item["dimension_id"] == "C1")
+        self.assertEqual(c1["score"], 1.0)
+        self.assertEqual(c1["score_percent"], 50.0)
+        self.assertEqual(c1["assessable_criterion_count"], 2)
+
+    def test_multi_judge_fusion_happens_within_each_criterion(self) -> None:
+        base = {
+            "dimension_id": "C9",
+            "judge_version": "1",
+            "confidence": 0.8,
+            "assessable": True,
+            "evidence": [],
+        }
+        judgments = [
+            {
+                **base,
+                "judge_id": "cv",
+                "verdict": "cv",
+                "criterion_results": [
+                    {
+                        "criterion_id": "C9.1",
+                        "verdict": "good",
+                        "score": 2.0,
+                        "confidence": 0.8,
+                        "assessable": True,
+                        "evidence": [],
+                    }
+                ],
+            },
+            {
+                **base,
+                "judge_id": "mlmm",
+                "verdict": "mlmm",
+                "criterion_results": [
+                    {
+                        "criterion_id": "C9.1",
+                        "verdict": "weak",
+                        "score": 0.0,
+                        "confidence": 0.8,
+                        "assessable": True,
+                        "evidence": [],
+                    },
+                    {
+                        "criterion_id": "C9.3",
+                        "verdict": "good",
+                        "score": 2.0,
+                        "confidence": 0.8,
+                        "assessable": True,
+                        "evidence": [],
+                    },
+                ],
+            },
+        ]
+        result = JudgmentFusion().fuse(
+            self.benchmark,
+            self.pack,
+            {"generation_mode": "offline", "scenario_id": None, "scene_tags": {}},
+            judgments,
+            {},
+        )
+        criteria = {item["criterion_id"]: item for item in result["criterion_results"]}
+        self.assertEqual(criteria["C9.1"]["score"], 1.0)
+        self.assertEqual(criteria["C9.1"]["judge_score_count"], 2)
+        c9 = next(item for item in result["dimension_results"] if item["dimension_id"] == "C9")
+        self.assertIsNone(c9["score"])
+        self.assertFalse(c9["coverage_complete"])
+        self.assertEqual(c9["assessable_criterion_count"], 2)
+
+    def test_batch_criterion_summary_preserves_fractional_scores(self) -> None:
+        summary = aggregate_evaluation_results(
+            [
+                {
+                    "case_score_percent": 50.0,
+                    "criterion_results": [
+                        {
+                            "dimension_id": "C1",
+                            "criterion_id": "C1.1",
+                            "criterion_name": "valid",
+                            "score": 0.5,
+                        }
+                    ],
+                    "dimension_results": [],
+                },
+                {
+                    "case_score_percent": 100.0,
+                    "criterion_results": [
+                        {
+                            "dimension_id": "C1",
+                            "criterion_id": "C1.1",
+                            "criterion_name": "valid",
+                            "score": 2.0,
+                        }
+                    ],
+                    "dimension_results": [],
+                },
+            ]
+        )
+        row = summary["criterion_summary"][0]
+        self.assertEqual(row["score_percent"], 62.5)
+        self.assertEqual(row["score_distribution"]["0_to_1"], 1)
+        self.assertEqual(row["score_distribution"]["2"], 1)
+
     def test_canonical_and_scenario_scores_coexist(self) -> None:
         judgments = [
             {
@@ -176,6 +335,16 @@ class FusionTests(EvaluationTestBase):
                 "confidence": 0.9,
                 "assessable": True,
                 "evidence": [],
+                "criterion_results": [
+                    {
+                        "criterion_id": "C1.1",
+                        "verdict": "ok",
+                        "score": 2.0,
+                        "confidence": 0.9,
+                        "assessable": True,
+                        "evidence": [],
+                    }
+                ],
             },
             {
                 "evaluation_id": "e",
@@ -190,6 +359,16 @@ class FusionTests(EvaluationTestBase):
                 "confidence": 0.9,
                 "assessable": True,
                 "evidence": [],
+                "criterion_results": [
+                    {
+                        "criterion_id": "C2.1",
+                        "verdict": "ok",
+                        "score": 2.0,
+                        "confidence": 0.9,
+                        "assessable": True,
+                        "evidence": [],
+                    }
+                ],
             },
         ]
         result = JudgmentFusion().fuse(
@@ -204,9 +383,10 @@ class FusionTests(EvaluationTestBase):
             judgments,
             {},
         )
-        self.assertEqual(result["canonical_score"], 100.0)
-        self.assertEqual(result["scenario_score"], 100.0)
-        self.assertEqual(result["case_score_percent"], 100.0)
+        self.assertIsNone(result["canonical_score"])
+        self.assertIsNone(result["scenario_score"])
+        self.assertIsNone(result["case_score_percent"])
+        self.assertTrue(result["coverage"]["canonical_missing_dimensions"])
         self.assertEqual(result["weight_resolution"]["base_profile_id"], "generic-offline-0.2")
         self.assertTrue(result["weight_resolution"]["matched_rule_ids"])
 
@@ -225,12 +405,27 @@ class FusionTests(EvaluationTestBase):
                 "confidence": 1.0,
                 "assessable": True,
                 "evidence": [{"description": "black screen"}],
+                "criterion_results": [
+                    {
+                        "criterion_id": "C1.1",
+                        "verdict": "invalid",
+                        "score": 0.0,
+                        "confidence": 1.0,
+                        "assessable": True,
+                        "evidence": [{"description": "black screen"}],
+                    }
+                ],
             }
         ]
         result = JudgmentFusion().fuse(
             self.benchmark,
             self.pack,
-            {"case_id": "c", "generation_mode": "offline", "scenario_id": None, "scene_tags": {}},
+            {
+                "case_id": "c",
+                "generation_mode": "offline",
+                "scenario_id": None,
+                "scene_tags": {},
+            },
             judgments,
             {},
         )
@@ -244,6 +439,7 @@ class FusionTests(EvaluationTestBase):
             self.benchmark,
             {"C1": {"score": 0.0}},
             {},
+            {"C1.1": {"dimension_id": "C1", "score": 0.0}},
         )
         self.assertTrue(outcome["block_score"])
         self.assertEqual(outcome["final_verdict"], "invalid_result")
@@ -251,6 +447,7 @@ class FusionTests(EvaluationTestBase):
             self.benchmark,
             {"C1": {"score": 2.0}},
             {},
+            {"C1.1": {"dimension_id": "C1", "score": 2.0}},
         )
         self.assertFalse(outcome_ok["block_score"])
 
@@ -269,6 +466,16 @@ class FusionTests(EvaluationTestBase):
                 "confidence": 0.8,
                 "assessable": True,
                 "evidence": [],
+                "criterion_results": [
+                    {
+                        "criterion_id": "C1.1",
+                        "verdict": "ok",
+                        "score": 1.0,
+                        "confidence": 0.8,
+                        "assessable": True,
+                        "evidence": [],
+                    }
+                ],
             }
         ]
         result = JudgmentFusion().fuse(
@@ -290,11 +497,11 @@ class FusionTests(EvaluationTestBase):
 
 
 class OrchestratorTests(EvaluationTestBase):
-    def test_direct_media_inputs_keep_feed_prompt_reference_and_result_separate(self) -> None:
+    def test_direct_media_inputs_keep_feed_prompt_reference_and_result_separate(
+        self,
+    ) -> None:
         run = self.seed_run()
-        self.artifacts.put_bytes(
-            "assets", "feed-a/source.bin", b"\x00\x00\x00\x18ftypisom-feed"
-        )
+        self.artifacts.put_bytes("assets", "feed-a/source.bin", b"\x00\x00\x00\x18ftypisom-feed")
         self.artifacts.put_bytes(
             "assets", "result-asset/source.bin", b"\x00\x00\x00\x18ftypisom-result"
         )
@@ -335,7 +542,9 @@ class OrchestratorTests(EvaluationTestBase):
             ["text", "video", "text", "image", "video"],
         )
 
-    def test_video_reference_operation_explains_feed_capture_replaces_prompt_subject(self) -> None:
+    def test_video_reference_operation_explains_feed_capture_replaces_prompt_subject(
+        self,
+    ) -> None:
         case = {
             "operation_recipe_id": "offline-video-reference-with-feed-capture",
             "operation_recipe_version": "0.1.0",
@@ -350,9 +559,7 @@ class OrchestratorTests(EvaluationTestBase):
         }
         contract = self.orchestrator()._operation_contract(case, "offline")
         self.assertEqual(contract["edited_video_role"], "prompt_video")
-        self.assertEqual(
-            contract["api_asset_bindings"]["refImagePath"], "feed_capture"
-        )
+        self.assertEqual(contract["api_asset_bindings"]["refImagePath"], "feed_capture")
         self.assertIn("Feed截图", contract["result_expectation"])
         self.assertIn("Prompt视频", contract["result_expectation"])
 
@@ -412,7 +619,8 @@ class OrchestratorTests(EvaluationTestBase):
         self.assertEqual(result["benchmark_version"], "0.2.0-draft")
         self.assertIn("canonical_score", result)
         self.assertIn("scenario_score", result)
-        self.assertIsNotNone(result["case_score_percent"])
+        self.assertIsNone(result["case_score_percent"])
+        self.assertTrue(result["coverage"]["canonical_missing_dimensions"])
 
     def test_evaluate_batch_persists_batch_manifest(self) -> None:
         self.registry.register(MetricJudge("C1", 2.0))
@@ -423,6 +631,7 @@ class OrchestratorTests(EvaluationTestBase):
             "evaluation_batch", summary["evaluation_batch_id"]
         )
         self.assertEqual(manifest["entity_type"], "evaluation_batch")
+        self.assertTrue(manifest["metadata"]["aggregate"]["criterion_summary"])
 
     def test_evaluation_result_passes_schema(self) -> None:
         self.registry.register(MetricJudge("C1", 1.0))

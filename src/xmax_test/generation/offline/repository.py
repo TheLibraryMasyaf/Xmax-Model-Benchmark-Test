@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...errors import NotFoundError
-
 
 class OfflineRunRepository:
     def __init__(self, repository: Any, artifacts: Any) -> None:
@@ -23,7 +21,11 @@ class OfflineRunRepository:
         return self._repository.get_run(run_id)
 
     def append_event(
-        self, run_id: str, event: str, *, payload: dict[str, Any] | None = None,
+        self,
+        run_id: str,
+        event: str,
+        *,
+        payload: dict[str, Any] | None = None,
         external_key: str | None = None,
     ) -> None:
         self._repository.append_event(run_id, event, payload=payload, external_key=external_key)
@@ -51,9 +53,7 @@ class OfflineRunRepository:
         import json
 
         data = json.dumps(events, ensure_ascii=False, indent=2).encode("utf-8")
-        result = self._artifacts.put_bytes(
-            "runs", f"{run_id}/events.jsonl", data
-        )
+        result = self._artifacts.put_bytes("runs", f"{run_id}/events.jsonl", data)
         return result["uri"]
 
     def completed_run_for_case(self, case_id: str, model_id: str) -> dict[str, Any] | None:

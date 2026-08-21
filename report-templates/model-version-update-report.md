@@ -113,7 +113,15 @@ Weight Profile及命中规则：`{{ profile_and_rules }}`
 - 典型证据：`{{ run_ids / evaluation_ids / artifact_uris }}`
 - 场景结论：`{{ scene_conclusion }}`
 
-## 4. 稳定性、运行与失败事实
+## 4. 细则级变化
+
+> 维度变化必须能回溯到细则。新口径报告对每条两版均可评的Benchmark细则输出均值和差值；只有旧维度分时标记需Replay，不反推。
+
+| 维度 | 细则ID | 细则名称 | 基线 | 新版 | 变化 | 基线可评数 | 新版可评数 | 分类 | 证据 |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `{{ dimension }}` | `{{ criterion_id }}` | `{{ criterion_name }}` | `{{ baseline_criterion_score }}` | `{{ candidate_criterion_score }}` | `{{ criterion_delta }}` | `{{ baseline_criterion_n }}` | `{{ candidate_criterion_n }}` | `{{ criterion_class }}` | `{{ evidence_ids }}` |
+
+## 5. 稳定性、运行与失败事实
 
 离线和实时事实分开报告，不能用视觉联系图推断延迟、FPS或网络指标。
 
@@ -127,7 +135,7 @@ Weight Profile及命中规则：`{{ profile_and_rules }}`
 
 失败与跳过：`{{ failures_and_skips }}`
 
-## 5. 人工信号与AI结论修订
+## 6. 人工信号与AI结论修订
 
 | 项目 | 数量/结论 |
 | --- | --- |
@@ -139,7 +147,7 @@ Weight Profile及命中规则：`{{ profile_and_rules }}`
 
 人工结论必须标注`blind`或`ai_assisted`，原AI结果和修订后结果同时保留。
 
-## 6. 发布建议
+## 7. 发布建议
 
 - 建议：`promote / shadow / block / 补测后决定`
 - 阻断原因：`{{ blockers_or_none }}`
@@ -147,7 +155,7 @@ Weight Profile及命中规则：`{{ profile_and_rules }}`
 - 建议修复重点：`{{ priorities }}`
 - 可接受风险：`{{ accepted_risks_or_none }}`
 
-## 7. 审计附录
+## 8. 审计附录
 
 - Plan、Run、Evaluation、Comparison产物路径：`{{ artifact_uris }}`
 - Benchmark、Scenario Pack和Judge内容哈希：`{{ hashes }}`

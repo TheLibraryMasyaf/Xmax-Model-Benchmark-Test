@@ -6,7 +6,7 @@
 
 ### 视频评测 Judge
 
-读取按角色分离的Feed原素材、Prompt文字、Prompt参考素材和Result原视频，输出Benchmark指定的结构化Judgment。若Provider不支持原视频，再使用预处理抽帧作为兼容输入。
+读取按角色分离的Feed原素材、Prompt文字、Prompt参考素材和Result原视频，对Benchmark分配的每条细则输出0/1/2或不可评的结构化Judgment。若Provider不支持原视频，再使用预处理抽帧作为兼容输入。
 
 ### 人工反馈 Normalizer
 
@@ -65,14 +65,14 @@ codex exec \
 
 适配器必须配置二进制路径、超时、重试、工作目录和输出Schema。不得在命令行中拼入API密钥或敏感URL。
 
-当前实现还传`--ephemeral --ignore-rules --color never --output-schema <schema.json>`和每张证据图的`-i <absolute-path>`。运行目录是临时隔离目录，避免项目AGENTS/工作区文件影响盲评。模型输出Schema只包含`verdict/score/confidence/assessable/evidence`等模型负责的字段；评测ID、Run ID、维度和Judge身份由本地系统注入后再用完整Judgment Schema校验。
+当前实现还传`--ephemeral --ignore-rules --color never --output-schema <schema.json>`和每张证据图的`-i <absolute-path>`。运行目录是临时隔离目录，避免项目AGENTS/工作区文件影响盲评。模型输出Schema只包含`verdict/confidence/assessable/evidence/criterion_results`等模型负责的字段；顶层维度分不由模型提交。评测ID、Run ID、维度和Judge身份由本地系统注入后再用完整Judgment Schema校验。
 
 ## 4. Prompt构建
 
 Prompt由以下部分组合：
 
-1. 当前Benchmark版本和目标维度。
-2. 维度定义、评分锚点和必要证据。
+1. 当前Benchmark版本、目标维度和全部细则ID。
+2. 每条细则的定义、0/1/2锚点和必要证据。
 3. 样本可见输入。
 4. 抽帧盲区和不可推断项。
 5. 严格JSON Schema。
@@ -83,6 +83,7 @@ Prompt由以下部分组合：
 
 - 保存完整stdout、stderr、退出码、耗时和Prompt哈希。
 - 只接受可解析且通过Schema校验的JSON。
+- 每个维度必须恰好返回合同中全部`criterion_id`；缺失、重复或额外ID都使整条Case失败并重试。
 - 非JSON、缺字段或引用不存在帧时重试。
 - 多次失败记录Judge error，不填默认分数。
 - 对隐藏重复样本计算自一致性，偏差过大时降低Judge版本可信度。

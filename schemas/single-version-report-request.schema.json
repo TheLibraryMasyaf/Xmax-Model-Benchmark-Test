@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Single Version Report Request",
+  "type": "object",
+  "required": [
+    "report_id",
+    "model_version",
+    "run_batch_id",
+    "evaluation_batch_id"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "report_id": {"type": "string", "minLength": 1},
+    "model_version": {"type": "string", "minLength": 1},
+    "run_batch_id": {"type": "string", "minLength": 1},
+    "evaluation_batch_id": {"type": "string", "minLength": 1},
+    "requested_scene_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "output_directory": {
+      "type": "string",
+      "default": "var/reports/single-version"
+    }
+  },
+  "additionalProperties": false
+}

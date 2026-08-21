@@ -8,7 +8,6 @@ API/RTC/system timestamps).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from ..hashing import content_hash
@@ -39,7 +38,11 @@ class ContactSheetBuilder:
             "run_id": run_id,
             "kind": kind,
             "frames": [
-                {"index": frame.get("index"), "timestamp_s": frame.get("timestamp_s"), "uri": frame.get("uri")}
+                {
+                    "index": frame.get("index"),
+                    "timestamp_s": frame.get("timestamp_s"),
+                    "uri": frame.get("uri"),
+                }
                 for frame in frames
             ],
             "producer_version": producer_version,
@@ -56,7 +59,9 @@ class FakeContactSheetRenderer:
     def __init__(self, artifacts: Any) -> None:
         self._artifacts = artifacts
 
-    def render(self, sheet_id: str, frames: list[dict[str, Any]], parameters: dict[str, Any]) -> str:
+    def render(
+        self, sheet_id: str, frames: list[dict[str, Any]], parameters: dict[str, Any]
+    ) -> str:
         payload = json.dumps(
             {"sheet_id": sheet_id, "frames": len(frames), "parameters": parameters},
             ensure_ascii=False,

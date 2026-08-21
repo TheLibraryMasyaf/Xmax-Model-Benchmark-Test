@@ -31,6 +31,10 @@
     "comparison_id": "replace-me",
     "baseline_model_version": "replace-baseline-version",
     "candidate_model_version": "replace-candidate-version",
+    "baseline_run_batch_id": "replace-baseline-run-batch",
+    "candidate_run_batch_id": "replace-candidate-run-batch",
+    "baseline_evaluation_batch_id": "replace-baseline-evaluation-batch",
+    "candidate_evaluation_batch_id": "replace-candidate-evaluation-batch",
     "requested_scene_ids": ["replace-scene-id"],
     "report_template_path": "report-templates/model-version-update-report.md",
     "report_output_directory": "var/reports/model-version-updates"

@@ -64,7 +64,7 @@ Benchmark为空或状态不是可执行版本时，系统允许做合同检查�
 - 运行指标：任务状态、费用、延迟、FPS、丢包、重试和设备数据。
 - Fusion：只合并已经版本化的结果，不重新看视频。
 
-具体维度到Judge的映射由Benchmark给出，不在本模块写死。
+具体维度到Judge的映射由Benchmark给出，不在本模块写死。Judge实际评分单元是细则而不是维度：每个可评细则必须输出`criterion_id`、0/1/2分、置信度和证据。CV/Metric只输出它真正覆盖的细则；MLLM必须对本次合同的所有细则逐条返回可评或不可评。维度级`score`只是审计便利字段，Fusion不信任它。
 
 ## 5. 证据
 
@@ -84,13 +84,15 @@ MLLM批量Judge对一条Case的全部所属维度是原子操作。遇到`Alloca
 
 融合顺序：
 
-1. 先执行媒体有效性等阻断型硬门槛；失败时停止产生视觉总分，但保留运行事实。
-2. Judge输出合法性和可评估性。
-3. 每个Judge置信度校准。
-4. 同维度多Judge融合。
+1. 校验Judge是否只提交Benchmark声明的细则；MLLM必须完整返回分配给它的全部细则。
+2. 同一`criterion_id`有多个Judge时合并分数、置信度和带Judge身份的证据；当前合并是算术平均，保留`judge_score_count`以便后续改版。
+3. 按Benchmark的细则尺度确定性计算维度分：`sum(可评细则分) / sum(可评细则满分)`；当前每条细则等权。
+4. 用细则分执行精确到`criterion_id`的Hard Gate；高维度平均不能掩盖阻断细则。
 5. 使用发布的基础Profile计算Canonical Score。
 6. 使用场景标签和发布规则计算Scenario Score。
-7. 应用其余不可被权重抵消的Fail/Cap/Block Gate并生成最终结论。
+7. 保存逐细则、派生维度、有效权重、Gate和覆盖缺口。
+
+不可评与未覆盖分开记录：有Judge提交但证据不足是`unassessable`，没有任何Judge提交该细则是`uncovered`。两者都不得填默认1分。
 
 权重只允许来自版本化Benchmark，算法见 [场景动态权重](scene-weighting.md)。Codex、CV Judge和操作者均不能为单条样本临场发明权重。若数据不足，先展示分项和覆盖率，不生成具有误导性的总分。
 
@@ -108,5 +110,7 @@ conflicts.jsonl
 weight-resolution.json
 raw/<judge_id>/
 ```
+
+`evaluation.json`的`criterion_results`是单条视频评分事实；`dimension_results`必须从其派生。`evaluate_runs`同时返回并在Evaluation Batch Manifest中保存`criterion_summary`、`dimension_summary`和`case_score_summary`，包含覆盖率、均值、中位数、最小/最大、标准差、P25/P75和分布。
 
 正式结果遵循 `schemas/evaluation-result.schema.json`，保存Benchmark、Scenario Pack、Weight Profile、命中规则、Score Schema、Judge、预处理器和模型版本，以支持历史回放。

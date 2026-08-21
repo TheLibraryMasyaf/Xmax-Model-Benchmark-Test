@@ -16,6 +16,12 @@
     "kind": {"enum": ["cv", "python_plugin", "mlmm", "mlmm_cli", "metric", "fusion"]},
     "status": {"enum": ["registered", "shadow", "champion", "deprecated"]},
     "supported_dimensions": {"type": "array", "items": {"type": "string"}},
+    "supported_criteria": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1},
+      "description": "Exact criterion IDs this Judge may score. Omit only for legacy manifests; production manifests must declare it."
+    },
     "supported_modes": {
       "type": "array",
       "items": {"enum": ["offline", "realtime"]}

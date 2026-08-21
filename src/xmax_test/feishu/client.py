@@ -23,7 +23,11 @@ class FeishuSyncClient(Protocol):
     ) -> dict[str, Any]: ...
 
     def upsert_record(
-        self, app_token: str, table_id: str, record_id: str | None, fields: dict[str, Any]
+        self,
+        app_token: str,
+        table_id: str,
+        record_id: str | None,
+        fields: dict[str, Any],
     ) -> dict[str, Any]: ...
 
     def find_record(
@@ -36,10 +40,16 @@ class FeishuSyncClient(Protocol):
         secondary_value: str,
     ) -> dict[str, Any] | None: ...
 
-    def upload_attachment(self, app_token: str, table_id: str, record_id: str, field: str, path: str) -> dict[str, Any]: ...
+    def upload_attachment(
+        self, app_token: str, table_id: str, record_id: str, field: str, path: str
+    ) -> dict[str, Any]: ...
 
     def remove_attachments(
-        self, app_token: str, table_id: str, record_id: str, field: str,
+        self,
+        app_token: str,
+        table_id: str,
+        record_id: str,
+        field: str,
         file_tokens: list[str],
     ) -> dict[str, Any]: ...
 
@@ -49,7 +59,9 @@ class FeishuSyncClient(Protocol):
 class LarkCliSyncClient:
     """Real sync client over lark-cli (``--as user`` by default)."""
 
-    def __init__(self, binary: str = "lark-cli", identity: str = "user", timeout: int = 120) -> None:
+    def __init__(
+        self, binary: str = "lark-cli", identity: str = "user", timeout: int = 120
+    ) -> None:
         self._binary = binary
         self._identity = identity
         self._timeout = timeout
@@ -57,7 +69,6 @@ class LarkCliSyncClient:
     def _run(self, args: list[str]) -> dict[str, Any]:
         import json
         import subprocess
-
         from shutil import which
 
         if which(self._binary) is None:
@@ -77,31 +88,63 @@ class LarkCliSyncClient:
 
     def get_fields(self, app_token: str, table_id: str) -> list[dict[str, Any]]:
         data = self._run(
-            ["base", "+field-list", "--base-token", app_token, "--table-id", table_id, "--limit", "200"]
+            [
+                "base",
+                "+field-list",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--limit",
+                "200",
+            ]
         )
         if isinstance(data, list):
             return data
         return data.get("items") or data.get("fields") or []
 
-    def list_records(self, app_token: str, table_id: str, page_token: str | None = None) -> dict[str, Any]:
+    def list_records(
+        self, app_token: str, table_id: str, page_token: str | None = None
+    ) -> dict[str, Any]:
         offset = int(page_token or 0)
         data = self._run(
             [
-                "base", "+record-list", "--base-token", app_token,
-                "--table-id", table_id, "--offset", str(offset), "--limit", "200",
+                "base",
+                "+record-list",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--offset",
+                str(offset),
+                "--limit",
+                "200",
             ]
         )
         return normalize_record_page(data, offset=offset)
 
-    def get_bitable_records(self, app_token: str, table_id: str, page_token: str | None = None) -> dict[str, Any]:
+    def get_bitable_records(
+        self, app_token: str, table_id: str, page_token: str | None = None
+    ) -> dict[str, Any]:
         """Alias used by the read-only case importer."""
         return self.list_records(app_token, table_id, page_token=page_token)
 
-    def upsert_record(self, app_token: str, table_id: str, record_id: str | None, fields: dict[str, Any]) -> dict[str, Any]:
+    def upsert_record(
+        self,
+        app_token: str,
+        table_id: str,
+        record_id: str | None,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
         import json
 
         args = [
-            "base", "+record-upsert", "--base-token", app_token, "--table-id", table_id,
+            "base",
+            "+record-upsert",
+            "--base-token",
+            app_token,
+            "--table-id",
+            table_id,
         ]
         if record_id:
             args += ["--record-id", record_id]
@@ -129,12 +172,22 @@ class LarkCliSyncClient:
 
         data = self._run(
             [
-                "base", "+record-search", "--base-token", app_token,
-                "--table-id", table_id, "--keyword", key_value,
-                "--search-field", key_field,
-                "--field-id", key_field,
-                "--field-id", secondary_field,
-                "--limit", "20",
+                "base",
+                "+record-search",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--keyword",
+                key_value,
+                "--search-field",
+                key_field,
+                "--field-id",
+                key_field,
+                "--field-id",
+                secondary_field,
+                "--limit",
+                "20",
             ]
         )
         rows = data.get("data") or []
@@ -153,26 +206,48 @@ class LarkCliSyncClient:
                 return {"record_id": record_ids[index], "fields": fields}
         return None
 
-    def upload_attachment(self, app_token: str, table_id: str, record_id: str, field: str, path: str) -> dict[str, Any]:
+    def upload_attachment(
+        self, app_token: str, table_id: str, record_id: str, field: str, path: str
+    ) -> dict[str, Any]:
         safe_path = self._safe_upload_path(path)
         return self._run(
             [
-                "base", "+record-upload-attachment", "--base-token", app_token,
-                "--table-id", table_id, "--record-id", record_id,
-                "--field-id", field, "--file", safe_path,
+                "base",
+                "+record-upload-attachment",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--record-id",
+                record_id,
+                "--field-id",
+                field,
+                "--file",
+                safe_path,
             ]
         )
 
     def remove_attachments(
-        self, app_token: str, table_id: str, record_id: str, field: str,
+        self,
+        app_token: str,
+        table_id: str,
+        record_id: str,
+        field: str,
         file_tokens: list[str],
     ) -> dict[str, Any]:
         if not file_tokens:
             return {"removed": 0}
         args = [
-            "base", "+record-remove-attachment", "--base-token", app_token,
-            "--table-id", table_id, "--record-id", record_id,
-            "--field-id", field,
+            "base",
+            "+record-remove-attachment",
+            "--base-token",
+            app_token,
+            "--table-id",
+            table_id,
+            "--record-id",
+            record_id,
+            "--field-id",
+            field,
         ]
         for token in file_tokens:
             args += ["--file-token", token]
@@ -194,20 +269,47 @@ class LarkCliSyncClient:
         return f"./{relative.as_posix()}"
 
     def download_attachment(
-        self, token: str, destination: Path, *, app_token: str | None = None,
-        table_id: str | None = None, record_id: str | None = None,
+        self,
+        token: str,
+        destination: Path,
+        *,
+        app_token: str | None = None,
+        table_id: str | None = None,
+        record_id: str | None = None,
     ) -> dict[str, Any]:
         if app_token and table_id and record_id:
             args = [
-                "base", "+record-download-attachment", "--base-token", app_token,
-                "--table-id", table_id, "--record-id", record_id,
-                "--file-token", token, "--output", str(destination), "--overwrite",
+                "base",
+                "+record-download-attachment",
+                "--base-token",
+                app_token,
+                "--table-id",
+                table_id,
+                "--record-id",
+                record_id,
+                "--file-token",
+                token,
+                "--output",
+                str(destination),
+                "--overwrite",
             ]
         else:
-            args = ["docs", "+media-download", "--token", token, "--output", str(destination), "--overwrite"]
+            args = [
+                "docs",
+                "+media-download",
+                "--token",
+                token,
+                "--output",
+                str(destination),
+                "--overwrite",
+            ]
         result = self._run(args)
         path = Path(result.get("path", destination))
-        return {"path": str(path), "sha256": file_sha256(path), "bytes": path.stat().st_size}
+        return {
+            "path": str(path),
+            "sha256": file_sha256(path),
+            "bytes": path.stat().st_size,
+        }
 
 
 class FakeFeishuSyncClient:
@@ -251,19 +353,29 @@ class FakeFeishuSyncClient:
         self.field_checks.append(table_id)
         return [{"field_name": name, "type": 1} for name in self._declared_fields]
 
-    def list_records(self, app_token: str, table_id: str, page_token: str | None = None) -> dict[str, Any]:
+    def list_records(
+        self, app_token: str, table_id: str, page_token: str | None = None
+    ) -> dict[str, Any]:
         self.calls.append("list_records")
         records = self._tables.get(table_id, [])
         if page_token is None:
             return {"records": records, "has_more": False, "page_token": None}
         return {"records": [], "has_more": False, "page_token": None}
 
-    def get_bitable_records(self, app_token: str, table_id: str, page_token: str | None = None) -> dict[str, Any]:
+    def get_bitable_records(
+        self, app_token: str, table_id: str, page_token: str | None = None
+    ) -> dict[str, Any]:
         """Alias used by the read-only case importer."""
         self.calls.append("get_bitable_records")
         return self.list_records(app_token, table_id, page_token=page_token)
 
-    def upsert_record(self, app_token: str, table_id: str, record_id: str | None, fields: dict[str, Any]) -> dict[str, Any]:
+    def upsert_record(
+        self,
+        app_token: str,
+        table_id: str,
+        record_id: str | None,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
         self.calls.append("upsert_record")
         if self.fail_upsert:
             raise ExternalServiceError(self.fail_upsert)
@@ -272,7 +384,9 @@ class FakeFeishuSyncClient:
             for record in records:
                 if record["record_id"] == record_id:
                     record["fields"] = {**record["fields"], **fields}
-                    self.upserts.append({"table_id": table_id, "record_id": record_id, "fields": fields})
+                    self.upserts.append(
+                        {"table_id": table_id, "record_id": record_id, "fields": fields}
+                    )
                     return {"record_id": record_id, "fields": record["fields"]}
             raise ExternalServiceError(f"record not found for upsert: {record_id}")
         record_id = f"rec-{self._next_record}"
@@ -294,14 +408,15 @@ class FakeFeishuSyncClient:
         self.calls.append("find_record")
         for record in self._tables.get(table_id, []):
             fields = record.get("fields", {})
-            if (
-                str(fields.get(key_field, "")) == str(key_value)
-                and str(fields.get(secondary_field, "")) == str(secondary_value)
-            ):
+            if str(fields.get(key_field, "")) == str(key_value) and str(
+                fields.get(secondary_field, "")
+            ) == str(secondary_value):
                 return record
         return None
 
-    def upload_attachment(self, app_token: str, table_id: str, record_id: str, field: str, path: str) -> dict[str, Any]:
+    def upload_attachment(
+        self, app_token: str, table_id: str, record_id: str, field: str, path: str
+    ) -> dict[str, Any]:
         self.calls.append("upload_attachment")
         if self.fail_upload:
             raise ExternalServiceError(self.fail_upload)
@@ -309,20 +424,28 @@ class FakeFeishuSyncClient:
         for record in records:
             if record["record_id"] == record_id:
                 token = f"tok-{file_sha256(path)[:8]}"
-                record["fields"].setdefault(field, []).append({"file_token": token, "name": Path(path).name})
-                self.uploads.append({
-                    "table_id": table_id,
-                    "record_id": record_id,
-                    "field": field,
-                    "token": token,
-                    "name": Path(path).name,
-                    "path": path,
-                })
+                record["fields"].setdefault(field, []).append(
+                    {"file_token": token, "name": Path(path).name}
+                )
+                self.uploads.append(
+                    {
+                        "table_id": table_id,
+                        "record_id": record_id,
+                        "field": field,
+                        "token": token,
+                        "name": Path(path).name,
+                        "path": path,
+                    }
+                )
                 return {"token": token}
         raise ExternalServiceError(f"cannot upload to missing record {record_id}")
 
     def remove_attachments(
-        self, app_token: str, table_id: str, record_id: str, field: str,
+        self,
+        app_token: str,
+        table_id: str,
+        record_id: str,
+        field: str,
         file_tokens: list[str],
     ) -> dict[str, Any]:
         self.calls.append("remove_attachments")
@@ -332,7 +455,8 @@ class FakeFeishuSyncClient:
                 continue
             current = record["fields"].get(field) or []
             record["fields"][field] = [
-                item for item in current
+                item
+                for item in current
                 if (item.get("file_token") or item.get("token")) not in token_set
             ]
             return {"removed": len(current) - len(record["fields"][field])}
@@ -340,4 +464,8 @@ class FakeFeishuSyncClient:
 
     def download_attachment(self, token: str, destination: Path, **_: Any) -> dict[str, Any]:
         destination.write_bytes(b"attachment-bytes")
-        return {"path": str(destination), "sha256": file_sha256(destination), "bytes": destination.stat().st_size}
+        return {
+            "path": str(destination),
+            "sha256": file_sha256(destination),
+            "bytes": destination.stat().st_size,
+        }

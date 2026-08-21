@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv-cv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -23,3 +24,5 @@ QWEN_API.csv
 config/project.json
 config/feishu.json
 config/judges.json
+config/run-*.local.json
+config/single-version-report.json

@@ -40,11 +40,14 @@ class CustomJudge:
 
 - `dimension_id`；
 - `verdict`；
-- 归一化 `score`；
+- 非空`criterion_results`，且每项有Benchmark中真实的`criterion_id`；
+- 每条细则的0/1/2 `score`（不可评时为`null`）；
 - `confidence`；
 - `assessable`；
 - 可读 `evidence`；
 - 可复算或审计的 `raw_metrics`。
+
+顶层维度`score`会由Worker从该Judge已提交的细则求平均，仅供审计。最终Fusion忽略该字段，从所有Judge的逐细则结果重新计算。不得把一个局部检测分复制给本维度的其他并行细则。
 
 缺少输入、模型加载失败或该样本不适用时，返回不可评并说明原因；不得返回虚构的50分。
 
@@ -82,9 +85,9 @@ class CustomJudge:
 接入前先更新或核对 `docs/judge-responsibilities.md`：
 
 - 一个细则由某个Judge独立主判时，保留它自己的判断和证据；
-- 多个Judge覆盖同一维度时，按Benchmark和评测编排中的融合规则处理；
+- 多个Judge覆盖同一细则时，当前按细则算术平均融合，并保存每个Judge身份和证据；
 - 不得仅因为新增主Judge就丢弃同维度其他平行细则；
-- 插件输出维度分，最终总分由Score Schema、场景权重和不可评处理共同产生。
+- 插件输出细则分，Fusion等权汇总可评细则为维度分，最终总分由Score Schema、场景权重和不可评处理共同产生。
 
 如果现有融合合同不能表达新关系，应先提出融合规则建设工作包，而不是在插件里读取其他Judge结果后自行算总分。
 

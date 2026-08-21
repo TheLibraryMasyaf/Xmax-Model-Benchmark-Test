@@ -11,7 +11,8 @@
     "judge_id",
     "judge_version",
     "verdict",
-    "evidence"
+    "evidence",
+    "criterion_results"
   ],
   "properties": {
     "evaluation_id": {"type": "string"},
@@ -39,8 +40,48 @@
       }
     },
     "raw_metrics": {"type": "object"},
-    "raw_output_uri": {"type": ["string", "null"]}
+    "raw_output_uri": {"type": ["string", "null"]},
+    "criterion_results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/criterion_result"}
+    }
+  },
+  "$defs": {
+    "criterion_result": {
+      "type": "object",
+      "required": [
+        "criterion_id",
+        "verdict",
+        "score",
+        "confidence",
+        "assessable",
+        "evidence"
+      ],
+      "properties": {
+        "criterion_id": {"type": "string", "minLength": 1},
+        "verdict": {"type": "string", "minLength": 1},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 2},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "assessable": {"type": "boolean"},
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["description"],
+            "properties": {
+              "start_s": {"type": "number"},
+              "end_s": {"type": "number"},
+              "region": {"type": ["string", "object", "null"]},
+              "description": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "raw_metrics": {"type": "object"}
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }
-

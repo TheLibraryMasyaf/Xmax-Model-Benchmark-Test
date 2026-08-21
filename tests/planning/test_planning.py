@@ -10,8 +10,8 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from xmax_test.benchmark import load_benchmark_contract
-from xmax_test.planning.builder import TestPlanBuilder
 from xmax_test.planning.budget import BudgetPreview
+from xmax_test.planning.builder import TestPlanBuilder
 from xmax_test.planning.case_numbers import CaseNumberAllocator
 from xmax_test.planning.recipes import RecipeResolver
 from xmax_test.planning.strategies import SelectedCombination, StrategyRegistry
@@ -66,9 +66,25 @@ class PlanningTestBase(unittest.TestCase):
 
         asset("feed-1", "feed_video")
         asset("feed-2", "feed_video")
-        asset("prompt-1", "prompt_text", {"text": "换装：把人物替换为参考图的服装", "group_id": "g1", "record_number": 1})
+        asset(
+            "prompt-1",
+            "prompt_text",
+            {
+                "text": "换装：把人物替换为参考图的服装",
+                "group_id": "g1",
+                "record_number": 1,
+            },
+        )
         asset("prompt-ref-1", "prompt_image", {"group_id": "g1"})
-        asset("prompt-2", "prompt_text", {"text": "手势舞：按照参考视频完成动作", "group_id": "g2", "record_number": 2})
+        asset(
+            "prompt-2",
+            "prompt_text",
+            {
+                "text": "手势舞：按照参考视频完成动作",
+                "group_id": "g2",
+                "record_number": 2,
+            },
+        )
         asset("prompt-ref-2", "prompt_video", {"group_id": "g2"})
 
     def request(self, **extra) -> dict:
@@ -86,20 +102,14 @@ class PlanningTestBase(unittest.TestCase):
 
 class DeterminismTests(PlanningTestBase):
     def test_unrelated_asset_batch_lineage_does_not_change_plan_identity(self) -> None:
-        first = self.builder.build(
-            self.request(asset_batch_ids=["assets-before"], repeat_count=1)
-        )
-        second = self.builder.build(
-            self.request(asset_batch_ids=["assets-after"], repeat_count=1)
-        )
+        first = self.builder.build(self.request(asset_batch_ids=["assets-before"], repeat_count=1))
+        second = self.builder.build(self.request(asset_batch_ids=["assets-after"], repeat_count=1))
         self.assertEqual(first["plan_hash"], second["plan_hash"])
         self.assertEqual(
             [case["case_id"] for case in first["cases"]],
             [case["case_id"] for case in second["cases"]],
         )
-        self.assertTrue(
-            all(case.get("generation_signature") for case in first["cases"])
-        )
+        self.assertTrue(all(case.get("generation_signature") for case in first["cases"]))
 
     def test_first_n_filters_are_deterministic_and_change_plan_hash(self) -> None:
         full = self.builder.build(self.request(seed=42, repeat_count=1))
@@ -243,9 +253,7 @@ class AllocationStrategyTests(PlanningTestBase):
             strategy_registry=registry,
             clock=FixedClock(),
         )
-        plan = builder.build(
-            self.request(combination_selection={"strategy": "first_only"})
-        )
+        plan = builder.build(self.request(combination_selection={"strategy": "first_only"}))
         self.assertEqual(len(plan["cases"]), 1)
 
 
@@ -259,9 +267,7 @@ class RecipeModeTests(PlanningTestBase):
         )
         self.assertEqual(image_case["generation_mode"], "offline")
         self.assertEqual(image_case["edited_video_asset_id"], image_case["feed_asset_id"])
-        self.assertEqual(
-            image_case["expected_audio_source_asset_id"], image_case["feed_asset_id"]
-        )
+        self.assertEqual(image_case["expected_audio_source_asset_id"], image_case["feed_asset_id"])
         self.assertEqual(
             image_case["api_asset_bindings"],
             {"refVideoPath": "feed_video", "refImagePath": "prompt_image"},
@@ -275,9 +281,7 @@ class RecipeModeTests(PlanningTestBase):
             if case["operation_recipe_id"] == "offline-video-reference-with-feed-capture"
         )
         self.assertEqual(video_case["generation_mode"], "offline")
-        self.assertEqual(
-            video_case["edited_video_asset_id"], "prompt-ref-2"
-        )
+        self.assertEqual(video_case["edited_video_asset_id"], "prompt-ref-2")
         self.assertEqual(video_case["expected_audio_source_asset_id"], "prompt-ref-2")
         self.assertEqual(
             video_case["api_asset_bindings"],
@@ -299,15 +303,9 @@ class RecipeModeTests(PlanningTestBase):
             }
         )
         plan = self.builder.build(self.request(seed=5))
-        interactive = [
-            case
-            for case in plan["cases"]
-            if case["prompt_text"].find("触控") != -1
-        ]
+        interactive = [case for case in plan["cases"] if case["prompt_text"].find("触控") != -1]
         self.assertTrue(interactive)
-        self.assertTrue(
-            all(case["generation_mode"] == "realtime" for case in interactive)
-        )
+        self.assertTrue(all(case["generation_mode"] == "realtime" for case in interactive))
 
     def test_explicit_override_wins_over_recipe_default(self) -> None:
         request = self.request(
@@ -329,9 +327,7 @@ class RecipeModeTests(PlanningTestBase):
         )
         plan = self.builder.build(request)
         self.assertGreaterEqual(plan["metadata"]["skipped_count"], 1)
-        skipped_reasons = [
-            item["reason"] for item in plan["metadata"]["skipped"]
-        ]
+        skipped_reasons = [item["reason"] for item in plan["metadata"]["skipped"]]
         self.assertTrue(any("does not allow explicit mode" in reason for reason in skipped_reasons))
 
 
@@ -356,9 +352,7 @@ class NumberingTests(PlanningTestBase):
         )
         plan = self.builder.build(self.request(seed=9, repeat_count=1))
         case = next(
-            item
-            for item in plan["cases"]
-            if item["case_number"].startswith("feed001_prompt001")
+            item for item in plan["cases"] if item["case_number"].startswith("feed001_prompt001")
         )
         self.assertEqual(case["case_number"], "feed001_prompt001_02")
 
@@ -374,7 +368,11 @@ class NumberingTests(PlanningTestBase):
                 "mode": "offline",
                 "origin": "xmax_offline",
                 "status": "completed",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h",
+                },
             }
         )
         self.repository.create_run(
@@ -387,7 +385,11 @@ class NumberingTests(PlanningTestBase):
                 "mode": "offline",
                 "origin": "xmax_offline",
                 "status": "completed",
-                "provenance": {"source_type": "t", "source_locator": "l", "source_hash": "h"},
+                "provenance": {
+                    "source_type": "t",
+                    "source_locator": "l",
+                    "source_hash": "h",
+                },
             }
         )
         plan = self.builder.build(self.request(seed=9, repeat_count=5))
@@ -398,8 +400,13 @@ class NumberingTests(PlanningTestBase):
         ]
         self.assertEqual(
             feed1_prompt1,
-            ["feed001_prompt001_03", "feed001_prompt001_04", "feed001_prompt001_05",
-             "feed001_prompt001_06", "feed001_prompt001_07"],
+            [
+                "feed001_prompt001_03",
+                "feed001_prompt001_04",
+                "feed001_prompt001_05",
+                "feed001_prompt001_06",
+                "feed001_prompt001_07",
+            ],
         )
 
     def test_allocator_single_repeat_without_history_has_no_suffix(self) -> None:

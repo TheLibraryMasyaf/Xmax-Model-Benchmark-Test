@@ -160,6 +160,10 @@
         "comparison_id",
         "baseline_model_version",
         "candidate_model_version",
+        "baseline_run_batch_id",
+        "candidate_run_batch_id",
+        "baseline_evaluation_batch_id",
+        "candidate_evaluation_batch_id",
         "requested_scene_ids",
         "report_template_path",
         "report_output_directory"
@@ -168,6 +172,10 @@
         "comparison_id": {"type": "string", "minLength": 1},
         "baseline_model_version": {"type": "string", "minLength": 1},
         "candidate_model_version": {"type": "string", "minLength": 1},
+        "baseline_run_batch_id": {"type": "string", "minLength": 1},
+        "candidate_run_batch_id": {"type": "string", "minLength": 1},
+        "baseline_evaluation_batch_id": {"type": "string", "minLength": 1},
+        "candidate_evaluation_batch_id": {"type": "string", "minLength": 1},
         "requested_scene_ids": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},

@@ -37,9 +37,7 @@ class BudgetPreview:
             mode = case.get("generation_mode", "offline")
             per_mode[mode] = per_mode.get(mode, 0) + 1
             estimate = case.get("generation_config", {}).get("estimated_credits")
-            seconds = case.get("generation_config", {}).get(
-                "estimated_billable_duration_s"
-            )
+            seconds = case.get("generation_config", {}).get("estimated_billable_duration_s")
             if estimate is None:
                 has_exact_credits = False
             else:

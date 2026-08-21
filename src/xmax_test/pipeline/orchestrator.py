@@ -18,8 +18,14 @@ from ..errors import (
 )
 from ..hashing import content_hash
 from ..time import Clock, SystemClock
-from .dependencies import check_stage_inputs, raise_missing_inputs
-from .manifests import MANIFEST_VERSION, PRODUCER_VERSION, ManifestStore, build_stage_manifest, ref_for_batch
+from .dependencies import check_stage_inputs
+from .manifests import (
+    MANIFEST_VERSION,
+    PRODUCER_VERSION,
+    ManifestStore,
+    build_stage_manifest,
+    ref_for_batch,
+)
 from .models import (
     StageExecutionRequest,
     StageExecutionResult,
@@ -67,7 +73,9 @@ class PipelineOrchestrator:
 
         for stage in ordered:
             stage_input_refs = self._stage_input_refs(stage, frozen, available)
-            config_snapshot = self._stage_config(request, stage, dry_run, smoke_limit, budget_approved)
+            config_snapshot = self._stage_config(
+                request, stage, dry_run, smoke_limit, budget_approved
+            )
             if "generate" == stage and not dry_run and not budget_approved:
                 raise ApprovalRequiredError(
                     "generate stage requires an approved budget before a real run; "
@@ -78,10 +86,7 @@ class PipelineOrchestrator:
             # Copy the lists as well as the mapping.  Appending frozen stage
             # inputs to a shallow copy used to mutate ``available`` and caused
             # the same run_batch ref to multiply at every downstream stage.
-            provided_view = {
-                entity_type: list(refs)
-                for entity_type, refs in available.items()
-            }
+            provided_view = {entity_type: list(refs) for entity_type, refs in available.items()}
             for ref in stage_input_refs:
                 provided_view.setdefault(ref.entity_type, []).append(ref)
             missing = check_stage_inputs(stage, provided_view, set(stages))
@@ -175,9 +180,7 @@ class PipelineOrchestrator:
     def _consumes(stage: str) -> set[str]:
         from .models import STAGE_OPTIONAL_INPUTS, STAGE_REQUIRED_INPUTS
 
-        return set(STAGE_REQUIRED_INPUTS.get(stage, ())) | set(
-            STAGE_OPTIONAL_INPUTS.get(stage, ())
-        )
+        return set(STAGE_REQUIRED_INPUTS.get(stage, ())) | set(STAGE_OPTIONAL_INPUTS.get(stage, ()))
 
     def _stage_config(
         self,
@@ -203,9 +206,7 @@ class PipelineOrchestrator:
                     "generation_mode_overrides": request.get("generation_mode_overrides"),
                     "execution_mode": request.get("execution_mode", "streaming"),
                     "pipeline_queue_size": request.get("pipeline_queue_size", 4),
-                    "circuit_breaker_threshold": request.get(
-                        "circuit_breaker_threshold", 3
-                    ),
+                    "circuit_breaker_threshold": request.get("circuit_breaker_threshold", 3),
                 }
             )
         if stage == "plan":
@@ -213,9 +214,7 @@ class PipelineOrchestrator:
                 {
                     "generation_modes": request.get("generation_modes"),
                     "repeat_count": request.get("repeat_count"),
-                    "generation_mode_overrides": request.get(
-                        "generation_mode_overrides"
-                    ),
+                    "generation_mode_overrides": request.get("generation_mode_overrides"),
                     "generation_config": request.get("generation_config", {}),
                     "filters": request.get("filters", {}),
                     "seed": request.get("seed"),
@@ -263,7 +262,7 @@ class PipelineOrchestrator:
             raise MissingInputError(
                 f"no executor registered for stage {stage}",
                 entity_id=stage,
-                suggested_command=f"xmax-test stage show --stage-run-id <id>",
+                suggested_command="xmax-test stage show --stage-run-id <id>",
             ) from exc
 
         stage_run_id = f"stage-{stage}-{config_hash[:8]}"
@@ -326,7 +325,9 @@ class PipelineOrchestrator:
             self._manifest_store.save_batch_manifest(batch)
         return result, manifest
 
-    def _publish_outputs(self, manifest: dict[str, Any], available: dict[str, list[EntityRef]]) -> None:
+    def _publish_outputs(
+        self, manifest: dict[str, Any], available: dict[str, list[EntityRef]]
+    ) -> None:
         for ref_data in manifest.get("output_refs", []):
             ref = EntityRef(**ref_data)
             available.setdefault(ref.entity_type, []).append(ref)

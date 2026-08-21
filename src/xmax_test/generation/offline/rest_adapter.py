@@ -20,7 +20,6 @@ from typing import Any, Protocol
 
 from ...errors import ExternalServiceError, MissingDependencyError
 from ...hashing import file_sha256
-from ...time import utc_now
 
 
 class OfflineTaskTransport(Protocol):
@@ -29,11 +28,19 @@ class OfflineTaskTransport(Protocol):
     def upload_credentials(self) -> dict[str, Any]: ...
 
     def upload_image(
-        self, local_path: str, *, filename: str | None = None, mime_type: str | None = None
+        self,
+        local_path: str,
+        *,
+        filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict[str, Any]: ...
 
     def upload_video(
-        self, local_path: str, *, filename: str | None = None, mime_type: str | None = None
+        self,
+        local_path: str,
+        *,
+        filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict[str, Any]: ...
 
     def submit(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -64,7 +71,9 @@ class HttpOfflineTaskTransport:
         self._fps = fps
         self._sts: dict[str, Any] | None = None
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         data = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self._api_key:
@@ -93,7 +102,12 @@ class HttpOfflineTaskTransport:
                     raise ExternalServiceError(
                         f"offline task HTTP {path} failed with {exc.code}"
                     ) from exc
-            except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                OSError,
+                json.JSONDecodeError,
+            ) as exc:
                 if attempt > self._max_retries:
                     raise ExternalServiceError(f"offline task HTTP {path} failed: {exc}") from exc
             time.sleep(min(2 ** (attempt - 1), 4))
@@ -115,9 +129,7 @@ class HttpOfflineTaskTransport:
             ) from exc
         sts = self.upload_credentials()
         credentials = sts.get("credentials", {})
-        missing = [
-            key for key in ("bucket", "region", "prefix") if not sts.get(key)
-        ]
+        missing = [key for key in ("bucket", "region", "prefix") if not sts.get(key)]
         missing_credentials = [
             key
             for key in ("accessKeyId", "secretAccessKey", "sessionToken")
@@ -181,12 +193,20 @@ class HttpOfflineTaskTransport:
         location = raw.get("Location") if isinstance(raw, dict) else None
         if isinstance(location, str) and location.strip():
             location = location.strip()
-            return location if re.match(r"^https?://", location, re.I) else f"https://{location.lstrip('/')}"
+            return (
+                location
+                if re.match(r"^https?://", location, re.IGNORECASE)
+                else f"https://{location.lstrip('/')}"
+            )
 
         endpoint = str(sts.get("endpoint") or "").strip()
         encoded_key = urllib.parse.quote(key.lstrip("/"), safe="/")
         if endpoint:
-            endpoint_url = endpoint if re.match(r"^https?://", endpoint, re.I) else f"https://{endpoint.lstrip('/')}"
+            endpoint_url = (
+                endpoint
+                if re.match(r"^https?://", endpoint, re.IGNORECASE)
+                else f"https://{endpoint.lstrip('/')}"
+            )
             parsed = urllib.parse.urlsplit(endpoint_url)
             hostname = parsed.hostname or ""
             bucket = str(sts["bucket"])
@@ -196,11 +216,15 @@ class HttpOfflineTaskTransport:
                     hostname = f"{hostname}:{parsed.port}"
             base_path = parsed.path.rstrip("/")
             return urllib.parse.urlunsplit(
-                (parsed.scheme or "https", hostname, f"{base_path}/{encoded_key}", "", "")
+                (
+                    parsed.scheme or "https",
+                    hostname,
+                    f"{base_path}/{encoded_key}",
+                    "",
+                    "",
+                )
             )
-        return (
-            f"https://{sts['bucket']}.cos.{sts['region']}.myqcloud.com/{encoded_key}"
-        )
+        return f"https://{sts['bucket']}.cos.{sts['region']}.myqcloud.com/{encoded_key}"
 
     def _upload_object(
         self,
@@ -259,18 +283,22 @@ class HttpOfflineTaskTransport:
         }
 
     def upload_image(
-        self, local_path: str, *, filename: str | None = None, mime_type: str | None = None
+        self,
+        local_path: str,
+        *,
+        filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict[str, Any]:
-        return self._upload_object(
-            local_path, "image/", filename=filename, mime_type=mime_type
-        )
+        return self._upload_object(local_path, "image/", filename=filename, mime_type=mime_type)
 
     def upload_video(
-        self, local_path: str, *, filename: str | None = None, mime_type: str | None = None
+        self,
+        local_path: str,
+        *,
+        filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict[str, Any]:
-        return self._upload_object(
-            local_path, "video/", filename=filename, mime_type=mime_type
-        )
+        return self._upload_object(local_path, "video/", filename=filename, mime_type=mime_type)
 
     def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         # The domain adapter also carries local audit fields (taskUid, model,
@@ -324,7 +352,12 @@ class FakeOfflineTaskTransport:
         self._poll_states = poll_states or [
             {"status": "submitted"},
             {"status": "processing"},
-            {"status": "completed", "result_url": "https://example.invalid/result.mp4", "credits": 100, "billed_seconds": 12},
+            {
+                "status": "completed",
+                "result_url": "https://example.invalid/result.mp4",
+                "credits": 100,
+                "billed_seconds": 12,
+            },
         ]
         self._submit_error = submit_error
         self._download_error = download_error
@@ -349,12 +382,20 @@ class FakeOfflineTaskTransport:
         }
 
     def upload_image(
-        self, local_path: str, *, filename: str | None = None, mime_type: str | None = None
+        self,
+        local_path: str,
+        *,
+        filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict[str, Any]:
         return self._upload(local_path, "image/", filename)
 
     def upload_video(
-        self, local_path: str, *, filename: str | None = None, mime_type: str | None = None
+        self,
+        local_path: str,
+        *,
+        filename: str | None = None,
+        mime_type: str | None = None,
     ) -> dict[str, Any]:
         return self._upload(local_path, "video/", filename)
 

@@ -7,15 +7,12 @@ external side effects: no downloads, no generation, no remote writes.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator
-
 from .benchmark import load_benchmark_contract
 from .config import load_config, load_dotenv, load_json, redact, secret_file
-from .errors import ErrorReport, MissingDependencyError, XmaxTestError
+from .errors import ErrorReport, XmaxTestError
 from .scenarios import load_scenario_pack
 
 PIPELINE_STAGES = [
@@ -31,6 +28,14 @@ PIPELINE_STAGES = [
 ]
 
 BILLED_STAGES = {"generate"}
+
+# Batch-level criteria are produced by the deterministic evaluator after all
+# per-video Judges finish. They are real coverage even though they are not a
+# separately configured external Judge.
+INTERNAL_CRITERIA_BY_MODE = {
+    "offline": {"C1.2", "O4.1", "O4.2", "O5.2", "O5.3"},
+    "realtime": {"C1.2"},
+}
 
 
 class ContextChecker:
@@ -286,12 +291,8 @@ class ContextChecker:
                         credential_path = Path(credential_csv)
                         if not credential_path.is_absolute():
                             credential_path = self.root / credential_path
-                    has_environment_key = bool(
-                        api_key_env and os.getenv(api_key_env)
-                    )
-                    has_credential_csv = bool(
-                        credential_path and credential_path.is_file()
-                    )
+                    has_environment_key = bool(api_key_env and os.getenv(api_key_env))
+                    has_credential_csv = bool(credential_path and credential_path.is_file())
                     if not has_environment_key and not has_credential_csv:
                         self.report.add_item(
                             {
@@ -307,9 +308,7 @@ class ContextChecker:
                         )
 
         if "evaluate" in request.get("stages", []):
-            benchmark_path = self.root / request.get(
-                "benchmark_path", "BENCHMARK.md"
-            )
+            benchmark_path = self.root / request.get("benchmark_path", "BENCHMARK.md")
             if benchmark_path.is_file():
                 try:
                     contract = load_benchmark_contract(benchmark_path)
@@ -320,16 +319,14 @@ class ContextChecker:
                         "offline",
                         "realtime",
                     ]
-                    self.judge_coverage = _judge_coverage(
-                        contract, enabled, modes
-                    )
-                    for mode, missing in self.judge_coverage["missing_by_mode"].items():
+                    self.judge_coverage = _judge_coverage(contract, enabled, modes)
+                    for mode, missing in self.judge_coverage["missing_criteria_by_mode"].items():
                         if missing:
                             self.report.add_item(
                                 {
                                     "code": "xmax.missing_dependency",
                                     "message": (
-                                        f"{mode} benchmark dimensions without a compatible "
+                                        f"{mode} benchmark criteria without a compatible "
                                         f"enabled judge: {', '.join(missing)}"
                                     ),
                                     "stage": "evaluate",
@@ -394,6 +391,10 @@ class ContextChecker:
         for key in (
             "baseline_model_version",
             "candidate_model_version",
+            "baseline_run_batch_id",
+            "candidate_run_batch_id",
+            "baseline_evaluation_batch_id",
+            "candidate_evaluation_batch_id",
             "requested_scene_ids",
             "report_template_path",
         ):
@@ -469,11 +470,7 @@ class ContextChecker:
             key_path = project.get("xmax_api_key_file")
             if key_path and not Path(key_path).is_absolute():
                 key_path = self.root / key_path
-            if not (
-                env.get("XMAX_API_KEY")
-                or _env("XMAX_API_KEY")
-                or secret_file(key_path)
-            ):
+            if not (env.get("XMAX_API_KEY") or _env("XMAX_API_KEY") or secret_file(key_path)):
                 self.report.add_item(
                     {
                         "code": "xmax.missing_dependency",
@@ -518,7 +515,10 @@ class ContextChecker:
                 missing("npm", "generate", "realtime browser harness")
                 package = self.root / "realtime-harness" / "node_modules" / "@xmaxai" / "sdk"
                 playwright = self.root / "realtime-harness" / "node_modules" / "playwright"
-                for path, label in ((package, "@xmaxai/sdk"), (playwright, "playwright")):
+                for path, label in (
+                    (package, "@xmaxai/sdk"),
+                    (playwright, "playwright"),
+                ):
                     if not path.exists():
                         self.report.add_item(
                             {
@@ -576,6 +576,8 @@ def _judge_coverage(
     modes = [mode for mode in ("offline", "realtime") if mode in requested_modes]
     missing_by_mode: dict[str, list[str]] = {mode: [] for mode in modes}
     covered_by_mode: dict[str, list[str]] = {mode: [] for mode in modes}
+    missing_criteria_by_mode: dict[str, list[str]] = {mode: [] for mode in modes}
+    covered_criteria_by_mode: dict[str, list[str]] = {mode: [] for mode in modes}
     for mode in modes:
         for dimension in benchmark.get("dimensions", []):
             applicable = set(dimension.get("applicable_modes", []))
@@ -586,25 +588,56 @@ def _judge_coverage(
                 routing.get("secondary_kinds", [])
             )
             dimension_id = dimension.get("dimension_id", "")
-            compatible = False
-            for judge in enabled_judges:
-                kind = judge.get("kind")
-                normalized_kind = "mlmm" if kind == "mlmm_cli" else kind
-                if allowed_kinds and normalized_kind not in allowed_kinds:
-                    continue
-                if dimension_id not in judge.get("supported_dimensions", []):
-                    continue
-                if mode not in judge.get("supported_modes", []):
-                    continue
-                compatible = True
-                break
-            target = covered_by_mode if compatible else missing_by_mode
+            dimension_criteria = [
+                criterion.get("criterion_id")
+                for criterion in dimension.get("criteria", [])
+                if criterion.get("criterion_id")
+            ]
+            # Some synthetic tests and third-party draft benchmarks may still
+            # declare a dimension without criterion contracts. Keep a
+            # dimension-level compatibility check for those inputs; production
+            # benchmarks with criteria always use the stricter path below.
+            if not dimension_criteria:
+                compatible = any(
+                    (
+                        ("mlmm" if judge.get("kind") == "mlmm_cli" else judge.get("kind"))
+                        in allowed_kinds
+                        and dimension_id in judge.get("supported_dimensions", [])
+                        and mode in judge.get("supported_modes", [])
+                    )
+                    for judge in enabled_judges
+                )
+                (covered_by_mode if compatible else missing_by_mode)[mode].append(dimension_id)
+                continue
+            missing_criteria: list[str] = []
+            for criterion_id in dimension_criteria:
+                compatible = criterion_id in INTERNAL_CRITERIA_BY_MODE.get(mode, set())
+                if not compatible:
+                    for judge in enabled_judges:
+                        kind = judge.get("kind")
+                        normalized_kind = "mlmm" if kind == "mlmm_cli" else kind
+                        if allowed_kinds and normalized_kind not in allowed_kinds:
+                            continue
+                        if dimension_id not in judge.get("supported_dimensions", []):
+                            continue
+                        if mode not in judge.get("supported_modes", []):
+                            continue
+                        supported = set(judge.get("supported_criteria") or [])
+                        if criterion_id in supported:
+                            compatible = True
+                            break
+                target = covered_criteria_by_mode if compatible else missing_criteria_by_mode
+                target[mode].append(criterion_id)
+                if not compatible:
+                    missing_criteria.append(criterion_id)
+            target = covered_by_mode if not missing_criteria else missing_by_mode
             target[mode].append(dimension_id)
     return {
-        "complete": not any(missing_by_mode.values()),
+        "complete": not any(missing_criteria_by_mode.values())
+        and not any(missing_by_mode.values()),
         "covered_by_mode": covered_by_mode,
         "missing_by_mode": missing_by_mode,
-        "covered_counts": {
-            mode: len(items) for mode, items in covered_by_mode.items()
-        },
+        "covered_criteria_by_mode": covered_criteria_by_mode,
+        "missing_criteria_by_mode": missing_criteria_by_mode,
+        "covered_counts": {mode: len(items) for mode, items in covered_by_mode.items()},
     }

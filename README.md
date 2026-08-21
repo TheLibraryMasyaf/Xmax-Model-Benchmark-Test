@@ -34,8 +34,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -
 预期输出：
 
 ```text
-Project scaffold complete
-BENCHMARK valid: version=0.1.0-draft status=shadow dimensions=23 weight_profiles=2 scene_weight_rules=14 score_schemas=1 scenarios=32
+Project check passed
+BENCHMARK valid: version=0.2.0-draft status=shadow dimensions=23 weight_profiles=2 scene_weight_rules=14 score_schemas=1 scenarios=32
 ```
 
 ## 2. 目录
@@ -94,6 +94,7 @@ xmax-test/
 | [运行与安全](docs/operations.md) | 密钥、付费门槛、续跑、监控与故障处理 |
 | [执行防呆与熔断](docs/fail-safe-checks.md) | 强制前检、COS实际导入、原子评测、熔断和同步验收 |
 | [版本更新报告](docs/version-reporting.md) | 基线/新版可比性、P0/P1/P2归类和报告生成 |
+| [单版本报告](docs/single-version-reporting.md) | 单模型/单批次总分、维度和细则得分、强弱项及P0/P1/P2改进优先级 |
 
 ## 4. 不可变约束
 
@@ -106,10 +107,11 @@ xmax-test/
 7. 批量计费生成前必须先输出组合数、预计任务数、预计积分范围和跳过项，再由操作者放行。
 8. 默认飞书投影为Feed数据、Prompt数据、Case数据；每次Run独立占一个Case编号，失败为0%、未重评为空。
 9. 默认每个Feed × Prompt重复5次但可覆盖；Case只保存单次百分比，组平均与分布只出现在报告。
-10. 输入API角色和音轨来源由Operation Recipe冻结；互动玩法默认实时，其他默认离线，显式指定优先。
-11. 阶段之间只通过版本化批次、实体引用和Stage Manifest交接；生成、评测、报告和飞书同步均可单独授权运行。
-12. 缺失上游输入时报合同错误，禁止静默执行未列入Run Request的阶段，尤其禁止隐式付费生成。
-13. 组合选择只在Plan时发生并冻结；Worker不重新抽样，也不改写重复次数。
+10. 每条视频必须保存Benchmark细则级的0/1/2或不可评结果；维度分从细则确定性汇总，批次再按同一`criterion_id`统计，禁止从维度分反推细则。
+11. 输入API角色和音轨来源由Operation Recipe冻结；互动玩法默认实时，其他默认离线，显式指定优先。
+12. 阶段之间只通过版本化批次、实体引用和Stage Manifest交接；生成、评测、报告和飞书同步均可单独授权运行。
+13. 缺失上游输入时报合同错误，禁止静默执行未列入Run Request的阶段，尤其禁止隐式付费生成。
+14. 组合选择只在Plan时发生并冻结；Worker不重新抽样，也不改写重复次数。
 
 ## 5. 运行准备
 

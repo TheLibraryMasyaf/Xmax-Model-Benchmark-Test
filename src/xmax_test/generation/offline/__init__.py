@@ -1,2 +1,1 @@
 """Offline generation adapters."""
-

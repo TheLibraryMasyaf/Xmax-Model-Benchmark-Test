@@ -28,11 +28,12 @@
 
 ## 3. 单条Case原子评测
 
-- 一次MLLM批Judge必须返回该Case分配给它的全部维度。
+- 一次MLLM批Judge必须返回该Case分配给它的全部维度，且每个维度恰好包含Benchmark声明的全部细则ID；重复、缺失或未知ID直接失败。
 - 免费额度错误以结构化码`AllocationQuota.FreeTierOnly`判断，不依赖固定HTTP状态。
 - 换模型时重发整条Case的Prompt、Feed、Prompt素材、操作合同和结果视频，不从上一模型的半成品继续。
 - MLLM批Judge失败时不保存EvaluationResult，不用CV/Metric子集重新归一化，不写飞书分数。
 - 新Benchmark、Scenario或Judge Registry内容会改变阶段缓存哈希，不得复用旧Evaluation Batch。
+- 不接受仅有维度分的新Judgment；不得由维度分反推细则分。Hard Gate声明`criterion_id`时必须查该细则的融合分，不得改查维度平均。
 
 ## 4. 飞书写入边界
 
@@ -51,5 +52,6 @@
 
 1. 本轮选中Case数 = Run终态数，不允许出现批量相同基础设施错误。
 2. 完整流程中，每个成功评测的Run有且仅有一个本轮EvaluationResult和一个飞书业务键。
-3. 所有同步条目回读后分数、说明、Feed/Prompt/Prompt素材/结果附件一致。
-4. 有任何评测或同步失败时，整体返回partial/非0退出码，不得以局部成功宣称全批完成。
+3. 每个新EvaluationResult有逐细则结果，每个维度分与它的可评细则等权均值一致，Evaluation Batch Manifest的细则汇总可由成员Evaluation重算。
+4. 所有同步条目回读后分数、说明、Feed/Prompt/Prompt素材/结果附件一致。
+5. 有任何评测或同步失败时，整体返回partial/非0退出码，不得以局部成功宣称全批完成。
