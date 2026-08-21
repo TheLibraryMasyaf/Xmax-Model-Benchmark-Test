@@ -109,7 +109,14 @@ class PipelineOrchestrator:
             # keeping stable IDs, which breaks idempotent persistence.  Only
             # stages that are missing or incomplete run again, and their
             # executors reuse completed sub-artifacts internally.
-            if existing is not None:
+            #
+            # ``generate`` is the exception: it is a long-lived stage that runs
+            # until the whole plan is drained, so a completed stage-run does not
+            # mean every case finished (a crash can leave error/uncreated runs
+            # behind).  On --resume, always re-enter generate; its executor
+            # reuses completed runs by generation_signature and re-submits the
+            # rest, so nothing is double-billed.
+            if existing is not None and (stage != "generate" or not resume):
                 executed.append(self._describe_skipped(stage, existing))
                 self._publish_outputs(existing, available)
                 continue
