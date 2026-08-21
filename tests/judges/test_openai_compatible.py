@@ -249,6 +249,43 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
                         output_schema={"type": "object"},
                     )
 
+    def test_structured_free_tier_code_rotates_even_when_gateway_uses_http_400(self) -> None:
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["model-a", "model-b"],
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+        )
+        requests = []
+        success = _Response(
+            {"choices": [{"message": {"content": '{"ok":true}'}}]}
+        )
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(
+                    "https://example.test",
+                    400,
+                    "quota",
+                    {},
+                    io.BytesIO(
+                        b'{"error":{"code":"AllocationQuota.FreeTierOnly"}}'
+                    ),
+                )
+            return success
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                response = provider.complete_json(
+                    prompt="return JSON",
+                    image_paths=[],
+                    output_schema={"type": "object"},
+                )
+
+        self.assertEqual([item["model"] for item in requests], ["model-a", "model-b"])
+        self.assertEqual(response.model, "model-b")
+
 
 if __name__ == "__main__":
     unittest.main()

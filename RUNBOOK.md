@@ -42,7 +42,7 @@ python3 -m venv .venv
 .venv/bin/xmax-test context-check --request config/run-request.json
 ```
 
-必须一次性输出：缺失文件、空Benchmark、无效场景标签、未覆盖维度、无效Operation Recipe/模式/互动Profile、缺失Judge、缺失Key、飞书映射、预计需要的外部权限。检查不产生外部副作用。
+必须一次性输出：缺失文件、空Benchmark、无效场景标签、未覆盖维度、无效Operation Recipe/模式/互动Profile、缺失Judge、缺失Key、飞书映射、预计需要的外部权限。检查不产生外部副作用。`run`命令内部会再强制执行同一检查，Agent不能通过少跑一条命令绕过。
 
 ## 4. 标准运行
 
@@ -64,7 +64,9 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 
 统一Run命令依次执行请求中显式列出的stages；已完成且输入/配置/生产者哈希未变的阶段自动跳过。依赖缺失时报错，不静默补跑未列出阶段。
 
-当Run Request同时列出`generate + preprocess + evaluate`且`execution_mode=streaming`（默认）时，统一Run采用有界流水线：每条completed Run立即进入预处理，每条completed Preprocess立即进入评测，与后续视频生成重叠执行。`pipeline_queue_size`默认4，队列满后对上游反压。所有条目结束后才封口Run/Preprocess/Evaluation Batch Manifest和总结报告。
+当Run Request同时列出`generate + preprocess + evaluate`且`execution_mode=streaming`（默认）时，统一Run采用有界流水线：每条completed Run立即进入预处理，每条completed Preprocess立即进入评测。若请求还显式列出`sync`且`sync_policy != none`，每条完整EvaluationResult会立即写入飞书，最后的`sync/reconcile`阶段再做幂等补偿和回读对账。`pipeline_queue_size`默认4，队列满后对上游反压。所有条目结束后才封口批次Manifest和总结报告。
+
+生成前会实际导入COS SDK的`CosConfig/CosS3Client`并校验STS响应，检查失败时不创建GenerationRun。统一Run、独立离线生成和TaskWorker遵循同一规则；批量Worker必须在领取第一条任务前完成共享预检。流水线对不可重试错误立即熔断，对完全相同的生成异常默认连续3次后熔断；可用`circuit_breaker_threshold`调整，不得为了“跑完”而关闭。
 
 显式设`execution_mode=batch`可恢复“整批生成完再预处理/评测”。只列出单阶段时，无论该字段为何都不会暗中执行下游。
 

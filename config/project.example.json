@@ -6,7 +6,7 @@
   "operation_recipe_path": "config/operation-recipes.json",
   "artifact_root": "var/artifacts",
   "manifest_root": "var/manifests",
-  "database_path": "var/xmax-test.sqlite3",
+  "database_path": "var/xmax-sandbox.sqlite3",
   "default_model": "x2.0",
   "default_repeats": 5,
   "xmax_api_base_url": "https://api.xmaxai.com/open/api/v1",

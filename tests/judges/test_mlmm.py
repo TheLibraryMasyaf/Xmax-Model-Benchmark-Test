@@ -113,6 +113,41 @@ class MlmmBatchTests(unittest.TestCase):
             ["feed", "prompt_text", "result_video"],
         )
 
+    def test_batch_provider_failure_is_atomic_not_partial_judge_errors(self) -> None:
+        class FailingProvider(FakeProvider):
+            def complete_json(self, **kwargs):
+                raise RuntimeError("quota exhausted")
+
+        judge = MlmmJudge(
+            FailingProvider(),
+            judge_id="mlmm",
+            version="2",
+            supported_dimensions=["C2", "C10"],
+            supported_modes=["offline"],
+            max_retries=0,
+        )
+        registry = JudgeRegistry()
+        registry.register(judge)
+        worker = JudgeWorker(registry)
+
+        with self.assertRaisesRegex(Exception, "no valid result"):
+            worker.run_batch(
+                evaluation_id="e",
+                run_id="r",
+                benchmark_version="b",
+                mode="offline",
+                context={
+                    "prompt": "blind batch",
+                    "dimension_contracts": [
+                        {"dimension_id": "C2", "version": "v1"},
+                        {"dimension_id": "C10", "version": "v1"},
+                    ],
+                },
+                judge_id="mlmm",
+                judge_version="2",
+                dimension_versions={"C2": "v1", "C10": "v1"},
+            )
+
     def test_only_anonymous_train_human_anchors_enter_prompt(self) -> None:
         provider = FakeProvider()
         with tempfile.TemporaryDirectory() as temporary:

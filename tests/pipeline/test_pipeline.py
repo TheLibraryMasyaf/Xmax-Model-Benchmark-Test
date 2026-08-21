@@ -305,6 +305,41 @@ class OrchestratorTests(PipelineTestBase):
         self.assertEqual([item["status"] for item in second["executed"]], ["skipped", "skipped"])
         self.assertEqual(self.calls, stages)  # second run executed nothing
 
+    def test_resume_reuses_completed_stage_and_only_runs_missing(self) -> None:
+        """--resume must reuse unchanged completed stages instead of re-running
+        them.  Re-executing a completed plan stage would renumber Case suffixes
+        and collide with the already-persisted task payloads."""
+
+        stages = ["plan", "generate", "preprocess", "evaluate"]
+        asset_batch = self.seed_asset_batch()
+        orchestrator = self.orchestrator(stages)
+        inputs = {"plan": [self.selector("asset_batch", [asset_batch])]}
+        request = self.request(stages, stage_inputs=inputs)
+
+        first = orchestrator.run(request, budget_approved=True)
+        self.assertEqual([item["status"] for item in first["executed"]], ["completed"] * 4)
+        self.assertEqual(self.calls, stages)
+
+        # Resume with identical hashes: every completed stage is reused.
+        resumed = orchestrator.run(request, resume=True, budget_approved=True)
+        self.assertEqual(
+            [item["status"] for item in resumed["executed"]],
+            ["skipped", "skipped", "skipped", "skipped"],
+        )
+        self.assertEqual(self.calls, stages)  # resume executed nothing again
+
+        # An incomplete stage is the only one that runs on resume.
+        third = orchestrator.run(
+            {**request, "stages": ["plan", "generate", "preprocess"]},
+            resume=True,
+            budget_approved=True,
+        )
+        self.assertEqual(
+            [item["status"] for item in third["executed"]],
+            ["skipped", "skipped", "skipped"],
+        )
+        self.assertEqual(self.calls, stages)
+
     def test_changed_config_creates_new_run_for_generate(self) -> None:
         stages = ["generate"]
         plan = self.seed_plan()

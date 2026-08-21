@@ -25,6 +25,28 @@ class PipelineTaskRuntime:
         self._reconcile = reconcile
         self._headed = headed
 
+    def preflight(self, tasks: list[dict[str, Any]]) -> None:
+        """Validate shared offline transport before TaskWorker claims a task."""
+
+        if getattr(self._composition, "_offline_preflight_ok", False):
+            return
+        for task in tasks:
+            if task.get("status") in {"completed", "cancelled"}:
+                continue
+            if task.get("result_refs", {}).get("run_id"):
+                continue
+            case = task.get("payload", {}).get("case", {})
+            if case.get("generation_mode", "offline") != "offline":
+                continue
+            adapter = self._composition.offline_adapter(
+                run_batch_id=f"runs-{task['task_id'][5:17]}",
+                model_id=case.get("model_id")
+                or self._composition.project.get("default_model", "x2.0"),
+            )
+            adapter.preflight()
+            self._composition._offline_preflight_ok = True
+            return
+
     def __call__(self, task: dict[str, Any]) -> dict[str, Any]:
         task_id = task["task_id"]
         case = task["payload"]["case"]
@@ -33,6 +55,7 @@ class PipelineTaskRuntime:
 
         run = self._existing_run(refs, run_batch_id)
         if run is None:
+            self.preflight([task])
             self._status(task_id, "generating")
             if case.get("generation_mode") == "realtime":
                 controller = self._composition.realtime_controller(
@@ -65,6 +88,7 @@ class PipelineTaskRuntime:
                     "task_id": task_id,
                     "benchmark_version": self._composition.benchmark.get("benchmark_version"),
                     "scenario_pack_version": self._composition.scenario_pack.get("version"),
+                    "judge_registry": self._judge_registry_fingerprint(),
                 }
             )[:12]
             existing = self._repository.list_evaluation_results(
@@ -86,13 +110,10 @@ class PipelineTaskRuntime:
         if self._sync_policy != "none":
             self._status(task_id, "syncing")
             evaluations = {run["run_id"]: evaluation} if evaluation else {}
-            sync = self._composition.feishu_sync_service().sync_case_runs(
-                [run], evaluations=evaluations, policy=self._sync_policy, dry_run=False
+            item_sync = self._composition.feishu_sync_service().sync_case_run(
+                run, evaluation, policy=self._sync_policy, dry_run=False
             )
-            if sync.get("errors"):
-                raise ExternalServiceError(
-                    f"task {task_id} Feishu sync failed: {sync['errors']}"
-                )
+            sync = {"policy": self._sync_policy, "items": [item_sync], "errors": []}
             refs = self._save_refs(task_id, sync=sync)
             if self._reconcile:
                 outcome = self._composition.feishu_reconcile().reconcile(
@@ -110,6 +131,12 @@ class PipelineTaskRuntime:
                 "completed" if run.get("status") == "completed" else "generation_error"
             ),
         }
+
+    def _judge_registry_fingerprint(self) -> str | None:
+        path = self._composition.root / "config" / "judges.json"
+        if not path.is_file():
+            return None
+        return content_hash({"content": path.read_text(encoding="utf-8")})
 
     def _existing_run(
         self, refs: dict[str, Any], run_batch_id: str

@@ -4,7 +4,7 @@
 
 ## 1. 事实源
 
-默认元数据位于`var/xmax-test.sqlite3`，大文件位于`var/artifacts/`。数据库保存业务ID、状态、版本、哈希和URI，不保存视频Blob。飞书可由两者重建。
+数据库路径始终以`config/project.json`的`database_path`为唯一真源：当前正式工作区使用`var/xmax-production.sqlite3`；`config/project.example.json`中的`var/xmax-sandbox.sqlite3`仅用于复制后创建隔离的演练环境，不能据此推断正式库路径。大文件位于`var/artifacts/`。数据库保存业务ID、状态、版本、哈希和URI，不保存视频Blob。飞书可由两者重建。
 
 ## 2. 目标实现
 

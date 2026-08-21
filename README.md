@@ -72,6 +72,7 @@ xmax-test/
 | [架构决策](docs/decisions.md) | 已确定且不得由执行 Agent 临场重选的技术决策 |
 | [外部输入合同](docs/external-inputs.md) | Benchmark、场景包、密钥和插件配置的接入边界 |
 | [跨模块实现合同](docs/implementation-contract.md) | 分层、ID、CLI、错误、Fake和测试的统一约定 |
+| [插件式扩展入口](docs/plugin-extension-guide.md) | 无上下文Agent修改评分、权重、MLLM或Judge时的路由、边界与交付要求 |
 | [本地存储](docs/storage.md) | SQLite、事件、Artifact和迁移边界 |
 | [整体技术架构](docs/architecture.md) | 服务边界、主流程、依赖方向 |
 | [可拆分阶段](docs/stage-orchestration.md) | Stage Manifest、独立运行、历史结果导入与同步策略 |
@@ -91,6 +92,7 @@ xmax-test/
 | [评测标准生命周期](docs/benchmark-lifecycle.md) | 新增、修改、停用、回放与发布 |
 | [飞书数据库](docs/feishu-database.md) | 表设计、幂等同步、附件和对账 |
 | [运行与安全](docs/operations.md) | 密钥、付费门槛、续跑、监控与故障处理 |
+| [执行防呆与熔断](docs/fail-safe-checks.md) | 强制前检、COS实际导入、原子评测、熔断和同步验收 |
 | [版本更新报告](docs/version-reporting.md) | 基线/新版可比性、P0/P1/P2归类和报告生成 |
 
 ## 4. 不可变约束

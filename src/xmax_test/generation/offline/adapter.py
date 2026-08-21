@@ -72,6 +72,15 @@ class OfflineGenerationAdapter:
     # ------------------------------------------------------------------
     # documented unified interface
     # ------------------------------------------------------------------
+    def preflight(self) -> dict[str, Any]:
+        if self._backend != "rest":
+            return {"ok": True, "backend": self._backend}
+        checker = getattr(self._transport, "preflight", None)
+        if checker is None:
+            # Test doubles and custom transports predate this optional hook.
+            return {"ok": True, "backend": self._backend, "custom_transport": True}
+        return checker()
+
     def prepare(self, case: dict[str, Any]) -> dict[str, Any]:
         bindings = case.get("api_asset_bindings", {})
         ref_video_role = bindings.get("refVideoPath")

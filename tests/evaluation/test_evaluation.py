@@ -207,7 +207,7 @@ class FusionTests(EvaluationTestBase):
         self.assertEqual(result["canonical_score"], 100.0)
         self.assertEqual(result["scenario_score"], 100.0)
         self.assertEqual(result["case_score_percent"], 100.0)
-        self.assertEqual(result["weight_resolution"]["base_profile_id"], "generic-offline-0.1")
+        self.assertEqual(result["weight_resolution"]["base_profile_id"], "generic-offline-0.2")
         self.assertTrue(result["weight_resolution"]["matched_rule_ids"])
 
     def test_hard_gate_blocks_score_regardless_of_weights(self) -> None:
@@ -409,7 +409,7 @@ class OrchestratorTests(EvaluationTestBase):
         run = self.seed_run()
         result = self.orchestrator().evaluate_run(run, "batch-eval")
         self.assertEqual(result["run_id"], run["run_id"])
-        self.assertEqual(result["benchmark_version"], "0.1.0-draft")
+        self.assertEqual(result["benchmark_version"], "0.2.0-draft")
         self.assertIn("canonical_score", result)
         self.assertIn("scenario_score", result)
         self.assertIsNotNone(result["case_score_percent"])

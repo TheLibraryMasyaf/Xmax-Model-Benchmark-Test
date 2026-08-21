@@ -93,6 +93,26 @@ class TaskTests(unittest.TestCase):
             {"completed": 2},
         )
 
+    def test_batch_preflight_failure_claims_no_tasks(self) -> None:
+        class BrokenRuntime:
+            def preflight(self, tasks):
+                self.seen = len(tasks)
+                raise RuntimeError("shared transport unavailable")
+
+            def __call__(self, task):  # pragma: no cover - must never execute
+                raise AssertionError("task execution must not start")
+
+        runtime = BrokenRuntime()
+        with self.assertRaisesRegex(RuntimeError, "shared transport unavailable"):
+            TaskWorker(self.repository, runtime).run_batch(
+                self.batch["task_batch_id"], lease_owner="worker-a"
+            )
+        self.assertEqual(runtime.seen, 2)
+        self.assertEqual(
+            self.repository.test_task_summary(self.batch["task_batch_id"])["counts"],
+            {"pending": 2},
+        )
+
     def test_completed_task_is_idempotently_reused(self) -> None:
         task_id = self.batch["task_ids"][0]
         calls = []

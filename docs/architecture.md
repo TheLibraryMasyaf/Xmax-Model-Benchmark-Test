@@ -162,4 +162,4 @@ Adapters → XMAX / Codex / Feishu / Storage
 - Generation Runner硬编码评测维度。
 - Benchmark定义具体Python类路径；路由通过 Judge ID完成。
 - 评测器在没有completed Run时自动调用生成器。
-- 生成器完成后无条件写飞书；远程写入只由显式`sync`阶段和`sync_policy`控制。
+- 只完成生成就无条件写飞书；远程写入只由显式`sync`阶段和`sync_policy`授权。在该授权存在时，流水线可在单条完整评测后立即同步，批末仍需幂等对账。

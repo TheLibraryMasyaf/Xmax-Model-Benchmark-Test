@@ -96,20 +96,10 @@ class JudgeWorker:
             "judge_id": judge_id,
             "judge_version": judge_version,
         }
-        try:
-            judgments = registered.plugin.evaluate({**context, **base})
-        except Exception as exc:
-            return [
-                {
-                    **base,
-                    "dimension_id": dimension_id,
-                    "dimension_version": version,
-                    "verdict": "judge_error",
-                    "error": str(exc),
-                    "evidence": [],
-                }
-                for dimension_id, version in dimension_versions.items()
-            ]
+        # A batch Judge owns all selected dimensions as one atomic Case
+        # judgment. If it fails, propagate the error so the Case is retried in
+        # full; never renormalize a score from the remaining CV/metric output.
+        judgments = registered.plugin.evaluate({**context, **base})
         results = []
         seen: set[str] = set()
         for judgment in judgments:

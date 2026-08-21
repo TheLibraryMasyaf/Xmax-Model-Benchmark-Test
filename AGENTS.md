@@ -12,7 +12,10 @@
 4. `docs/data-contracts.md` 与相关 `schemas/*.json`。
 5. `docs/decisions.md`：已经决定的技术取舍，不要重新发散设计。
 6. `docs/implementation-contract.md`：所有工作包共同遵循的实现、错误和测试合同。
-7. 只有评测任务才读取 `BENCHMARK.md`；标准为空时不得从旧资料推断补齐。
+7. 真实执行或改流水线时必须读取 `docs/fail-safe-checks.md`，不得绕过前置检查或用残缺结果出分。
+8. 只有评测任务才读取 `BENCHMARK.md`；标准为空时不得从旧资料推断补齐。
+
+如果任务是修改评分标准、权重、MLLM Provider或CV/Metric Judge等插件式扩展，先读取 `docs/plugin-extension-guide.md`，再按其路由读取对应 `docs/plugin-recipes/` 分册。
 
 建成后的实际运行按 `RUNBOOK.md`，外部输入按 `docs/external-inputs.md`。
 

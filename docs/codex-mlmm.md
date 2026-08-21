@@ -27,7 +27,7 @@ Qwen3-VL默认使用原生视频输入，不再把通用抽帧截图作为它的
 
 OpenAI兼容Provider把视频编码为`video_url`、图片编码为`image_url`，并在每项前插入`[INPUT_ROLE:<role>]`文本标签；不得把所有图片或视频扁平化后只依靠附件顺序猜角色。Judge Prompt中也包含同一份操作合同，保证图片型Provider仍能理解生成语义。项目中的`.bin`只是Artifact Store的内部保存名，Provider会按文件签名识别真实PNG/JPEG/MP4/WebM MIME，传给模型的仍是原始媒体格式。
 
-当前Qwen配置使用`fps=2.0`、视频帧`min_pixels=65536`、`max_pixels=655360`。评测由XMAX离线生成的Run时，系统优先复用Run事件中按素材SHA匹配的Feed/Prompt上传URL和结果URL，不重复上传；没有可复用URL时才用Base64 Data URL。本地Base64单项编码后不得超过`max_base64_bytes=10000000`；超限必须由输入包提供模型可访问的URL，不能静默压缩原视频或退回截图并冒充原生视频评测。
+当前Qwen配置使用`fps=2.0`、视频帧`min_pixels=65536`、`max_pixels=655360`和跨候选都可用的`total_pixels=50000000`。评测由XMAX离线生成的Run时，系统优先复用Run事件中按素材SHA匹配的Feed/Prompt上传URL和结果URL，不重复上传；没有可复用URL时才用Base64 Data URL。本地Base64单项编码后不得超过`max_base64_bytes=10000000`；超限必须由输入包提供模型可访问的URL，不能静默压缩原视频或退回截图并冒充原生视频评测。
 
 预处理截图仍然保留，但职责改为：CV Judge输入、ROI/异常窗口、审计复核，以及Codex CLI等不支持原生视频Provider的兼容兜底。它不再进入启用`direct_media`的Qwen请求。联系图不能代替FPS、实时延迟、音频和设备数据；Qwen3-VL只能读取视频视觉内容，音轨仍由音频Metric Judge评测。
 
@@ -35,22 +35,21 @@ OpenAI兼容Provider把视频编码为`video_url`、图片编码为`image_url`�
 
 `config/judges.json` 中的 `provider.type` 可为 `openai_compatible`、`codex_cli`或`python_plugin`。Judge层调用 `complete_json(prompt, image_paths, output_schema, media_inputs)`；`media_inputs`是可选的带角色原始媒体合同，`image_paths`是兼容兜底。评分维度、人工校准和融合不依赖供应商。
 
-### Qwen3-VL真实配置
+### 百炼视频MLLM真实配置
 
-当前 `config/judges.json` 从项目上层 `QWEN_API.csv` 读取 `apiKey` 和 `openAiCompatible`，不复制密钥、不写日志。CSV是两列键值格式；工作空间端点会自动补上 `/chat/completions`。
+当前 `config/judges.json` 从项目上层 `QWEN_API.csv` 读取 `apiKey` 和 `openAiCompatible`，不复制密钥、不写日志。CSV是两列键值格式；工作空间端点会自动补上 `/chat/completions`。当前凭据文件位于Git仓库之外，不可能被本仓库跟踪；`.gitignore`也额外忽略`QWEN_API.csv`，防止后续被复制进仓库时误提交。
 
-模型顺序是：
+他人接入时只需在他们的项目上层放置同格式CSV，并至少提供`apiKey`与`openAiCompatible`两行；不需要改Python代码。若改成环境变量，可在Judge配置中使用`api_key_env`并显式配置对应地域/业务空间的`endpoint`。
 
-1. `qwen3-vl-plus`
-2. `qwen3-vl-plus-2026-01-25`
-3. `qwen3-vl-flash`
-4. `qwen3-vl-flash-2026-01-25`
+模型顺序以`config/judges.json`为唯一真源。2026-08-21通过百炼控制台登录账户逐项回读：当前候选只保留显示“剩1,000,000/共1,000,000”且“免费额度用完即停”已开启的模型。候选包含官方视觉理解文档明确支持视频和结构化输出的Qwen3.8 Max、Qwen3.7/3.6/3.5视觉能力模型，以及Qwen3-VL Plus/Flash快照和Instruct规格。
 
-请求使用 `response_format={"type":"json_object"}` 和 `enable_thinking=false`，本地再用JSON Schema严格校验。只有HTTP 403且错误码为 `AllocationQuota.FreeTierOnly` 时才将当前模型标记为免费额度耗尽并立即重试下一个。HTTP 429的RPM/TPM限流不切模型，交给上层退避/重试，避免误用其他模型免费额度。全部候选均耗尽时明确失败，不转付费模型。
+以下项不进入当前调用链：控制台明确显示“无免费额度”的模型；剩余额度显示为`-`的泛化别名；当前请求的非思考结构化输出协议不匹配的Thinking专用规格；以及仅WebSocket实时协议的Omni模型。全模态HTTP模型虽然当前显示100万Token，但账户的“免费额度用完即停”尚未开启，因此未注册为回退候选。
+
+请求使用 `response_format={"type":"json_object"}` 和 `enable_thinking=false`，本地再用JSON Schema严格校验。结构化错误码 `AllocationQuota.FreeTierOnly` 是额度耗尽的唯一权威信号，即使中间网关返回的不是HTTP 403也会切换模型。切换后完整重发当前Case，不跳过、不保存前一模型的半成品。HTTP 429的RPM/TPM限流不切模型，交给上层退避/重试。全部候选失败时该Case不产生EvaluationResult、不写飞书分数，且不转付费模型。
 
 2026-08-20已用一个真实离线Case做原生多输入烟测：同一请求传入Feed视频、Prompt文字、Prompt图片和Result视频，`qwen3-vl-plus`正确回传四个角色且`role_confusion=false`；调用消耗5089输入Token、273输出Token。该烟测只验证输入能力和角色隔离，不作为正式Benchmark评分。
 
-进程重启后会从第一个模型重新检测；已耗尽模型返回403后会立即跳过。每次返回保存实际 `provider_model`、Token usage和 `model_fallback_attempts`，便于报告对账。
+进程重启后会从第一个模型重新检测；已耗尽模型返回结构化额度错误后会立即跳过，不假设固定HTTP状态。每次返回保存实际 `provider_model`、Token usage和 `model_fallback_attempts`，便于报告对账。
 
 ### Codex CLI可替换配置
 

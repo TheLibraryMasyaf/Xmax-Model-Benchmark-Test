@@ -78,6 +78,8 @@ Judgment证据优先包含：
 
 MLLM只能描述输入中可见内容；不得把Prompt、API错误或工程猜测当作视觉证据。原生视频允许判断可见画面连续性和时序，但Qwen3-VL不能据此判断音轨、API延迟或其他运行事实。
 
+MLLM批量Judge对一条Case的全部所属维度是原子操作。遇到`AllocationQuota.FreeTierOnly`时，Provider用下一个配置模型重发该Case的完整请求；所有候选都失败时，该Case评测失败且不保存、不上传残缺分数。禁止丢弃MLLM维度后用剩余CV/Metric结果重新归一化总分。
+
 ## 6. 融合
 
 融合顺序：

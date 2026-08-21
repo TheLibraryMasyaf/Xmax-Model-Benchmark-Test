@@ -14,7 +14,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .benchmark import load_benchmark_contract
-from .config import load_dotenv, load_json, redact, secret_file
+from .config import load_config, load_dotenv, load_json, redact, secret_file
 from .errors import ErrorReport, MissingDependencyError, XmaxTestError
 from .scenarios import load_scenario_pack
 
@@ -201,7 +201,7 @@ class ContextChecker:
             )
             return
         try:
-            pack = load_json(path)
+            pack = load_config(path, "operation-recipes.schema.json", base_dir=self.root)
         except XmaxTestError as exc:
             self.report.add(exc)
             return
@@ -243,7 +243,7 @@ class ContextChecker:
             )
             return
         try:
-            pack = load_json(path)
+            pack = load_config(path, "judge-registry.schema.json", base_dir=self.root)
         except XmaxTestError as exc:
             self.report.add(exc)
             return
@@ -503,7 +503,7 @@ class ContextChecker:
         if "generate" in stages and not request.get("dry_run"):
             if not modes or "offline" in modes:
                 try:
-                    import qcloud_cos  # noqa: F401
+                    from qcloud_cos import CosConfig, CosS3Client  # noqa: F401
                 except ImportError:
                     self.report.add_item(
                         {

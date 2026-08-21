@@ -9,7 +9,7 @@
 {
   "$schema": "./schemas/benchmark.schema.json",
   "schema_version": "1.1",
-  "benchmark_version": "0.1.0-draft",
+  "benchmark_version": "0.2.0-draft",
   "status": "shadow",
   "provisional": true,
   "review_after": "first_round_evaluation",
@@ -2071,59 +2071,59 @@
   ],
   "weight_profiles": [
     {
-      "profile_id": "generic-offline-0.1",
-      "version": "0.1.0-draft",
+      "profile_id": "generic-offline-0.2",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "description": "当前标准的通用离线暂定权重；首轮测试后复核。",
       "applicable_modes": [
         "offline"
       ],
       "weights": {
-        "C1": 8,
-        "C2": 10,
-        "C3": 8,
-        "C4": 8,
-        "C5": 8,
-        "C6": 6,
-        "C7": 8,
-        "C8": 5,
-        "C9": 6,
-        "C10": 5,
-        "O1": 6,
-        "O2": 6,
-        "O3": 6,
-        "O4": 4,
-        "O5": 3,
-        "O6": 3
+        "C1": 6,
+        "C2": 9,
+        "C3": 7,
+        "C4": 7,
+        "C5": 7,
+        "C6": 5,
+        "C7": 9,
+        "C8": 8,
+        "C9": 10,
+        "C10": 10,
+        "O1": 5,
+        "O2": 5,
+        "O3": 5,
+        "O4": 2,
+        "O5": 1,
+        "O6": 4
       },
       "maximum_rule_multiplier": 4.0
     },
     {
-      "profile_id": "generic-realtime-0.1",
-      "version": "0.1.0-draft",
+      "profile_id": "generic-realtime-0.2",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "description": "当前标准的通用实时暂定权重；首轮测试后复核。",
       "applicable_modes": [
         "realtime"
       ],
       "weights": {
-        "C1": 8,
-        "C2": 9,
-        "C3": 5,
-        "C4": 7,
-        "C5": 6,
-        "C6": 5,
-        "C7": 7,
-        "C8": 5,
-        "C9": 5,
-        "C10": 5,
-        "R1": 6,
-        "R2": 7,
+        "C1": 6,
+        "C2": 8,
+        "C3": 4,
+        "C4": 6,
+        "C5": 5,
+        "C6": 4,
+        "C7": 8,
+        "C8": 8,
+        "C9": 9,
+        "C10": 9,
+        "R1": 4,
+        "R2": 6,
         "R3": 7,
         "R4": 5,
-        "R5": 4,
-        "R6": 5,
-        "R7": 4
+        "R5": 3,
+        "R6": 3,
+        "R7": 5
       },
       "maximum_rule_multiplier": 4.0
     }
@@ -2131,12 +2131,12 @@
   "scene_weight_rules": [
     {
       "rule_id": "core-selfie-appearance-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "日常自拍视频换装或换角色（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
@@ -2149,20 +2149,20 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
+        "C1": 5,
         "C2": 10,
         "C3": 14,
         "C4": 12,
         "C5": 5,
         "C6": 4,
         "C7": 10,
-        "C9": 8,
-        "C10": 6,
-        "O1": 6,
-        "O2": 7,
-        "O3": 5,
-        "O4": 3,
-        "O5": 2,
+        "C9": 11,
+        "C10": 10,
+        "O1": 5,
+        "O2": 6,
+        "O3": 3,
+        "O4": 2,
+        "O5": 1,
         "O6": 2
       },
       "exclude_dimensions": [
@@ -2171,12 +2171,12 @@
     },
     {
       "rule_id": "core-selfie-appearance-realtime",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "日常自拍视频换装或换角色（实时）暂定权重。",
       "applicable_profile_ids": [
-        "generic-realtime-0.1"
+        "generic-realtime-0.2"
       ],
       "when": {
         "all": [
@@ -2189,22 +2189,22 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
+        "C1": 5,
         "C2": 10,
         "C3": 13,
         "C4": 12,
         "C5": 4,
         "C6": 3,
         "C7": 9,
-        "C9": 7,
-        "C10": 4,
-        "R1": 5,
+        "C9": 10,
+        "C10": 8,
+        "R1": 4,
         "R2": 4,
         "R3": 8,
         "R4": 3,
-        "R5": 4,
-        "R6": 4,
-        "R7": 4
+        "R5": 3,
+        "R6": 2,
+        "R7": 2
       },
       "exclude_dimensions": [
         "C8"
@@ -2212,12 +2212,12 @@
     },
     {
       "rule_id": "core-selfie-action-expression-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "日常自拍视频动作与表情替换（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
@@ -2230,21 +2230,21 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
-        "C2": 10,
+        "C1": 5,
+        "C2": 9,
         "C3": 8,
         "C4": 11,
         "C5": 17,
         "C6": 3,
         "C7": 10,
-        "C9": 7,
-        "C10": 6,
-        "O1": 5,
+        "C9": 10,
+        "C10": 10,
+        "O1": 4,
         "O2": 4,
-        "O3": 5,
-        "O4": 3,
-        "O5": 2,
-        "O6": 3
+        "O3": 4,
+        "O4": 2,
+        "O5": 1,
+        "O6": 2
       },
       "exclude_dimensions": [
         "C8"
@@ -2252,12 +2252,12 @@
     },
     {
       "rule_id": "core-selfie-action-expression-realtime",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "日常自拍视频动作与表情替换（实时）暂定权重。",
       "applicable_profile_ids": [
-        "generic-realtime-0.1"
+        "generic-realtime-0.2"
       ],
       "when": {
         "all": [
@@ -2270,22 +2270,22 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
-        "C2": 9,
+        "C1": 5,
+        "C2": 8,
         "C3": 5,
         "C4": 10,
         "C5": 16,
         "C6": 3,
         "C7": 9,
-        "C9": 6,
-        "C10": 4,
-        "R1": 5,
-        "R2": 8,
-        "R3": 9,
+        "C9": 9,
+        "C10": 8,
+        "R1": 4,
+        "R2": 7,
+        "R3": 8,
         "R4": 2,
         "R5": 2,
-        "R6": 2,
-        "R7": 4
+        "R6": 1,
+        "R7": 3
       },
       "exclude_dimensions": [
         "C8"
@@ -2293,12 +2293,12 @@
     },
     {
       "rule_id": "core-dance-fixed-camera-appearance-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "固定机位舞蹈短视频替换角色或服装（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
@@ -2311,20 +2311,20 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
-        "C2": 8,
-        "C3": 11,
-        "C4": 10,
-        "C5": 18,
-        "C6": 5,
+        "C1": 5,
+        "C2": 7,
+        "C3": 10,
+        "C4": 9,
+        "C5": 17,
+        "C6": 4,
         "C7": 12,
-        "C8": 3,
-        "C9": 8,
-        "C10": 4,
-        "O1": 4,
-        "O2": 4,
-        "O3": 3,
-        "O4": 2,
+        "C8": 6,
+        "C9": 11,
+        "C10": 8,
+        "O1": 3,
+        "O2": 3,
+        "O3": 2,
+        "O4": 1,
         "O5": 1,
         "O6": 1
       },
@@ -2332,12 +2332,12 @@
     },
     {
       "rule_id": "core-dance-moving-camera-appearance-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "移动镜头热门舞蹈主体替换角色或服装（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
@@ -2350,19 +2350,19 @@
         ]
       },
       "weight_overrides": {
-        "C1": 5,
-        "C2": 7,
-        "C3": 10,
-        "C4": 10,
-        "C5": 16,
-        "C6": 12,
-        "C7": 11,
-        "C8": 4,
-        "C9": 8,
-        "C10": 3,
-        "O1": 4,
-        "O2": 3,
-        "O3": 3,
+        "C1": 4,
+        "C2": 6,
+        "C3": 9,
+        "C4": 9,
+        "C5": 15,
+        "C6": 11,
+        "C7": 10,
+        "C8": 7,
+        "C9": 11,
+        "C10": 7,
+        "O1": 3,
+        "O2": 2,
+        "O3": 2,
         "O4": 2,
         "O5": 1,
         "O6": 1
@@ -2371,12 +2371,12 @@
     },
     {
       "rule_id": "core-live-long-appearance-realtime",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "单人直播虚拟形象或换装（实时）暂定权重。",
       "applicable_profile_ids": [
-        "generic-realtime-0.1"
+        "generic-realtime-0.2"
       ],
       "when": {
         "all": [
@@ -2389,34 +2389,34 @@
         ]
       },
       "weight_overrides": {
-        "C1": 7,
-        "C2": 9,
-        "C3": 10,
-        "C4": 12,
-        "C5": 5,
+        "C1": 6,
+        "C2": 8,
+        "C3": 9,
+        "C4": 11,
+        "C5": 4,
         "C6": 2,
         "C7": 7,
-        "C8": 2,
-        "C9": 6,
-        "C10": 4,
-        "R1": 4,
-        "R2": 5,
+        "C8": 5,
+        "C9": 10,
+        "C10": 8,
+        "R1": 3,
+        "R2": 4,
         "R3": 7,
-        "R4": 2,
-        "R5": 5,
-        "R6": 8,
+        "R4": 1,
+        "R5": 4,
+        "R6": 6,
         "R7": 5
       },
       "exclude_dimensions": []
     },
     {
       "rule_id": "core-vlog-moving-camera-style-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "自拍旅行 Vlog 风格化（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
@@ -2429,33 +2429,33 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
-        "C2": 10,
-        "C3": 10,
+        "C1": 5,
+        "C2": 9,
+        "C3": 9,
         "C4": 8,
         "C5": 3,
-        "C6": 14,
+        "C6": 13,
         "C7": 5,
-        "C8": 3,
-        "C9": 10,
-        "C10": 8,
-        "O1": 7,
+        "C8": 6,
+        "C9": 12,
+        "C10": 11,
+        "O1": 6,
         "O2": 5,
-        "O3": 4,
-        "O4": 2,
-        "O5": 2,
+        "O3": 3,
+        "O4": 1,
+        "O5": 1,
         "O6": 3
       },
       "exclude_dimensions": []
     },
     {
       "rule_id": "core-real-scene-effects-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "他拍实景视频特效增强（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
@@ -2468,20 +2468,20 @@
         ]
       },
       "weight_overrides": {
-        "C1": 5,
-        "C2": 10,
-        "C3": 7,
+        "C1": 4,
+        "C2": 9,
+        "C3": 6,
         "C4": 3,
         "C5": 7,
-        "C6": 10,
+        "C6": 9,
         "C7": 6,
-        "C8": 16,
-        "C9": 10,
-        "C10": 7,
-        "O1": 5,
+        "C8": 18,
+        "C9": 12,
+        "C10": 10,
+        "O1": 4,
         "O2": 5,
-        "O3": 3,
-        "O4": 2,
+        "O3": 2,
+        "O4": 1,
         "O5": 2,
         "O6": 2
       },
@@ -2489,12 +2489,12 @@
     },
     {
       "rule_id": "core-moving-camera-added-subject-realtime",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "移动镜头下新增虚拟主体并持续互动（实时）暂定权重。",
       "applicable_profile_ids": [
-        "generic-realtime-0.1"
+        "generic-realtime-0.2"
       ],
       "when": {
         "all": [
@@ -2507,118 +2507,39 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
-        "C2": 9,
-        "C3": 7,
+        "C1": 5,
+        "C2": 8,
+        "C3": 6,
         "C4": 6,
-        "C5": 8,
-        "C6": 9,
+        "C5": 7,
+        "C6": 8,
         "C7": 7,
-        "C8": 9,
-        "C9": 6,
-        "C10": 3,
-        "R1": 4,
-        "R2": 6,
+        "C8": 12,
+        "C9": 9,
+        "C10": 7,
+        "R1": 3,
+        "R2": 5,
         "R3": 7,
-        "R4": 7,
-        "R5": 2,
-        "R6": 2,
+        "R4": 6,
+        "R5": 1,
+        "R6": 1,
         "R7": 2
       },
       "exclude_dimensions": []
     },
     {
       "rule_id": "core-multi-subject-appearance-offline",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "多人合拍换装或换角色（离线）暂定权重。",
       "applicable_profile_ids": [
-        "generic-offline-0.1"
+        "generic-offline-0.2"
       ],
       "when": {
         "all": [
           {
             "scenario_id": "core-multi-subject-appearance"
-          },
-          {
-            "mode": "offline"
-          }
-        ]
-      },
-      "weight_overrides": {
-        "C1": 6,
-        "C2": 12,
-        "C3": 12,
-        "C4": 12,
-        "C5": 5,
-        "C6": 7,
-        "C7": 10,
-        "C8": 2,
-        "C9": 7,
-        "C10": 5,
-        "O1": 6,
-        "O2": 6,
-        "O3": 4,
-        "O4": 3,
-        "O5": 1,
-        "O6": 2
-      },
-      "exclude_dimensions": []
-    },
-    {
-      "rule_id": "core-multi-subject-appearance-realtime",
-      "version": "0.1.0-draft",
-      "status": "shadow",
-      "priority": 100,
-      "description": "多人合拍换装或换角色（实时）暂定权重。",
-      "applicable_profile_ids": [
-        "generic-realtime-0.1"
-      ],
-      "when": {
-        "all": [
-          {
-            "scenario_id": "core-multi-subject-appearance"
-          },
-          {
-            "mode": "realtime"
-          }
-        ]
-      },
-      "weight_overrides": {
-        "C1": 6,
-        "C2": 12,
-        "C3": 10,
-        "C4": 12,
-        "C5": 4,
-        "C6": 6,
-        "C7": 9,
-        "C8": 2,
-        "C9": 5,
-        "C10": 3,
-        "R1": 4,
-        "R2": 4,
-        "R3": 9,
-        "R4": 3,
-        "R5": 5,
-        "R6": 3,
-        "R7": 3
-      },
-      "exclude_dimensions": []
-    },
-    {
-      "rule_id": "core-multi-subject-action-expression-offline",
-      "version": "0.1.0-draft",
-      "status": "shadow",
-      "priority": 100,
-      "description": "多人合拍换动作或表情（离线）暂定权重。",
-      "applicable_profile_ids": [
-        "generic-offline-0.1"
-      ],
-      "when": {
-        "all": [
-          {
-            "scenario_id": "core-multi-subject-action-expression"
           },
           {
             "mode": "offline"
@@ -2627,18 +2548,97 @@
       },
       "weight_overrides": {
         "C1": 5,
-        "C2": 12,
-        "C3": 7,
-        "C4": 10,
-        "C5": 16,
+        "C2": 11,
+        "C3": 11,
+        "C4": 11,
+        "C5": 5,
         "C6": 6,
-        "C7": 11,
-        "C8": 4,
-        "C9": 6,
-        "C10": 6,
-        "O1": 4,
-        "O2": 4,
-        "O3": 4,
+        "C7": 10,
+        "C8": 5,
+        "C9": 10,
+        "C10": 9,
+        "O1": 5,
+        "O2": 5,
+        "O3": 3,
+        "O4": 2,
+        "O5": 1,
+        "O6": 1
+      },
+      "exclude_dimensions": []
+    },
+    {
+      "rule_id": "core-multi-subject-appearance-realtime",
+      "version": "0.2.0-draft",
+      "status": "shadow",
+      "priority": 100,
+      "description": "多人合拍换装或换角色（实时）暂定权重。",
+      "applicable_profile_ids": [
+        "generic-realtime-0.2"
+      ],
+      "when": {
+        "all": [
+          {
+            "scenario_id": "core-multi-subject-appearance"
+          },
+          {
+            "mode": "realtime"
+          }
+        ]
+      },
+      "weight_overrides": {
+        "C1": 5,
+        "C2": 11,
+        "C3": 9,
+        "C4": 11,
+        "C5": 4,
+        "C6": 5,
+        "C7": 9,
+        "C8": 5,
+        "C9": 8,
+        "C10": 7,
+        "R1": 3,
+        "R2": 3,
+        "R3": 9,
+        "R4": 2,
+        "R5": 4,
+        "R6": 2,
+        "R7": 3
+      },
+      "exclude_dimensions": []
+    },
+    {
+      "rule_id": "core-multi-subject-action-expression-offline",
+      "version": "0.2.0-draft",
+      "status": "shadow",
+      "priority": 100,
+      "description": "多人合拍换动作或表情（离线）暂定权重。",
+      "applicable_profile_ids": [
+        "generic-offline-0.2"
+      ],
+      "when": {
+        "all": [
+          {
+            "scenario_id": "core-multi-subject-action-expression"
+          },
+          {
+            "mode": "offline"
+          }
+        ]
+      },
+      "weight_overrides": {
+        "C1": 4,
+        "C2": 11,
+        "C3": 6,
+        "C4": 9,
+        "C5": 15,
+        "C6": 5,
+        "C7": 10,
+        "C8": 7,
+        "C9": 9,
+        "C10": 10,
+        "O1": 3,
+        "O2": 3,
+        "O3": 3,
         "O4": 2,
         "O5": 1,
         "O6": 2
@@ -2647,12 +2647,12 @@
     },
     {
       "rule_id": "core-multi-subject-action-expression-realtime",
-      "version": "0.1.0-draft",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "priority": 100,
       "description": "多人合拍换动作或表情（实时）暂定权重。",
       "applicable_profile_ids": [
-        "generic-realtime-0.1"
+        "generic-realtime-0.2"
       ],
       "when": {
         "all": [
@@ -2665,23 +2665,23 @@
         ]
       },
       "weight_overrides": {
-        "C1": 6,
-        "C2": 11,
+        "C1": 5,
+        "C2": 10,
         "C3": 4,
-        "C4": 10,
-        "C5": 15,
-        "C6": 5,
-        "C7": 10,
-        "C8": 3,
-        "C9": 5,
-        "C10": 2,
-        "R1": 4,
-        "R2": 6,
-        "R3": 8,
+        "C4": 9,
+        "C5": 14,
+        "C6": 4,
+        "C7": 9,
+        "C8": 6,
+        "C9": 8,
+        "C10": 6,
+        "R1": 3,
+        "R2": 5,
+        "R3": 7,
         "R4": 2,
         "R5": 3,
         "R6": 2,
-        "R7": 4
+        "R7": 3
       },
       "exclude_dimensions": []
     }
@@ -2705,8 +2705,8 @@
   ],
   "score_schemas": [
     {
-      "score_schema_id": "xmax-scene-score-0.1",
-      "version": "0.1.0-draft",
+      "score_schema_id": "xmax-scene-score-0.2",
+      "version": "0.2.0-draft",
       "status": "shadow",
       "dimensions": [
         {
@@ -2803,8 +2803,8 @@
         }
       ],
       "weight_profile_by_mode": {
-        "offline": "generic-offline-0.1",
-        "realtime": "generic-realtime-0.1"
+        "offline": "generic-offline-0.2",
+        "realtime": "generic-realtime-0.2"
       },
       "outputs": [
         "canonical_score",
@@ -2815,6 +2815,11 @@
     }
   ],
   "change_log": [
+    {
+      "version": "0.2.0-draft",
+      "date": "2026-08-21",
+      "summary": "提高C8/C9/C10等直接影响观看感受的维度权重，降低部分纯技术和成本维度权重；同步更新通用与全部场景权重规则。"
+    },
     {
       "version": "0.1.0-draft",
       "date": "2026-08-19",
@@ -2829,7 +2834,7 @@
 
 适用于XMAX基于原视频、摄像头流、参考图片或参考视频的离线与实时生成，不包含纯文本直接生成视频。
 
-当前`benchmark_version = 0.1.0-draft`，所有维度、Profile、规则、Gate和Score Schema均为Shadow。系统可以在第一轮测试中产出Shadow分数和诊断，但不能把它当作稳定的正式排行榜结论。
+当前`benchmark_version = 0.2.0-draft`，所有维度、Profile、规则、Gate和Score Schema均为Shadow。系统可以在第一轮测试中产出Shadow分数和诊断，但不能把它当作稳定的正式排行榜结论。
 
 ## 2. 评分方法
 
@@ -2867,7 +2872,7 @@
 
 ## 4. 通用暂定权重
 
-`generic-offline-0.1`和`generic-realtime-0.1`分别保存通用离线/实时权重，均合计100。它们是Canonical Score的基础，也是场景规则的基准Profile。
+`generic-offline-0.2`和`generic-realtime-0.2`分别保存通用离线/实时权重，均合计100。它们是Canonical Score的基础，也是场景规则的基准Profile。C8、C9、C10在通用Profile中合计26%，用于提高物理真实性、视觉融合和整体观感对总分的影响。
 
 ## 5. 核心场景暂定权重规则
 

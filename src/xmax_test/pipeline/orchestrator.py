@@ -98,7 +98,13 @@ class PipelineOrchestrator:
             existing = self._repository.find_stage_run(
                 stage, input_hash, config_hash, PRODUCER_VERSION
             )
-            if existing is not None and not resume:
+            # A stage whose input/config hashes are unchanged and already
+            # completed must be reused even on --resume; re-executing it can
+            # mutate derived identity (e.g. plan case-number suffixes) while
+            # keeping stable IDs, which breaks idempotent persistence.  Only
+            # stages that are missing or incomplete run again, and their
+            # executors reuse completed sub-artifacts internally.
+            if existing is not None:
                 executed.append(self._describe_skipped(stage, existing))
                 self._publish_outputs(existing, available)
                 continue
@@ -197,6 +203,9 @@ class PipelineOrchestrator:
                     "generation_mode_overrides": request.get("generation_mode_overrides"),
                     "execution_mode": request.get("execution_mode", "streaming"),
                     "pipeline_queue_size": request.get("pipeline_queue_size", 4),
+                    "circuit_breaker_threshold": request.get(
+                        "circuit_breaker_threshold", 3
+                    ),
                 }
             )
         if stage == "plan":
@@ -221,6 +230,17 @@ class PipelineOrchestrator:
                     "pipeline_queue_size": request.get("pipeline_queue_size", 4),
                 }
             )
+        fingerprints = request.get("_contract_fingerprints", {})
+        if stage == "plan":
+            snapshot["benchmark_fingerprint"] = fingerprints.get("benchmark")
+            snapshot["scenario_pack_fingerprint"] = fingerprints.get("scenario_pack")
+        if stage == "evaluate":
+            snapshot["benchmark_fingerprint"] = fingerprints.get("benchmark")
+            snapshot["scenario_pack_fingerprint"] = fingerprints.get("scenario_pack")
+            snapshot["judge_registry_fingerprint"] = fingerprints.get("judges")
+        if stage in {"sync", "reconcile"}:
+            snapshot["feishu_projection_fingerprint"] = fingerprints.get("feishu")
+            snapshot["benchmark_fingerprint"] = fingerprints.get("benchmark")
         if stage == "report":
             snapshot["comparison"] = request.get("comparison")
         return snapshot

@@ -19,6 +19,7 @@ downloads/
 # 本地密钥和飞书凭据
 API_KEY.txt
 api_key.txt
+QWEN_API.csv
 config/project.json
 config/feishu.json
 config/judges.json

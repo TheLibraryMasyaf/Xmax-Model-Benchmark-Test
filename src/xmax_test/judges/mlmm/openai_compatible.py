@@ -126,6 +126,12 @@ class OpenAiCompatibleProvider:
             try:
                 with urllib.request.urlopen(request, timeout=self._timeout) as response:
                     raw_text = response.read().decode("utf-8")
+                if _is_free_tier_exhausted(200, raw_text):
+                    if self._advance_model(model_index):
+                        continue
+                    raise ExternalServiceError(
+                        "all configured MLLM models exhausted their free tier"
+                    )
                 break
             except urllib.error.HTTPError as exc:
                 error_body = exc.read().decode("utf-8", errors="replace")
@@ -133,7 +139,7 @@ class OpenAiCompatibleProvider:
                     if self._advance_model(model_index):
                         continue
                     raise ExternalServiceError(
-                        "all configured Qwen3-VL models exhausted their free tier"
+                        "all configured MLLM models exhausted their free tier"
                     ) from exc
                 raise ExternalServiceError(
                     f"MLLM API request failed with HTTP {exc.code}: "
@@ -272,12 +278,24 @@ def _chat_completions_endpoint(value: str) -> str:
 
 
 def _is_free_tier_exhausted(status: int, body: str) -> bool:
-    if status != 403:
-        return False
+    del status  # Alibaba's structured error code is authoritative across gateways.
     lowered = body.lower()
-    return (
-        "allocationquota.freetieronly" in lowered
-        or "free tier of the model has been exhausted" in lowered
+    if "allocationquota.freetieronly" in lowered:
+        return True
+    if "free tier of the model has been exhausted" in lowered:
+        return True
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    sources = [payload, error] if isinstance(error, dict) else [payload]
+    return any(
+        str(source.get("code") or "").lower()
+        == "allocationquota.freetieronly"
+        for source in sources
     )
 
 

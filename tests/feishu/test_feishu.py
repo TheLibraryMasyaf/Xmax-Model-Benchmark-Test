@@ -174,6 +174,13 @@ class LarkCliPathTests(unittest.TestCase):
 
 
 class FullSyncTests(FeishuTestBase):
+    def test_batch_sync_rejects_duplicate_case_model_keys(self) -> None:
+        first = self.run_record(run_id="run-1")
+        second = self.run_record(run_id="run-2")
+        with self.assertRaises(ContractError):
+            self.service.sync_case_runs([first, second], policy="full")
+        self.assertEqual(self.client._tables.get("tbl-case", []), [])
+
     def test_upsert_without_echoed_record_id_is_resolved_before_attachments(self) -> None:
         original = self.client.upsert_record
 
@@ -299,19 +306,37 @@ class FullSyncTests(FeishuTestBase):
     def test_selected_evaluation_writes_specific_case_description(self) -> None:
         run = self.run_record(case_score=66.0)
         evaluation = self.selected_evaluations(run)[run["run_id"]]
-        evaluation["dimension_results"] = [{
-            "dimension_id": "C2",
-            "score": 0,
-            "assessable": True,
-            "evidence": [{"description": "未执行换装，人物服装全程保持原样。"}],
-        }]
+        evaluation["dimension_results"] = [
+            {
+                "dimension_id": "C2",
+                "score": 0,
+                "assessable": True,
+                "evidence": [{"description": "未执行换装，人物服装全程保持原样。"}],
+            },
+            {
+                "dimension_id": "C9",
+                "score": 0.5,
+                "assessable": True,
+                "evidence": [{"description": "边缘持续闪烁。"}],
+            },
+            {
+                "dimension_id": "C10",
+                "score": 1,
+                "assessable": True,
+                "evidence": [{"description": "整体略显生硬。"}],
+            },
+        ]
         summary = self.service.sync_case_runs(
             [run], evaluations={run["run_id"]: evaluation}, policy="full"
         )
         self.assertEqual(summary["errors"], [])
         description = self.client._tables["tbl-case"][0]["fields"]["case说明"]
-        self.assertIn("66.00%", description)
+        self.assertNotIn("66.00%", description)
+        self.assertNotIn("分", description)
+        self.assertTrue(description.startswith("主要问题：C2"))
         self.assertIn("未执行换装", description)
+        self.assertIn("边缘持续闪烁", description)
+        self.assertNotIn("整体略显生硬", description)
 
     def test_same_payload_skips_second_sync(self) -> None:
         run = self.run_record(case_score=85.0)

@@ -27,6 +27,7 @@ class FeishuSyncService:
         repository: Any,
         artifacts: Any,
         clock: Any = None,
+        benchmark: dict[str, Any] | None = None,
     ) -> None:
         self._client = client
         self._ledger = ledger
@@ -35,7 +36,52 @@ class FeishuSyncService:
         self._repository = repository
         self._artifacts = artifacts
         self._clock = clock
+        self._dimension_names = {
+            str(item.get("dimension_id")): str(item.get("name") or "").strip()
+            for item in (benchmark or {}).get("dimensions", [])
+            if item.get("dimension_id")
+        }
         self._table_structure_checked: set[str] = set()
+
+    def sync_case_run(
+        self,
+        run: dict[str, Any],
+        evaluation: dict[str, Any] | None,
+        *,
+        policy: str = "full",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Sync one completed pipeline item without scanning the whole Case table."""
+
+        if policy not in VALID_POLICIES:
+            raise ContractError(f"invalid sync policy: {policy!r}")
+        if policy == "none":
+            return {"action": "skipped", "policy": policy}
+        app_token = self._config["base"]["app_token"]
+        table_id = self._config["tables"]["case_data"]
+        projection = self._config["field_projection"]["case_data"]
+        self._read_structure(app_token, table_id)
+        record = self._client.find_record(
+            app_token,
+            table_id,
+            projection["case_number"],
+            str(run.get("case_number", "")),
+            projection["model_version"],
+            str(run.get("model_id", "")),
+        )
+        if policy == "score_only" and record is None:
+            raise ContractError(
+                f"score_only cannot create Case for {run.get('case_number', '')}"
+            )
+        return self._sync_one(
+            app_token,
+            table_id,
+            run,
+            evaluation,
+            record,
+            policy=policy,
+            dry_run=dry_run,
+        )
 
     # ------------------------------------------------------------------
     def sync_case_runs(
@@ -68,6 +114,16 @@ class FeishuSyncService:
         # can be judged more than once, so silently taking "latest" would make
         # Case scores depend on timing and can publish an experimental score.
         evaluations = evaluations or {}
+        selected_keys: dict[tuple[str, str], str] = {}
+        for run in runs:
+            key = (str(run.get("case_number", "")), str(run.get("model_id", "")))
+            previous_run_id = selected_keys.get(key)
+            if previous_run_id and previous_run_id != run.get("run_id"):
+                raise ContractError(
+                    "sync input contains multiple Runs for the same Feishu Case key "
+                    f"{key[0]} + {key[1]}: {previous_run_id}, {run.get('run_id')}"
+                )
+            selected_keys[key] = str(run.get("run_id", ""))
         for run in runs:
             case_number = run.get("case_number", "")
             model_version = run.get("model_id", "")
@@ -232,15 +288,12 @@ class FeishuSyncService:
         # internal 0-100 -> feishu 0-1
         return round(internal / 100.0, 4)
 
-    @staticmethod
-    def _description(run: dict[str, Any], evaluation: dict[str, Any] | None) -> str | None:
+    def _description(
+        self, run: dict[str, Any], evaluation: dict[str, Any] | None
+    ) -> str | None:
         if run.get("status") == "error":
             return f"生成失败: {run.get('metrics', {}).get('failure_class', 'unknown')}"
         if evaluation:
-            verdict = str(evaluation.get("final_verdict") or "").strip()
-            if verdict:
-                return verdict
-            score = evaluation.get("case_score_percent")
             dimensions = [
                 item for item in evaluation.get("dimension_results", [])
                 if item.get("assessable") and item.get("score") is not None
@@ -257,11 +310,16 @@ class FeishuSyncService:
                     "",
                 )
                 if evidence:
+                    dimension_id = str(item.get("dimension_id") or "")
+                    label = self._dimension_names.get(dimension_id, "")
+                    heading = f"{dimension_id} {label}".strip()
                     details.append(
-                        f"{item.get('dimension_id')} {float(item['score']):g}分：{evidence}"
+                        f"{heading}——{evidence}"
                     )
-            prefix = f"本次评分 {float(score):.2f}%" if score is not None else "本次评测"
-            return "；".join([prefix, *details])[:1000]
+            if details:
+                return ("主要问题：" + "；".join(details))[:1000]
+            verdict = str(evaluation.get("final_verdict") or "").strip()
+            return verdict[:1000] or None
         # A completed but unreviewed Run has no evaluation description. In
         # particular, never write the meaningless placeholder "已生成".
         return None

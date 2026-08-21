@@ -18,12 +18,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Protocol
 
-from ...errors import ExternalServiceError
+from ...errors import ExternalServiceError, MissingDependencyError
 from ...hashing import file_sha256
 from ...time import utc_now
 
 
 class OfflineTaskTransport(Protocol):
+    def preflight(self) -> dict[str, Any]: ...
+
     def upload_credentials(self) -> dict[str, Any]: ...
 
     def upload_image(
@@ -100,6 +102,38 @@ class HttpOfflineTaskTransport:
     def upload_credentials(self) -> dict[str, Any]:
         self._sts = self._request("GET", "/cos/sts")
         return self._sts
+
+    def preflight(self) -> dict[str, Any]:
+        """Validate the real upload transport before creating paid Run rows."""
+
+        try:
+            from qcloud_cos import CosConfig, CosS3Client  # noqa: F401
+        except ImportError as exc:
+            raise MissingDependencyError(
+                "real XMAX upload requires importable CosConfig and CosS3Client; "
+                "install with: pip install -e '.[production]'"
+            ) from exc
+        sts = self.upload_credentials()
+        credentials = sts.get("credentials", {})
+        missing = [
+            key for key in ("bucket", "region", "prefix") if not sts.get(key)
+        ]
+        missing_credentials = [
+            key
+            for key in ("accessKeyId", "secretAccessKey", "sessionToken")
+            if not credentials.get(key)
+        ]
+        if missing or missing_credentials:
+            raise ExternalServiceError(
+                "XMAX COS STS preflight is incomplete: "
+                f"missing={missing}, missing_credentials={missing_credentials}"
+            )
+        return {
+            "ok": True,
+            "bucket": sts["bucket"],
+            "region": sts["region"],
+            "prefix_present": bool(sts["prefix"]),
+        }
 
     @staticmethod
     def _detect_media(local_path: str, expected_prefix: str) -> tuple[str, str]:
@@ -194,7 +228,7 @@ class HttpOfflineTaskTransport:
         try:
             from qcloud_cos import CosConfig, CosS3Client
         except ImportError as exc:
-            raise ExternalServiceError(
+            raise MissingDependencyError(
                 "real XMAX upload requires optional dependency cos-python-sdk-v5; "
                 "install with: pip install -e '.[production]'"
             ) from exc

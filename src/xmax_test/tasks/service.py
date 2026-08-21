@@ -77,6 +77,7 @@ class TaskWorker:
         current = self._repository.get_test_task(task_id)
         if current["status"] == "completed":
             return {**current, "reused": True}
+        self._preflight([current])
         claimed = self._repository.claim_test_task(
             task_id,
             lease_owner,
@@ -95,6 +96,12 @@ class TaskWorker:
         lease_seconds: int = 900,
         max_tasks: int | None = None,
     ) -> dict[str, Any]:
+        # Run transport/dependency checks before claiming even one task.  A
+        # batch-wide infrastructure failure must leave every task untouched,
+        # rather than manufacturing hundreds of per-Case error rows.
+        self._preflight(
+            self._repository.list_test_tasks(task_batch_id=task_batch_id)
+        )
         processed: list[str] = []
         errors: list[dict[str, Any]] = []
         while max_tasks is None or len(processed) < max_tasks:
@@ -114,6 +121,11 @@ class TaskWorker:
             "processed_task_ids": processed,
             "errors": errors,
         }
+
+    def _preflight(self, tasks: list[dict[str, Any]]) -> None:
+        preflight = getattr(self._execute_task, "preflight", None)
+        if callable(preflight):
+            preflight(tasks)
 
     def _execute_claimed(
         self, task: dict[str, Any], lease_owner: str

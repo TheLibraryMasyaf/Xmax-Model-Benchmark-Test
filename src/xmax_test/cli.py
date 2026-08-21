@@ -62,6 +62,7 @@ REQUIRED_PROJECT_FILES = (
     "docs/data-contracts.md",
     "docs/decisions.md",
     "docs/external-inputs.md",
+    "docs/fail-safe-checks.md",
     "docs/feishu-database.md",
     "docs/implementation-contract.md",
     "docs/stage-orchestration.md",
@@ -196,11 +197,10 @@ class Composition:
         judges_path = self.root / "config" / "judges.json"
         enabled = []
         if judges_path.is_file():
-            try:
-                data = json.loads(judges_path.read_text(encoding="utf-8"))
-                enabled = [j for j in data.get("judges", []) if j.get("enabled")]
-            except (OSError, json.JSONDecodeError):
-                enabled = []
+            data = load_config(
+                judges_path, "judge-registry.schema.json", base_dir=self.root
+            )
+            enabled = [j for j in data.get("judges", []) if j.get("enabled")]
         for judge in enabled:
             entrypoint = judge.get("entrypoint", "")
             kind = judge.get("kind")
@@ -249,7 +249,9 @@ class Composition:
 
         if judge is None:
             path = self.root / "config" / "judges.json"
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_config(
+                path, "judge-registry.schema.json", base_dir=self.root
+            )
             judge = next(
                 (
                     item
@@ -482,7 +484,16 @@ class Composition:
         ledger = SyncLedger(self.database)
         uploader = AttachmentUploader(client)
         config = self.feishu_config()
-        return FeishuSyncService(client, ledger, uploader, config, self.database, self.artifacts, clock=self.clock)
+        return FeishuSyncService(
+            client,
+            ledger,
+            uploader,
+            config,
+            self.database,
+            self.artifacts,
+            clock=self.clock,
+            benchmark=self.benchmark,
+        )
 
     def feishu_reconcile(self) -> Any:
         from .feishu.reconcile import ReconcileService
@@ -574,7 +585,9 @@ def cmd_artifacts_gc(composition: Composition, args: argparse.Namespace) -> int:
 
 
 def cmd_context_check(composition: Composition, args: argparse.Namespace) -> int:
-    request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    request = load_config(
+        Path(args.request), "run-request.schema.json", base_dir=composition.root
+    )
     checker = ContextChecker(composition.root)
     checker.check_run_request(request)
     summary = checker.summary()
@@ -583,8 +596,56 @@ def cmd_context_check(composition: Composition, args: argparse.Namespace) -> int
 
 
 def cmd_run(composition: Composition, args: argparse.Namespace) -> int:
-    request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    request = load_config(
+        Path(args.request), "run-request.schema.json", base_dir=composition.root
+    )
+    checked_request = {
+        **request,
+        "dry_run": bool(args.dry_run or request.get("dry_run")),
+        "budget_approved": bool(args.budget_approved),
+    }
+    checker = ContextChecker(composition.root)
+    checker.check_run_request(checked_request)
+    preflight = checker.summary()
+    if not preflight["ok"]:
+        _emit(args, "run.preflight", preflight, ok=False)
+        codes = {item.get("code") for item in preflight.get("errors", [])}
+        if "xmax.approval_required" in codes:
+            return EXIT_APPROVAL_REQUIRED
+        if "xmax.missing_dependency" in codes:
+            return EXIT_MISSING_DEPENDENCY
+        if "xmax.external_failure" in codes:
+            return EXIT_EXTERNAL_FAILURE
+        return EXIT_INPUT_ERROR
+    request = {
+        **request,
+        "_contract_fingerprints": _contract_fingerprints(composition, request),
+    }
     return _execute_run_request(composition, request, args)
+
+
+def _contract_fingerprints(
+    composition: Composition, request: dict[str, Any]
+) -> dict[str, str]:
+    """Bind stage reuse to the exact benchmark, judges and Feishu projection."""
+
+    from .hashing import content_hash
+
+    candidates = {
+        "benchmark": Path(request.get("benchmark_path", composition.root / "BENCHMARK.md")),
+        "scenario_pack": Path(
+            request.get("scenario_pack_path", composition.root / "config/scenarios.json")
+        ),
+        "judges": composition.root / "config/judges.json",
+        "feishu": composition.root / "config/feishu.json",
+    }
+    result: dict[str, str] = {}
+    for name, path in candidates.items():
+        if path.is_file():
+            result[name] = content_hash(
+                {"path": str(path.resolve()), "content": path.read_text(encoding="utf-8")}
+            )
+    return result
 
 
 def _execute_run_request(
@@ -770,6 +831,15 @@ def _generate_executor(
         offline_adapter = None
         realtime_controller = None
 
+        # Fail before creating even one GenerationRun when the shared offline
+        # upload transport is unavailable or misconfigured. This prevents a
+        # batch-wide storm of identical submit_failure rows.
+        if any(case.get("generation_mode") == "offline" for case in cases):
+            offline_adapter = composition.offline_adapter(
+                run_batch_id=batch_id, model_id=model_id
+            )
+            offline_adapter.preflight()
+
         def generate_case(case: dict[str, Any]) -> dict[str, Any]:
             nonlocal offline_adapter, realtime_controller
             if req.resume:
@@ -851,6 +921,14 @@ def _generate_executor(
                 if evaluation_enabled
                 else None
             )
+            inline_sync_enabled = bool(
+                evaluation_enabled
+                and "sync" in request.get("stages", [])
+                and request.get("sync_policy", "none") != "none"
+            )
+            sync_service = (
+                composition.feishu_sync_service() if inline_sync_enabled else None
+            )
             judge_config_path = composition.root / "config" / "judges.json"
             judge_config = (
                 json.loads(judge_config_path.read_text(encoding="utf-8"))
@@ -882,13 +960,26 @@ def _generate_executor(
                     run, evaluation_batch_id, preprocess=preprocess
                 )
 
+            def sync_one(
+                run: dict[str, Any], evaluation: dict[str, Any]
+            ) -> dict[str, Any]:
+                return sync_service.sync_case_run(  # type: ignore[union-attr]
+                    run,
+                    evaluation,
+                    policy=request.get("sync_policy", "full"),
+                )
+
             try:
                 coordinator = StreamingPipelineCoordinator(
                     generate_case=generate_case,
                     preprocess_run=preprocess_service.build,
                     evaluate_run=evaluate_one if evaluation_enabled else None,
+                    sync_run=sync_one if inline_sync_enabled else None,
                     on_generated=on_generated,
                     queue_size=int(request.get("pipeline_queue_size", 4)),
+                    circuit_breaker_threshold=int(
+                        request.get("circuit_breaker_threshold", 3)
+                    ),
                 )
                 outcome = coordinator.run(cases)
             finally:
@@ -905,6 +996,7 @@ def _generate_executor(
                     "evaluation_batch_id": evaluation_batch_id,
                     "preprocess": outcome.preprocess,
                     "evaluations": outcome.evaluations,
+                    "sync": outcome.sync,
                     "errors": outcome.errors,
                     "metadata": outcome.metadata,
                 }
@@ -1436,6 +1528,8 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
     model_id = composition.project.get("default_model", "x2.0")
     batch_id = f"runs-{plan.get('plan_hash', '')[:12]}"
     adapter = composition.offline_adapter(run_batch_id=batch_id, model_id=model_id)
+    if any(case.get("generation_mode") == "offline" for case in plan.get("cases", [])):
+        adapter.preflight()
     run_ids = []
     for case in plan.get("cases", []):
         if case.get("generation_mode") != "offline":
