@@ -208,6 +208,32 @@ class OfflineGenerationAdapter:
         """Full cycle: create run, submit, poll to terminal, persist result."""
 
         started_monotonic = time.monotonic()
+        model_id = case.get("model_id") or self.model_id
+        inflight = self._repository.inflight_run_for_case(
+            case["case_id"], model_id, self._run_batch_id
+        )
+        if inflight is not None:
+            if self._backend != "rest":
+                raise ContractError(
+                    f"run {inflight['run_id']} is still active and cannot be auto-resumed "
+                    f"for backend {self._backend}"
+                )
+            external_id = self._repository.external_task_id_for_run(inflight["run_id"])
+            if not external_id:
+                raise ContractError(
+                    f"inflight run {inflight['run_id']} has no submitted external task id"
+                )
+            return self._finish_submitted_run(
+                case,
+                inflight["run_id"],
+                {
+                    "run_id": inflight["run_id"],
+                    "external_task_id": external_id,
+                    "backend": "rest",
+                    "status": "submitted",
+                },
+                started_monotonic,
+            )
         prepared = self.prepare(case)
         run_id = prepared["run_id"]
         self._repository.create_run(
@@ -264,6 +290,17 @@ class OfflineGenerationAdapter:
             )
             raise
         task["run_id"] = run_id
+
+        return self._finish_submitted_run(case, run_id, task, started_monotonic)
+
+    def _finish_submitted_run(
+        self,
+        case: dict[str, Any],
+        run_id: str,
+        task: dict[str, Any],
+        started_monotonic: float,
+    ) -> dict[str, Any]:
+        """Poll and persist an already-submitted task without submitting it again."""
 
         for _ in range(300):
             event = self.poll(task)

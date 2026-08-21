@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from xmax_test.errors import MlmmTimeoutError
 from xmax_test.feedback.normalizer import MlmmHumanNormalizer
 from xmax_test.judges.mlmm.base import MlmmResponse
 from xmax_test.judges.mlmm.judge import MlmmJudge
@@ -171,6 +172,37 @@ class MlmmBatchTests(unittest.TestCase):
                 judge_version="2",
                 dimension_versions={"C2": "v1", "C10": "v1"},
             )
+
+    def test_transport_timeout_is_not_retried_by_judge(self) -> None:
+        class TimeoutProvider(FakeProvider):
+            def complete_json(self, **kwargs):
+                self.calls.append(kwargs)
+                raise MlmmTimeoutError("bounded timeout")
+
+        provider = TimeoutProvider()
+        judge = MlmmJudge(
+            provider,
+            judge_id="mlmm",
+            version="2",
+            supported_dimensions=["C2"],
+            supported_modes=["offline"],
+            max_retries=5,
+        )
+        with self.assertRaises(MlmmTimeoutError):
+            judge.evaluate(
+                {
+                    "run_id": "run-timeout",
+                    "prompt": "blind batch",
+                    "dimension_contracts": [
+                        {
+                            "dimension_id": "C2",
+                            "version": "v1",
+                            "criteria": [{"criterion_id": "C2.1"}],
+                        }
+                    ],
+                }
+            )
+        self.assertEqual(len(provider.calls), 1)
 
     def test_only_anonymous_train_human_anchors_enter_prompt(self) -> None:
         provider = FakeProvider()

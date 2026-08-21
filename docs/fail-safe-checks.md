@@ -32,6 +32,8 @@
 - 免费额度错误以结构化码`AllocationQuota.FreeTierOnly`判断，不依赖固定HTTP状态。
 - 换模型时重发整条Case的Prompt、Feed、Prompt素材、操作合同和结果视频，不从上一模型的半成品继续。
 - MLLM批Judge失败时不保存EvaluationResult，不用CV/Metric子集重新归一化，不写飞书分数。
+- 前25个候选保持百炼“免费额度用完即停”；`qwen3-vl-flash`是唯一末位付费候选。首次付费和每次充值周期都必须执行`evaluation-budget authorize --recharge-confirmed`，本地99元上限不能靠重启绕过。
+- 付费调用前先做进程安全的保守预留；超时按全额预留记账且不自动重试。预算暂停后，任何CV/Metric/MLLM Judge都不得启动，统一Run也不得把残缺Evaluation Batch交给`sync/report`。
 - 新Benchmark、Scenario或Judge Registry内容会改变阶段缓存哈希，不得复用旧Evaluation Batch。
 - 不接受仅有维度分的新Judgment；不得由维度分反推细则分。Hard Gate声明`criterion_id`时必须查该细则的融合分，不得改查维度平均。
 
@@ -45,6 +47,7 @@
 ## 5. 中断与续跑
 
 - 已completed且输入、配置、生产者哈希未变的Stage直接复用；只重跑缺失或未完成阶段。
+- 离线Run已有`task_submitted.external_task_id`但本地仍为running时，续跑必须轮询原任务并收口，不能再次POST生成。
 - 生成、评测和飞书同步各自使用不可变ID/内容哈希续跑；不用文件时间或行号猜测。
 - 正式已付费视频不因中断自动删除。删除正式Run、飞书记录或仍被引用的Artifact必须再次获得用户确认。
 

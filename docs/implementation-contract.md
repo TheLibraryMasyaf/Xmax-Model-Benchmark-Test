@@ -64,6 +64,7 @@ JSON输出统一为：
 - 每个外部提交先用业务幂等键查询已有状态；不能确认时停止，避免重复计费。
 - 自动重试只用于已确认幂等的操作，使用有上限的指数退避并记录Attempt。
 - 批量生成批准绑定`plan_hash + cost_estimate + generation_config_hash`；任一变化使批准失效。
+- 付费MLLM使用独立的持久化预算授权周期；`xmax.evaluation_budget_paused`返回退出码6。每次充值后必须由操作者带`--recharge-confirmed`重开，进程重启、换Worker或`--resume`不得自动重置已花金额。
 - `--resume`从Repository读取终态与事件，不依赖进程内缓存。
 - `--resume`必须校验`input_hash + config_hash + producer_version`；任一变化时不续跑旧Stage Run。
 - 单阶段命令只组装本阶段Adapter。例如`evaluate`的Composition Root不创建XMAX或飞书导入Adapter，以便用测试证明无隐式副作用。

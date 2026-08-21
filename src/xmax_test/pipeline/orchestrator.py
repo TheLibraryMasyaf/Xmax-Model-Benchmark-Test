@@ -127,6 +127,14 @@ class PipelineOrchestrator:
             executed.append(self._describe(stage, manifest))
             if result.errors:
                 all_errors.extend(result.errors)
+            evaluation_paused = any(
+                item.get("code") == "xmax.evaluation_budget_paused"
+                for item in result.errors
+            )
+            if evaluation_paused:
+                # Do not expose an incomplete EvaluationBatch to sync/report.
+                # Generation/preprocessing may already be complete and remain reusable.
+                break
             if result.status in {"completed", "partial"}:
                 self._publish_outputs(manifest, available)
 

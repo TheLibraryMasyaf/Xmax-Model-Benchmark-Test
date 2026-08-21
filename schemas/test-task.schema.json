@@ -14,7 +14,7 @@
     "status": {
       "enum": [
         "pending", "leased", "generating", "preprocessing", "evaluating",
-        "syncing", "completed", "error", "cancelled"
+        "syncing", "evaluation_paused", "completed", "error", "cancelled"
       ]
     },
     "payload": {

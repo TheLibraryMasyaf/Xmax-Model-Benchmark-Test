@@ -154,6 +154,7 @@ class Composition:
         self.scenario_pack = load_scenario_pack(scenario_path)
         self.recipes = self._build_recipes()
         self.interactions = self._build_interactions()
+        self._evaluation_budget_gate = None
         self.judges = self._build_judges()
 
     # ------------------------------------------------------------------
@@ -289,9 +290,17 @@ class Composition:
                 model=provider_config.get("model"),
             )
         if provider_name == "openai_compatible":
+            from .evaluation.budget import EvaluationBudgetGate, PaidFallbackPolicy
+
             credential_csv = provider_config.get("credential_csv")
             if credential_csv and not Path(credential_csv).is_absolute():
                 credential_csv = self.root / credential_csv
+            policy = PaidFallbackPolicy.from_config(provider_config.get("paid_fallback"))
+            budget_gate = (
+                EvaluationBudgetGate(self.database, policy) if policy is not None else None
+            )
+            if budget_gate is not None:
+                self._evaluation_budget_gate = budget_gate
             return OpenAiCompatibleProvider(
                 endpoint=provider_config.get("endpoint"),
                 model=provider_config.get("model"),
@@ -310,6 +319,7 @@ class Composition:
                 video_options=provider_config.get("video_options", {}),
                 image_options=provider_config.get("image_options", {}),
                 max_base64_bytes=int(provider_config.get("max_base64_bytes", 10_000_000)),
+                budget_gate=budget_gate,
             )
         if provider_name == "python_plugin":
             provider_entrypoint = provider_config.get("entrypoint", "")
@@ -444,8 +454,14 @@ class Composition:
             self.preprocess_service(repository),
             fusion=JudgmentFusion(),
             recipe_resolver=self.recipes,
+            budget_gate=self._evaluation_budget_gate,
             clock=self.clock,
         )
+
+    def evaluation_budget_gate(self) -> Any:
+        if self._evaluation_budget_gate is None:
+            raise ConfigError("no enabled paid_fallback is configured for MLLM evaluation")
+        return self._evaluation_budget_gate
 
     def plan_builder(self) -> Any:
         from .planning.builder import TestPlanBuilder
@@ -1629,6 +1645,8 @@ def cmd_task(composition: Composition, args: argparse.Namespace) -> int:
         resume=args.resume,
     )
     _emit(args, "task.run", data, ok=data.get("status") == "completed")
+    if data.get("status") == "evaluation_paused":
+        return EXIT_APPROVAL_REQUIRED
     return 0 if data.get("status") == "completed" else EXIT_PARTIAL
 
 
@@ -1661,8 +1679,11 @@ def cmd_worker(composition: Composition, args: argparse.Namespace) -> int:
         lease_seconds=args.lease_seconds,
         max_tasks=args.max_tasks,
     )
-    _emit(args, "worker.run", data, ok=not data.get("errors"))
-    return 0 if not data.get("errors") else EXIT_PARTIAL
+    ok = not data.get("errors") and not data.get("evaluation_paused")
+    _emit(args, "worker.run", data, ok=ok)
+    if data.get("evaluation_paused"):
+        return EXIT_APPROVAL_REQUIRED
+    return 0 if ok else EXIT_PARTIAL
 
 
 def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> int:
@@ -1776,6 +1797,43 @@ def cmd_evaluate(composition: Composition, args: argparse.Namespace) -> int:
     summary = orchestrator.evaluate_runs(runs, resume=args.resume)
     _emit(args, "evaluate", summary, ok=not summary.get("errors"))
     return 0 if not summary.get("errors") else EXIT_PARTIAL
+
+
+def cmd_evaluation_budget(composition: Composition, args: argparse.Namespace) -> int:
+    """Inspect, pause, or explicitly authorize the project-local paid budget."""
+
+    from .errors import ApprovalRequiredError
+
+    gate = composition.evaluation_budget_gate()
+    budget_id = gate.policy.budget_id
+    if args.budget_id and args.budget_id != budget_id:
+        raise ConfigError(
+            f"configured evaluation budget is {budget_id}, not {args.budget_id}"
+        )
+    if args.action == "authorize":
+        if not args.recharge_confirmed:
+            raise ApprovalRequiredError(
+                "refusing to open paid MLLM evaluation without --recharge-confirmed"
+            )
+        state = gate.authorize(operator=args.operator, limit_cny=args.limit_cny)
+    elif args.action == "pause":
+        state = gate.pause(args.reason)
+    else:
+        state = gate.status()
+    data = {
+        "budget": state,
+        "accounting_scope": "this xmax-test database only",
+        "warning": (
+            "This is a conservative local estimate from provider usage; Alibaba account-wide "
+            "charges and calls made outside this project are not included."
+        ),
+        "next_action": (
+            "Keep FreeTierOnly enabled for every earlier model. Disable it only for the final "
+            "qwen3-vl-flash alias, recharge, then authorize this budget."
+        ),
+    }
+    _emit(args, f"evaluation-budget.{args.action}", data)
+    return 0
 
 
 def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
@@ -2102,6 +2160,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = subparsers.add_parser("evaluate", help="evaluate a completed run batch")
     p.add_argument("--run-batch-id", required=True)
     p.add_argument("--resume", action="store_true")
+
+    p = subparsers.add_parser(
+        "evaluation-budget", help="inspect or explicitly reopen the paid MLLM budget"
+    )
+    sub = p.add_subparsers(dest="action", required=True)
+    budget_status = sub.add_parser("status")
+    budget_status.add_argument("--budget-id")
+    budget_authorize = sub.add_parser("authorize")
+    budget_authorize.add_argument("--budget-id")
+    budget_authorize.add_argument("--limit-cny", type=float, default=99.0)
+    budget_authorize.add_argument("--operator", required=True)
+    budget_authorize.add_argument("--recharge-confirmed", action="store_true")
+    budget_pause = sub.add_parser("pause")
+    budget_pause.add_argument("--budget-id")
+    budget_pause.add_argument("--reason", required=True)
 
     p = subparsers.add_parser("human", help="human signal operations")
     sub = p.add_subparsers(dest="action", required=True)
@@ -2532,6 +2605,7 @@ _HANDLERS: dict[str, Callable[[Composition, argparse.Namespace], int]] = {
     ),
     "preprocess": cmd_preprocess,
     "evaluate": cmd_evaluate,
+    "evaluation-budget": cmd_evaluation_budget,
     "report": cmd_report,
     "sync": cmd_sync,
     "reconcile": cmd_reconcile,

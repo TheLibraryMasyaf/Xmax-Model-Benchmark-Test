@@ -62,6 +62,25 @@ class OfflineRunRepository:
                 return run
         return None
 
+    def inflight_run_for_case(
+        self, case_id: str, model_id: str, run_batch_id: str
+    ) -> dict[str, Any] | None:
+        for run in self._repository.list_runs(run_batch_id=run_batch_id):
+            if (
+                run.get("case_id") == case_id
+                and run.get("model_id") == model_id
+                and run.get("status") in {"planned", "running"}
+            ):
+                return run
+        return None
+
+    def external_task_id_for_run(self, run_id: str) -> str | None:
+        for event in reversed(self._repository.get_event_log(run_id)):
+            external_id = event.get("payload", {}).get("external_task_id")
+            if external_id:
+                return str(external_id)
+        return None
+
     def submitted_external_task(self, external_task_id: str) -> dict[str, Any] | None:
         for run in self._repository.list_runs():
             if run.get("metrics", {}).get("external_task_id") == external_task_id:

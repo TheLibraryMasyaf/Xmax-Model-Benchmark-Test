@@ -52,6 +52,8 @@ Runner只消费TestCase中已经冻结的Operation Recipe绑定，不重新解�
 
 当前真实适配器按官方合同使用`X-Api-Key`、`/cos/sts`和`/offline-task[/<taskUid>]`，并解包`success/code/message/data`响应。这里需要的不是给本地文件做“公网伪装”，而是得到XMAX官方上传链路认可的媒体URL：`refImagePath`与`refVideoPath`不得使用自建公网URL、本地路径、`blob:` URL，也不得忽略COS响应后自行猜测对象地址。Python适配器实现与当前`@xmaxai/sdk` `uploadImage/uploadVideo`等价的STS + COS契约，包括扩展名缺失时的媒体类型识别、正确`Content-Type`、安全对象名，以及`Location → endpoint → 标准COS域名`的URL解析优先级。真实运行需`XMAX_API_KEY`和`cos-python-sdk-v5`；CLI只有收到`--budget-approved`才提交计费任务。
 
+若进程在`task_submitted`之后退出，Run保留`external_task_id`。同一Run Batch续跑相同Case时，Adapter必须先轮询该外部任务并下载终态结果，禁止重新上传或POST第二个付费任务；只有没有同批非终态Run时才创建新Attempt。
+
 ## 4. Session + RTC适配器
 
 根据项目根目录的参考时序，拆成三层：

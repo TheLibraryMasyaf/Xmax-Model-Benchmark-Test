@@ -137,6 +137,22 @@ class ApprovalRequiredError(XmaxTestError):
     stage = "approval"
 
 
+class EvaluationBudgetPausedError(ApprovalRequiredError):
+    """Evaluation is paused before any Judge because its paid budget is closed."""
+
+    code = "xmax.evaluation_budget_paused"
+    retryable = True
+    stage = "evaluate"
+
+
+class MlmmTimeoutError(ExternalServiceError):
+    """One MLLM request reached its bounded transport timeout."""
+
+    code = "xmax.mlmm_timeout"
+    retryable = True
+    stage = "evaluate"
+
+
 class StateError(ContractError):
     """An entity state transition is illegal (e.g. terminal back to running)."""
 

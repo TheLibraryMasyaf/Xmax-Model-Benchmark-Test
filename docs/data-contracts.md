@@ -43,9 +43,10 @@ Schema：`schemas/test-task.schema.json`。Task内嵌冻结TestCase快照，并�
 ```text
 pending → leased → generating → preprocessing → evaluating → syncing → completed
                     └─ 任意基础设施异常 → error
+                    └─ 付费评测闸门关闭 → evaluation_paused
 ```
 
-模型正常返回生成失败Run时，Task仍标记`completed`且`outcome=generation_error`，并按0%同步；`error`只表示流程基础设施未完成，可用`--resume`重试。
+模型正常返回生成失败Run时，Task仍标记`completed`且`outcome=generation_error`，并按0%同步；`error`只表示流程基础设施未完成，可用`--resume`重试。`evaluation_paused`不是失败，也不持有租约；它保存已有Run/Preprocess引用，在人工重新授权后由Worker自动重排。
 
 ### 2.3 GenerationRun
 

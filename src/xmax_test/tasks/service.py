@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ..errors import EvaluationBudgetPausedError
 from ..hashing import content_hash
 from ..time import utc_now
 
@@ -103,9 +104,12 @@ class TaskWorker:
         # Run transport/dependency checks before claiming even one task.  A
         # batch-wide infrastructure failure must leave every task untouched,
         # rather than manufacturing hundreds of per-Case error rows.
+        if self._evaluation_available():
+            self._repository.requeue_evaluation_paused_tasks(task_batch_id)
         self._preflight(self._repository.list_test_tasks(task_batch_id=task_batch_id))
         processed: list[str] = []
         errors: list[dict[str, Any]] = []
+        paused: list[dict[str, Any]] = []
         while max_tasks is None or len(processed) < max_tasks:
             task = self._repository.claim_next_test_task(
                 task_batch_id,
@@ -118,10 +122,13 @@ class TaskWorker:
             processed.append(task["task_id"])
             if result["status"] == "error":
                 errors.append(result.get("last_error") or {"task_id": task["task_id"]})
+            elif result["status"] == "evaluation_paused":
+                paused.append(result.get("last_error") or {"task_id": task["task_id"]})
         return {
             **self._repository.test_task_summary(task_batch_id),
             "processed_task_ids": processed,
             "errors": errors,
+            "evaluation_paused": paused,
         }
 
     def _preflight(self, tasks: list[dict[str, Any]]) -> None:
@@ -146,9 +153,18 @@ class TaskWorker:
                 "retryable": bool(getattr(exc, "retryable", True)),
                 "task_id": task["task_id"],
             }
+            status = (
+                "evaluation_paused"
+                if isinstance(exc, EvaluationBudgetPausedError)
+                else "error"
+            )
             return self._repository.update_test_task(
                 task["task_id"],
-                "error",
+                status,
                 lease_owner=lease_owner,
                 last_error=error,
             )
+
+    def _evaluation_available(self) -> bool:
+        check = getattr(self._execute_task, "evaluation_available", None)
+        return bool(check()) if callable(check) else False

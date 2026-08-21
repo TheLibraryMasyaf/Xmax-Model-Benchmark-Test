@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..errors import ContractError
+from ..errors import ContractError, EvaluationBudgetPausedError
 from ..hashing import content_hash
 from ..time import utc_now
 from .aggregation import aggregate_evaluation_results
@@ -34,6 +34,7 @@ class EvaluationOrchestrator:
         preprocess: PreprocessService,
         fusion: JudgmentFusion | None = None,
         recipe_resolver: Any = None,
+        budget_gate: Any = None,
         clock: Any = None,
     ) -> None:
         self._repository = repository
@@ -45,6 +46,7 @@ class EvaluationOrchestrator:
         self._preprocess = preprocess
         self._fusion = fusion or JudgmentFusion()
         self._recipe_resolver = recipe_resolver
+        self._budget_gate = budget_gate
         self._clock = clock
 
     def evaluate_runs(
@@ -82,6 +84,8 @@ class EvaluationOrchestrator:
                 result = self.evaluate_run(run, evaluation_batch_id, preprocess=preprocess)
                 results.append(result)
             except Exception as exc:
+                if isinstance(exc, EvaluationBudgetPausedError):
+                    raise
                 errors.append(
                     {
                         "code": "xmax.contract_error",
@@ -180,6 +184,9 @@ class EvaluationOrchestrator:
         *,
         preprocess: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # Once the paid budget closes, no CV, metric or MLLM Judge may begin.
+        if self._budget_gate is not None:
+            self._budget_gate.assert_evaluation_allowed()
         if run.get("status") != "completed":
             raise ContractError(f"evaluate requires completed run, got {run.get('status')}")
         if not run.get("result_asset_id"):

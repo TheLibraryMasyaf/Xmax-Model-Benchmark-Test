@@ -41,15 +41,19 @@ OpenAI兼容Provider把视频编码为`video_url`、图片编码为`image_url`�
 
 他人接入时只需在他们的项目上层放置同格式CSV，并至少提供`apiKey`与`openAiCompatible`两行；不需要改Python代码。若改成环境变量，可在Judge配置中使用`api_key_env`并显式配置对应地域/业务空间的`endpoint`。
 
-模型顺序以`config/judges.json`为唯一真源。2026-08-21通过百炼控制台登录账户逐项回读：当前候选只保留显示“剩1,000,000/共1,000,000”且“免费额度用完即停”已开启的模型。候选包含官方视觉理解文档明确支持视频和结构化输出的Qwen3.8 Max、Qwen3.7/3.6/3.5视觉能力模型，以及Qwen3-VL Plus/Flash快照和Instruct规格。
+模型顺序以`config/judges.json`为唯一真源。2026-08-21通过百炼控制台登录账户逐项回读后，删除了无免费额度的`qwen3.8-max`，当前共26个候选：前25个只使用免费额度，唯一末位兜底是泛化别名`qwen3-vl-flash`。前25个模型必须保持“免费额度用完即停”开启；只有末位`qwen3-vl-flash`在人工充值并准备启用付费时关闭该开关。
 
 以下项不进入当前调用链：控制台明确显示“无免费额度”的模型；剩余额度显示为`-`的泛化别名；当前请求的非思考结构化输出协议不匹配的Thinking专用规格；以及仅WebSocket实时协议的Omni模型。全模态HTTP模型虽然当前显示100万Token，但账户的“免费额度用完即停”尚未开启，因此未注册为回退候选。
 
-请求使用 `response_format={"type":"json_object"}` 和 `enable_thinking=false`，本地再用JSON Schema严格校验。结构化错误码 `AllocationQuota.FreeTierOnly` 是额度耗尽的唯一权威信号，即使中间网关返回的不是HTTP 403也会切换模型。切换后完整重发当前Case，不跳过、不保存前一模型的半成品。HTTP 429的RPM/TPM限流不切模型，交给上层退避/重试。全部候选失败时该Case不产生EvaluationResult、不写飞书分数，且不转付费模型。
+请求使用 `response_format={"type":"json_object"}` 和 `enable_thinking=false`，本地再用JSON Schema严格校验。结构化错误码 `AllocationQuota.FreeTierOnly` 是额度耗尽的唯一权威信号，即使中间网关返回的不是HTTP 403也会切换模型。切换后完整重发当前Case，不跳过、不保存前一模型的半成品。HTTP 429的RPM/TPM限流不切模型。末位`qwen3-vl-flash`第一次被选中时，如果项目预算尚未显式授权，则在发出请求前暂停；不会自动从免费链切入付费。
+
+付费兜底由`provider.paid_fallback`配置，默认本地硬上限99元。价格阶梯来自[阿里云百炼Qwen3-VL-Flash官方计费页](https://help.aliyun.com/zh/model-studio/qwen3-vl-flash)，作为版本化配置保存，价格变化时先更新配置和测试。系统在每次末位调用前保守预留0.36元，成功后按百炼返回的输入、缓存输入和输出Token结算；超时因计费结果不明确而按整笔预留计入，明确HTTP拒绝或连接前失败则释放。达到无法再预留下一次调用的边界时，预算持久化为`paused`，后续Case在任何CV/Metric/MLLM Judge开始前停止。这里统计的是本项目数据库中的保守估算，不是阿里云账户总账；其他程序的调用不会被计入。
+
+超时设为180秒。`xmax.mlmm_timeout`不在Judge层自动重试，避免一次视频卡住多个15分钟周期；每次尝试写`request_started/request_succeeded/request_failed`时间、耗时、模型和错误码到`var/logs/mlmm/mlmm-events.jsonl`，不记录密钥。
 
 2026-08-20已用一个真实离线Case做原生多输入烟测：同一请求传入Feed视频、Prompt文字、Prompt图片和Result视频，`qwen3-vl-plus`正确回传四个角色且`role_confusion=false`；调用消耗5089输入Token、273输出Token。该烟测只验证输入能力和角色隔离，不作为正式Benchmark评分。
 
-进程重启后会从第一个模型重新检测；已耗尽模型返回结构化额度错误后会立即跳过，不假设固定HTTP状态。每次返回保存实际 `provider_model`、Token usage和 `model_fallback_attempts`，便于报告对账。
+进程重启后会从第一个模型重新检测；已耗尽模型返回结构化额度错误后会立即跳过，不假设固定HTTP状态。付费预算状态保存在SQLite，重启不会解除暂停。每次返回保存实际 `provider_model`、Token usage和 `model_fallback_attempts`，便于报告对账。
 
 ### Codex CLI可替换配置
 

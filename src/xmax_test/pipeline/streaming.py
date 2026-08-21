@@ -9,6 +9,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..errors import EvaluationBudgetPausedError
+
 StageCallable = Callable[..., dict[str, Any]]
 
 
@@ -67,7 +69,17 @@ class StreamingPipelineCoordinator:
         timings: dict[str, dict[str, float]] = {
             stage: {} for stage in ("generate", "preprocess", "evaluate", "sync")
         }
-        workers = self._workers(outcome, lock, queues, sentinel, timings)
+        evaluation_paused = threading.Event()
+        deferred_evaluation_run_ids: list[str] = []
+        workers = self._workers(
+            outcome,
+            lock,
+            queues,
+            sentinel,
+            timings,
+            evaluation_paused,
+            deferred_evaluation_run_ids,
+        )
         for worker in workers:
             worker.start()
         aborted, abort_reason = self._generate_all(cases, outcome, lock, queues[0], timings)
@@ -76,6 +88,11 @@ class StreamingPipelineCoordinator:
         for worker in workers:
             worker.join()
         outcome.metadata = self._metadata(outcome, timings, aborted, abort_reason)
+        outcome.metadata["evaluation_gate"] = {
+            "paused": evaluation_paused.is_set(),
+            "deferred_count": len(deferred_evaluation_run_ids),
+            "deferred_run_ids": deferred_evaluation_run_ids,
+        }
         return outcome
 
     def _workers(
@@ -85,6 +102,8 @@ class StreamingPipelineCoordinator:
         queues: list[queue.Queue[Any]],
         sentinel: object,
         timings: dict[str, dict[str, float]],
+        evaluation_paused: threading.Event,
+        deferred_evaluation_run_ids: list[str],
     ) -> list[threading.Thread]:
         specs = [
             (
@@ -119,6 +138,8 @@ class StreamingPipelineCoordinator:
                     lock,
                     sentinel,
                     timings,
+                    evaluation_paused,
+                    deferred_evaluation_run_ids,
                 ),
                 name=f"xmax-{stage}-worker",
                 daemon=True,
@@ -137,6 +158,8 @@ class StreamingPipelineCoordinator:
         lock: threading.Lock,
         sentinel: object,
         timings: dict[str, dict[str, float]],
+        evaluation_paused: threading.Event,
+        deferred_evaluation_run_ids: list[str],
     ) -> None:
         while True:
             item = input_queue.get()
@@ -147,9 +170,24 @@ class StreamingPipelineCoordinator:
                     return
                 run = item[0] if isinstance(item, tuple) else item
                 arguments = item if isinstance(item, tuple) else (item,)
+                if stage == "evaluate" and evaluation_paused.is_set():
+                    with lock:
+                        deferred_evaluation_run_ids.append(run.get("run_id"))
+                    continue
                 self._mark(lock, timings, stage, "first_item_started")
                 try:
                     result = function(*arguments)
+                except EvaluationBudgetPausedError as exc:
+                    if stage != "evaluate":
+                        self._add_error(outcome, lock, stage, run.get("run_id"), exc)
+                        continue
+                    first_pause = not evaluation_paused.is_set()
+                    evaluation_paused.set()
+                    with lock:
+                        deferred_evaluation_run_ids.append(run.get("run_id"))
+                    if first_pause:
+                        self._add_error(outcome, lock, stage, run.get("run_id"), exc)
+                    continue
                 except Exception as exc:
                     self._add_error(outcome, lock, stage, run.get("run_id"), exc)
                     continue
@@ -235,10 +273,10 @@ class StreamingPipelineCoordinator:
         with lock:
             outcome.errors[stage].append(
                 {
-                    "code": "xmax.streaming_stage_error",
+                    "code": getattr(exc, "code", "xmax.streaming_stage_error"),
                     "message": str(exc),
                     "stage": stage,
-                    "retryable": False,
+                    "retryable": bool(getattr(exc, "retryable", False)),
                     "entity_id": entity_id,
                 }
             )

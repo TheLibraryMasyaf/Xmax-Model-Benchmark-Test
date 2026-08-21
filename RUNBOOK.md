@@ -68,6 +68,29 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 
 生成前会实际导入COS SDK的`CosConfig/CosS3Client`并校验STS响应，检查失败时不创建GenerationRun。统一Run、独立离线生成和TaskWorker遵循同一规则；批量Worker必须在领取第一条任务前完成共享预检。流水线对不可重试错误立即熔断，对完全相同的生成异常默认连续3次后熔断；可用`circuit_breaker_threshold`调整，不得为了“跑完”而关闭。
 
+### 4.1 Qwen免费链与99元付费兜底
+
+`config/judges.json`中的模型顺序就是调用顺序。前25个候选必须在百炼控制台保持“免费额度用完即停”；唯一例外是列表最后的`qwen3-vl-flash`，它是付费兜底。不要给其他模型关闭该开关，也不要把另一个收费模型加入末尾。
+
+首次进入付费阶段前：
+
+```bash
+# 只读查看本项目预算；不会调用模型
+.venv/bin/xmax-test evaluation-budget status
+
+# 人工已充值，并且只为末位qwen3-vl-flash关闭“免费额度用完即停”后执行
+.venv/bin/xmax-test evaluation-budget authorize \
+  --limit-cny 99 --operator <操作者> --recharge-confirmed
+
+# 用原命令继续；已生成/已预处理内容会复用
+.venv/bin/xmax-test run --request config/run-request.json --resume --budget-approved
+# 或任务队列
+.venv/bin/xmax-test worker run --task-batch-id <task_batch_id> \
+  --lease-owner <agent-id> --budget-approved
+```
+
+预算未授权、达到99元上限或末位仍被百炼`FreeTierOnly`拦截时，CLI返回退出码6和`xmax.evaluation_budget_paused`。评测会在所有Judge前关闭，`evaluation_paused`任务保留已有Run/Preprocess；生成可继续，评分同步和报告不继续。充值后每次都必须重新执行`authorize --recharge-confirmed`，它会开启新的本地99元授权周期。该数字是按百炼返回Token usage计算的本项目保守估算，不包含同一阿里云账户下其他程序的消费；仍应同时使用百炼账户余额/预算告警。
+
 显式设`execution_mode=batch`可恢复“整批生成完再预处理/评测”。只列出单阶段时，无论该字段为何都不会暗中执行下游。
 
 小批次可在`filters`中使用`feed_limit`、`prompt_limit`、`feed_asset_ids`或`prompt_record_numbers`。Feed和Prompt先按飞书业务编号、再按稳定ID排序后截取；过滤条件属于计划哈希，不能复用到全量计划。仓库提供`config/run-smoke-5x5.example.json`作为前5个Feed × 前5个Prompt、每组合1次的安全模板。它默认`dry_run=true`；复制为本轮请求、完成`context-check`和预算确认后才能改为false。
@@ -96,6 +119,7 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 
 .venv/bin/xmax-test preprocess --run-batch-id <run_batch_id> --resume
 .venv/bin/xmax-test evaluate --run-batch-id <run_batch_id> --resume
+.venv/bin/xmax-test evaluation-budget status
 
 .venv/bin/xmax-test human import --input <human-file.json>
 .venv/bin/xmax-test human feedback --input <feedback-file.json>
@@ -208,7 +232,13 @@ var/reports/model-version-updates/<comparison_id>.json
 
 当用户只要求报告一个模型版本或某次指定测试批次时，读取`docs/single-version-reporting.md`，使用`report-templates/single-version-evaluation-report.md`。报告必须包含总分分布、全量适用维度、细则级得分或缺失说明、强项、短板、Good/Bad Case和P0/P1/P2改进建议。
 
-当前没有独立的单版本报告CLI；执行Agent从已有产物填写模板，写入：
+独立单版本报告CLI为：
+
+```bash
+.venv/bin/xmax-test report single-version --request config/single-version-report.json
+```
+
+输出写入：
 
 ```text
 var/reports/single-version/<report_id>.md

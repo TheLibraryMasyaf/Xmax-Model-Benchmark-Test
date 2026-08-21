@@ -40,6 +40,9 @@ SQLite启动时启用外键、WAL和busy timeout。迁移只前进，记录`sche
 | `batch_manifests` | `entity_type + batch_id` | 批次内容冻结，不原地修改 |
 | `selector_snapshots` | `selector_id + snapshot_hash` | 保存解析后稳定ID集 |
 | `result_imports` | `import_request_id + source_hash` | 远端/本地已有结果幂等导入 |
+| `evaluation_budgets` | `budget_id` | 保存本地付费上限、已用/预留金额和人工授权周期；暂停跨进程持久化 |
+| `evaluation_budget_reservations` | `reservation_id` | 付费请求前预留，成功结算、明确拒绝释放、超时保守核销 |
+| `evaluation_budget_events` | `event_id` | 授权、预留、结算、释放、暂停仅追加审计 |
 
 JSON负载可以作为版本化列保存，但常用关联键、状态、时间和哈希必须单独建列与索引。Schema演进不能要求物理新增每个Benchmark维度列。
 

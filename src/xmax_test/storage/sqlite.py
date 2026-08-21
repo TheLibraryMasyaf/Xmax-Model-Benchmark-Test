@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,7 @@ from ..time import Clock, SystemClock, utc_now
 from .migrations import migrate
 
 TERMINAL_STATUSES = {"completed", "error", "cancelled"}
+_STARTUP_LOCK_RETRIES = 8
 
 
 def _json(value: Any) -> str:
@@ -42,9 +45,22 @@ class SqliteMetadataRepository:
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA busy_timeout = 30000")
-        self._conn.execute("PRAGMA journal_mode = WAL")
         self._lock = threading.RLock()
-        migrate(self._conn)
+        self._initialize_database()
+
+    def _initialize_database(self) -> None:
+        """Serialize transient WAL/migration contention during concurrent startup."""
+
+        for attempt in range(_STARTUP_LOCK_RETRIES):
+            try:
+                self._conn.execute("PRAGMA journal_mode = WAL")
+                migrate(self._conn)
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt + 1 >= _STARTUP_LOCK_RETRIES:
+                    raise
+                self._conn.rollback()
+                time.sleep(min(0.02 * (2**attempt), 0.25))
 
     # ------------------------------------------------------------------
     # generic append / event log
@@ -385,7 +401,7 @@ class SqliteMetadataRepository:
             with self._conn:
                 self._conn.execute(
                     "UPDATE test_tasks SET status='pending', last_error=NULL, updated_at=? "
-                    "WHERE task_id=? AND status='error'",
+                    "WHERE task_id=? AND status IN ('error','evaluation_paused')",
                     (self._clock.now(), task_id),
                 )
         return self._claim_test_task(
@@ -471,6 +487,7 @@ class SqliteMetadataRepository:
             "generating",
             "preprocessing",
             "evaluating",
+            "evaluation_paused",
             "syncing",
             "completed",
             "error",
@@ -486,7 +503,7 @@ class SqliteMetadataRepository:
         if lease_owner and current.get("lease_owner") not in {None, lease_owner}:
             raise ConflictError(f"test task {task_id} is leased by another worker")
         merged_refs = {**current.get("result_refs", {}), **(result_refs or {})}
-        terminal = status in {"completed", "error", "cancelled"}
+        terminal = status in {"completed", "error", "cancelled", "evaluation_paused"}
         with self._conn:
             self._conn.execute(
                 "UPDATE test_tasks SET status=?, result_refs=?, last_error=?, "
@@ -502,6 +519,17 @@ class SqliteMetadataRepository:
                 ),
             )
         return self.get_test_task(task_id)
+
+    def requeue_evaluation_paused_tasks(self, task_batch_id: str) -> int:
+        """Resume generated tasks only after the persistent budget gate is open."""
+
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE test_tasks SET status='pending', last_error=NULL, updated_at=? "
+                "WHERE task_batch_id=? AND status='evaluation_paused'",
+                (self._clock.now(), task_batch_id),
+            )
+        return int(cursor.rowcount)
 
     def test_task_summary(self, task_batch_id: str) -> dict[str, Any]:
         rows = self._conn.execute(
@@ -932,6 +960,328 @@ class SqliteMetadataRepository:
     # ------------------------------------------------------------------
     # approvals
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # paid evaluation budgets
+    # ------------------------------------------------------------------
+    def ensure_evaluation_budget(
+        self,
+        *,
+        budget_id: str,
+        provider_id: str,
+        model: str,
+        currency: str,
+        limit_micros: int,
+    ) -> dict[str, Any]:
+        """Create a closed budget without silently authorizing paid calls."""
+
+        now = self._clock.now()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO evaluation_budgets("
+                "budget_id, provider_id, model, currency, limit_micros, spent_micros, "
+                "reserved_micros, status, authorization_epoch, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 0, 0, 'awaiting_authorization', 0, ?)",
+                (budget_id, provider_id, model, currency, int(limit_micros), now),
+            )
+            row = self._conn.execute(
+                "SELECT provider_id, model, currency FROM evaluation_budgets WHERE budget_id=?",
+                (budget_id,),
+            ).fetchone()
+            if row is None:
+                raise ContractError(f"failed to create evaluation budget {budget_id}")
+            actual = (row["provider_id"], row["model"], row["currency"])
+            expected = (provider_id, model, currency)
+            if actual != expected:
+                raise ConflictError(
+                    f"evaluation budget {budget_id} belongs to {actual}, expected {expected}"
+                )
+        return self.get_evaluation_budget(budget_id)
+
+    def get_evaluation_budget(self, budget_id: str) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT * FROM evaluation_budgets WHERE budget_id=?", (budget_id,)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"evaluation budget not found: {budget_id}")
+        result = self._row_dict(row)
+        for key in ("limit_micros", "spent_micros", "reserved_micros"):
+            result[key] = int(result[key])
+        result["available_micros"] = max(
+            0,
+            result["limit_micros"]
+            - result["spent_micros"]
+            - result["reserved_micros"],
+        )
+        result["limit_cny"] = result["limit_micros"] / 1_000_000
+        result["spent_cny"] = result["spent_micros"] / 1_000_000
+        result["reserved_cny"] = result["reserved_micros"] / 1_000_000
+        result["available_cny"] = result["available_micros"] / 1_000_000
+        return result
+
+    def authorize_evaluation_budget(
+        self, budget_id: str, *, limit_micros: int, operator: str
+    ) -> dict[str, Any]:
+        if not operator.strip():
+            raise ContractError("evaluation budget authorization requires an operator")
+        if limit_micros <= 0:
+            raise ContractError("evaluation budget limit must be greater than zero")
+        now = self._clock.now()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT authorization_epoch FROM evaluation_budgets WHERE budget_id=?",
+                    (budget_id,),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError(f"evaluation budget not found: {budget_id}")
+                epoch = int(row["authorization_epoch"]) + 1
+                self._conn.execute(
+                    "UPDATE evaluation_budgets SET limit_micros=?, spent_micros=0, "
+                    "reserved_micros=0, status='open', authorization_epoch=?, operator=?, "
+                    "authorized_at=?, paused_reason=NULL, updated_at=? WHERE budget_id=?",
+                    (int(limit_micros), epoch, operator.strip(), now, now, budget_id),
+                )
+                self._conn.execute(
+                    "UPDATE evaluation_budget_reservations SET status='superseded', "
+                    "updated_at=? WHERE budget_id=? AND status='reserved'",
+                    (now, budget_id),
+                )
+                self._append_budget_event_locked(
+                    budget_id,
+                    "authorized",
+                    amount_micros=int(limit_micros),
+                    payload={"operator": operator.strip(), "authorization_epoch": epoch},
+                    now=now,
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_evaluation_budget(budget_id)
+
+    def pause_evaluation_budget(self, budget_id: str, *, reason: str) -> dict[str, Any]:
+        now = self._clock.now()
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE evaluation_budgets SET status='paused', paused_reason=?, "
+                "updated_at=? WHERE budget_id=?",
+                (reason, now, budget_id),
+            )
+            if cursor.rowcount == 0:
+                raise NotFoundError(f"evaluation budget not found: {budget_id}")
+            self._append_budget_event_locked(
+                budget_id, "paused", payload={"reason": reason}, now=now
+            )
+        return self.get_evaluation_budget(budget_id)
+
+    def reserve_evaluation_budget(
+        self, budget_id: str, amount_micros: int
+    ) -> dict[str, Any]:
+        if amount_micros <= 0:
+            raise ContractError("evaluation budget reservation must be greater than zero")
+        now = self._clock.now()
+        reservation_id = f"eval-budget-res-{uuid.uuid4().hex}"
+        paused_state: dict[str, Any] | None = None
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM evaluation_budgets WHERE budget_id=?", (budget_id,)
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError(f"evaluation budget not found: {budget_id}")
+                if row["status"] != "open":
+                    self._conn.commit()
+                    paused_state = self.get_evaluation_budget(budget_id)
+                elif (
+                    int(row["spent_micros"])
+                    + int(row["reserved_micros"])
+                    + int(amount_micros)
+                    > int(row["limit_micros"])
+                ):
+                    reason = "paid qwen3-vl-flash budget cannot reserve another request"
+                    self._conn.execute(
+                        "UPDATE evaluation_budgets SET status='paused', paused_reason=?, "
+                        "updated_at=? WHERE budget_id=?",
+                        (reason, now, budget_id),
+                    )
+                    self._append_budget_event_locked(
+                        budget_id,
+                        "limit_reached",
+                        amount_micros=int(amount_micros),
+                        payload={"reason": reason},
+                        now=now,
+                    )
+                    self._conn.commit()
+                    paused_state = self.get_evaluation_budget(budget_id)
+                else:
+                    self._conn.execute(
+                        "UPDATE evaluation_budgets SET reserved_micros=reserved_micros+?, "
+                        "updated_at=? WHERE budget_id=?",
+                        (int(amount_micros), now, budget_id),
+                    )
+                    self._conn.execute(
+                        "INSERT INTO evaluation_budget_reservations("
+                        "reservation_id, budget_id, amount_micros, status, usage, "
+                        "created_at, updated_at) VALUES (?, ?, ?, 'reserved', '{}', ?, ?)",
+                        (reservation_id, budget_id, int(amount_micros), now, now),
+                    )
+                    self._append_budget_event_locked(
+                        budget_id,
+                        "reserved",
+                        reservation_id=reservation_id,
+                        amount_micros=int(amount_micros),
+                        now=now,
+                    )
+                    self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        if paused_state is not None:
+            from ..evaluation.budget import EvaluationBudgetGate
+
+            raise EvaluationBudgetGate._paused_error(paused_state)
+        return {
+            "reservation_id": reservation_id,
+            "budget_id": budget_id,
+            "amount_micros": int(amount_micros),
+        }
+
+    def settle_evaluation_budget_reservation(
+        self,
+        reservation_id: str,
+        *,
+        actual_micros: int,
+        usage: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._finish_budget_reservation(
+            reservation_id,
+            status="settled",
+            actual_micros=int(actual_micros),
+            usage=usage,
+            reason="provider usage settled",
+        )
+
+    def release_evaluation_budget_reservation(
+        self, reservation_id: str, *, reason: str
+    ) -> dict[str, Any]:
+        return self._finish_budget_reservation(
+            reservation_id,
+            status="released",
+            actual_micros=0,
+            usage={},
+            reason=reason,
+        )
+
+    def forfeit_evaluation_budget_reservation(
+        self, reservation_id: str, *, reason: str
+    ) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT amount_micros FROM evaluation_budget_reservations WHERE reservation_id=?",
+            (reservation_id,),
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"evaluation budget reservation not found: {reservation_id}")
+        return self._finish_budget_reservation(
+            reservation_id,
+            status="forfeited",
+            actual_micros=int(row["amount_micros"]),
+            usage={},
+            reason=reason,
+        )
+
+    def _finish_budget_reservation(
+        self,
+        reservation_id: str,
+        *,
+        status: str,
+        actual_micros: int,
+        usage: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        now = self._clock.now()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT * FROM evaluation_budget_reservations WHERE reservation_id=?",
+                    (reservation_id,),
+                ).fetchone()
+                if row is None:
+                    raise NotFoundError(
+                        f"evaluation budget reservation not found: {reservation_id}"
+                    )
+                if row["status"] != "reserved":
+                    self._conn.commit()
+                    return self.get_evaluation_budget(row["budget_id"])
+                reserved = int(row["amount_micros"])
+                if actual_micros < 0 or actual_micros > reserved:
+                    raise ContractError(
+                        f"actual evaluation cost {actual_micros} exceeds reservation {reserved}"
+                    )
+                self._conn.execute(
+                    "UPDATE evaluation_budget_reservations SET actual_micros=?, status=?, "
+                    "usage=?, updated_at=? WHERE reservation_id=?",
+                    (actual_micros, status, _json(usage), now, reservation_id),
+                )
+                self._conn.execute(
+                    "UPDATE evaluation_budgets SET reserved_micros=reserved_micros-?, "
+                    "spent_micros=spent_micros+?, updated_at=? WHERE budget_id=?",
+                    (reserved, actual_micros, now, row["budget_id"]),
+                )
+                self._append_budget_event_locked(
+                    row["budget_id"],
+                    status,
+                    reservation_id=reservation_id,
+                    amount_micros=actual_micros,
+                    payload={"reason": reason, "usage": usage},
+                    now=now,
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return self.get_evaluation_budget(row["budget_id"])
+
+    def list_evaluation_budget_events(self, budget_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM evaluation_budget_events WHERE budget_id=? "
+            "ORDER BY created_at, event_id",
+            (budget_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = self._row_dict(row)
+            item["payload"] = json.loads(item["payload"])
+            result.append(item)
+        return result
+
+    def _append_budget_event_locked(
+        self,
+        budget_id: str,
+        event_type: str,
+        *,
+        reservation_id: str | None = None,
+        amount_micros: int = 0,
+        payload: dict[str, Any] | None = None,
+        now: str,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO evaluation_budget_events(event_id, budget_id, reservation_id, "
+            "event_type, amount_micros, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"eval-budget-event-{uuid.uuid4().hex}",
+                budget_id,
+                reservation_id,
+                event_type,
+                int(amount_micros),
+                _json(payload or {}),
+                now,
+            ),
+        )
+
     def save_approval(self, approval: dict[str, Any]) -> None:
         approval_hash = approval.get("approval_hash")
         if not approval_hash:

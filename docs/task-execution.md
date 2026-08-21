@@ -53,4 +53,5 @@ Worker通过`BEGIN IMMEDIATE`原子租约一条`pending` Task；过期租约回�
 - 已`completed`的Task再次调用会直接返回，不重复付费。
 - XMAX返回生成失败Run仍是已执行Task；写飞书0%，不无限重试。
 - 网络、Judge、飞书等基础设施异常进入`error`；使用`task run ... --resume`只续跑该任务。
+- 付费评测闸门关闭时进入`evaluation_paused`而不是`error`，保留`run_id/preprocess_id`且释放租约；Worker继续生成后续pending任务，但所有Judge和飞书评分同步都暂停。充值并显式开放预算后，下一次`worker run`自动把本批这些任务重新排队，只续评测和后续步骤。
 - `result_refs`保存已有`run_id/preprocess_id/evaluation_id`，续跑优先复用。

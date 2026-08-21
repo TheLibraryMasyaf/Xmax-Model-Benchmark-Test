@@ -11,13 +11,19 @@ import csv
 import json
 import mimetypes
 import os
+import socket
 import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ...errors import ConfigError, ExternalServiceError
+from ...errors import (
+    ConfigError,
+    EvaluationBudgetPausedError,
+    ExternalServiceError,
+    MlmmTimeoutError,
+)
 from .base import MlmmResponse
 
 
@@ -40,6 +46,7 @@ class OpenAiCompatibleProvider:
         video_options: dict[str, Any] | None = None,
         image_options: dict[str, Any] | None = None,
         max_base64_bytes: int = 10_000_000,
+        budget_gate: Any = None,
     ) -> None:
         credentials = _read_key_value_csv(credential_csv) if credential_csv else {}
         self._endpoint = _chat_completions_endpoint(
@@ -61,6 +68,13 @@ class OpenAiCompatibleProvider:
         self._video_options = dict(video_options or {})
         self._image_options = dict(image_options or {})
         self._max_base64_bytes = int(max_base64_bytes)
+        self._budget_gate = budget_gate
+        self._paid_model = budget_gate.policy.model if budget_gate is not None else None
+        if self._paid_model is not None:
+            if configured_models.count(self._paid_model) != 1:
+                raise ConfigError("paid_fallback.model must occur exactly once in provider.models")
+            if configured_models[-1] != self._paid_model:
+                raise ConfigError("paid_fallback.model must be the final provider.models entry")
 
     @property
     def provider_id(self) -> str:
@@ -111,6 +125,9 @@ class OpenAiCompatibleProvider:
         while True:
             model_index, current_model = self._current_model()
             attempted.append(current_model)
+            paid_reservation = None
+            if current_model == self._paid_model:
+                paid_reservation = self._budget_gate.reserve_paid_call()
             body = {
                 "model": current_model,
                 "messages": [{"role": "user", "content": content}],
@@ -127,6 +144,15 @@ class OpenAiCompatibleProvider:
                 with urllib.request.urlopen(request, timeout=self._timeout) as response:
                     raw_text = response.read().decode("utf-8")
                 if _is_free_tier_exhausted(200, raw_text):
+                    if paid_reservation is not None:
+                        self._budget_gate.release(
+                            paid_reservation["reservation_id"],
+                            reason="provider rejected paid fallback under FreeTierOnly",
+                        )
+                        state = self._budget_gate.pause(
+                            "qwen3-vl-flash still has FreeTierOnly enabled in Alibaba console"
+                        )
+                        raise self._budget_gate._paused_error(state)
                     if self._advance_model(model_index):
                         continue
                     raise ExternalServiceError(
@@ -135,7 +161,17 @@ class OpenAiCompatibleProvider:
                 break
             except urllib.error.HTTPError as exc:
                 error_body = exc.read().decode("utf-8", errors="replace")
+                if paid_reservation is not None:
+                    self._budget_gate.release(
+                        paid_reservation["reservation_id"],
+                        reason=f"provider rejected request with HTTP {exc.code}",
+                    )
                 if _is_free_tier_exhausted(exc.code, error_body):
+                    if current_model == self._paid_model:
+                        state = self._budget_gate.pause(
+                            "qwen3-vl-flash still has FreeTierOnly enabled in Alibaba console"
+                        )
+                        raise self._budget_gate._paused_error(state) from exc
                     if self._advance_model(model_index):
                         continue
                     raise ExternalServiceError(
@@ -145,13 +181,62 @@ class OpenAiCompatibleProvider:
                     f"MLLM API request failed with HTTP {exc.code}: "
                     f"{_safe_error_summary(error_body)}"
                 ) from exc
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            except EvaluationBudgetPausedError:
+                raise
+            except (TimeoutError, socket.timeout) as exc:
+                if paid_reservation is not None:
+                    self._budget_gate.forfeit(
+                        paid_reservation["reservation_id"],
+                        reason="paid request timed out; billing outcome is ambiguous",
+                    )
+                raise MlmmTimeoutError(
+                    f"MLLM API request exceeded the {self._timeout}s timeout: {exc}"
+                ) from exc
+            except urllib.error.URLError as exc:
+                if paid_reservation is not None:
+                    reason = getattr(exc, "reason", None)
+                    if isinstance(reason, (TimeoutError, socket.timeout)):
+                        self._budget_gate.forfeit(
+                            paid_reservation["reservation_id"],
+                            reason="paid request timed out; billing outcome is ambiguous",
+                        )
+                        raise MlmmTimeoutError(
+                            f"MLLM API request exceeded the {self._timeout}s timeout: {exc}"
+                        ) from exc
+                    self._budget_gate.release(
+                        paid_reservation["reservation_id"],
+                        reason="network failure before a confirmed provider response",
+                    )
+                raise ExternalServiceError(f"MLLM API request failed: {exc}") from exc
+            except OSError as exc:
+                if paid_reservation is not None:
+                    self._budget_gate.release(
+                        paid_reservation["reservation_id"],
+                        reason="local transport failure before a confirmed provider response",
+                    )
                 raise ExternalServiceError(f"MLLM API request failed: {exc}") from exc
         try:
             envelope = json.loads(raw_text)
+            usage = envelope.get("usage", {})
+            if paid_reservation is not None:
+                if usage and (
+                    usage.get("prompt_tokens") is not None
+                    or usage.get("input_tokens") is not None
+                ):
+                    self._budget_gate.settle(paid_reservation["reservation_id"], usage)
+                else:
+                    self._budget_gate.forfeit(
+                        paid_reservation["reservation_id"],
+                        reason="paid response omitted billable token usage",
+                    )
             message = envelope["choices"][0]["message"]["content"]
             payload = json.loads(message) if isinstance(message, str) else message
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            if paid_reservation is not None:
+                self._budget_gate.forfeit(
+                    paid_reservation["reservation_id"],
+                    reason="paid response was incompatible and billing outcome is ambiguous",
+                )
             raise ExternalServiceError(
                 f"MLLM API returned an incompatible response: {exc}"
             ) from exc
@@ -163,6 +248,7 @@ class OpenAiCompatibleProvider:
             usage=envelope.get("usage", {}),
             metadata={
                 "model_fallback_attempts": attempted,
+                "paid_fallback": current_model == self._paid_model,
                 "input_mode": input_mode,
                 "media_roles": [item.get("role", "unknown") for item in (media_inputs or [])]
                 if input_mode == "direct_media"

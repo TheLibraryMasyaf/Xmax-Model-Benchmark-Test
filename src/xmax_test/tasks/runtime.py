@@ -47,6 +47,10 @@ class PipelineTaskRuntime:
             self._composition._offline_preflight_ok = True
             return
 
+    def evaluation_available(self) -> bool:
+        gate = getattr(self._composition, "_evaluation_budget_gate", None)
+        return gate is None or gate.status().get("status") == "open"
+
     def __call__(self, task: dict[str, Any]) -> dict[str, Any]:
         task_id = task["task_id"]
         case = task["payload"]["case"]

@@ -87,7 +87,7 @@ xmax-test/
 | [场景动态权重](docs/scene-weighting.md) | 预设权重档、规则合成、归一化和审计 |
 | [Judge责任矩阵](docs/judge-responsibilities.md) | 各类评测标准应由谁主判、辅助和提供事实 |
 | [CV Judge](docs/cv-judges.md) | 建议模型、插件协议、训练边界 |
-| [MLLM Provider](docs/codex-mlmm.md) | Qwen3-VL/Codex调用、免费额度回退、JSON输出和重试 |
+| [MLLM Provider](docs/codex-mlmm.md) | Qwen/Codex调用、免费链、末位付费兜底、99元预算闸门、JSON输出和超时 |
 | [人工信号](docs/human-feedback.md) | 独立人工集、纠错、维度提案与学习 |
 | [评测标准生命周期](docs/benchmark-lifecycle.md) | 新增、修改、停用、回放与发布 |
 | [飞书数据库](docs/feishu-database.md) | 表设计、幂等同步、附件和对账 |

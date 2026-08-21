@@ -7,6 +7,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from xmax_test.errors import EvaluationBudgetPausedError
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 from xmax_test.tasks import TaskAllocator, TaskWorker
 from xmax_test.time import FixedClock
@@ -128,6 +129,42 @@ class TaskTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["result_refs"]["run_id"], "run-after-claim")
+
+    def test_budget_pause_is_not_a_failed_task_and_can_be_requeued(self) -> None:
+        class PausedRuntime:
+            def __init__(self):
+                self.open = False
+
+            def preflight(self, tasks):
+                return None
+
+            def evaluation_available(self):
+                return self.open
+
+            def __call__(self, task):
+                self.repository.update_test_task(
+                    task["task_id"],
+                    "evaluating",
+                    lease_owner="worker-a",
+                    result_refs={"run_id": f"run-{task['case_id']}"},
+                )
+                raise EvaluationBudgetPausedError("recharge required")
+
+        runtime = PausedRuntime()
+        runtime.repository = self.repository
+        summary = TaskWorker(self.repository, runtime).run_batch(
+            self.batch["task_batch_id"], lease_owner="worker-a"
+        )
+        self.assertEqual(summary["counts"], {"evaluation_paused": 2})
+        self.assertEqual(len(summary["evaluation_paused"]), 2)
+        self.assertEqual(self.repository.list_test_tasks()[0]["result_refs"]["run_id"], "run-case-a")
+
+        runtime.open = True
+        self.repository.requeue_evaluation_paused_tasks(self.batch["task_batch_id"])
+        self.assertEqual(
+            self.repository.test_task_summary(self.batch["task_batch_id"])["counts"],
+            {"pending": 2},
+        )
 
 
 if __name__ == "__main__":

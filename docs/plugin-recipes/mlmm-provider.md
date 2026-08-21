@@ -29,13 +29,17 @@
     "endpoint": "<API地址>",
     "model": "<模型名>",
     "api_key_env": "<环境变量名>",
-    "timeout_seconds": 300,
+    "timeout_seconds": 180,
     "direct_media": true
   }
 }
 ```
 
 只保存环境变量名，不把Key写入JSON。模型是否支持视频直传、图片数量、Base64上限和JSON Schema响应，必须根据真实API能力配置；不能因为API接受请求就假定它理解了视频。
+
+需要使用内置付费兜底时，改用`models`数组，并让`paid_fallback.model`在数组中只出现一次且必须是最后一项。完整字段和价格阶梯复制`config/judges.example.json`，不要在Python里写死；当前内置闸门只适用于`openai_compatible`。新增其他协议的收费Provider时，必须先实现同等的“请求前预留、usage结算、超时保守核销、SQLite持久化暂停、人工重新授权”合同，不能只把收费模型加入配置。
+
+首次付费及每次充值周期使用`xmax-test evaluation-budget authorize --recharge-confirmed`显式开放。Provider切换或价格变化必须使用新的`budget_id`或明确的新授权周期；不能继承另一个模型的剩余额度。
 
 ## 3. 自定义Python Provider合同
 
@@ -101,12 +105,13 @@ Provider只负责传输、媒体适配、结构化响应和错误归一化，不
 
 1. 正常结构化响应；
 2. 视频或图片输入角色保持正确；
-3. 超时后按上限重试；
+3. 超时在配置上限内返回`xmax.mlmm_timeout`且不被Judge再次自动重试；
 4. 限流或额度耗尽后的允许回退；
 5. 永久认证失败不无限重试；
 6. 返回非JSON、缺字段或越界分数；
 7. usage和实际模型名被保存；
-8.日志不包含密钥。
+8. 日志不包含密钥；
+9. 收费候选不在末位时配置加载失败，未授权/超限时任何Judge均不开始，流式生成仍能排空。
 
 ## 6. 注册和离线验收
 

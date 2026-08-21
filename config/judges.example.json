@@ -16,7 +16,6 @@
         "api_key_csv_field": "apiKey",
         "endpoint_csv_field": "openAiCompatible",
         "models": [
-          "qwen3.8-max",
           "qwen3.7-plus",
           "qwen3.7-plus-2026-05-26",
           "qwen3-vl-plus-2025-12-19",
@@ -36,13 +35,13 @@
           "qwen3.5-27b",
           "qwen3.5-35b-a3b",
           "qwen3-vl-plus-2025-09-23",
-          "qwen3-vl-flash",
           "qwen3-vl-flash-2026-01-22",
           "qwen3-vl-flash-2025-10-15",
           "qwen3-vl-235b-a22b-instruct",
           "qwen3-vl-32b-instruct",
           "qwen3-vl-30b-a3b-instruct",
-          "qwen3-vl-8b-instruct"
+          "qwen3-vl-8b-instruct",
+          "qwen3-vl-flash"
         ],
         "response_format_type": "json_object",
         "direct_media": true,
@@ -58,7 +57,21 @@
         },
         "max_base64_bytes": 10000000,
         "request_options": {"enable_thinking": false},
-        "timeout_seconds": 300
+        "timeout_seconds": 180,
+        "paid_fallback": {
+          "enabled": true,
+          "budget_id": "qwen3-vl-flash-paid",
+          "provider_id": "openai_compatible",
+          "model": "qwen3-vl-flash",
+          "currency": "CNY",
+          "limit_cny": 99,
+          "max_reservation_cny": 0.36,
+          "pricing_tiers": [
+            {"max_input_tokens": 32000, "input_cny_per_million": 0.15, "cached_input_cny_per_million": 0.03, "output_cny_per_million": 1.5},
+            {"max_input_tokens": 128000, "input_cny_per_million": 0.3, "cached_input_cny_per_million": 0.06, "output_cny_per_million": 3.0},
+            {"max_input_tokens": 260096, "input_cny_per_million": 0.6, "cached_input_cny_per_million": 0.12, "output_cny_per_million": 6.0}
+          ]
+        }
       },
       "calibration": {
         "path": "var/feedback/learning.train.jsonl",
@@ -79,7 +92,7 @@
       ],
       "supported_modes": ["offline", "realtime"],
       "required_inputs": ["feed_evidence", "prompt", "result_evidence"],
-      "timeout_seconds": 300
+      "timeout_seconds": 180
     },
     {
       "judge_id": "video-quality-cv",

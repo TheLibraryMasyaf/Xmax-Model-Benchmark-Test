@@ -228,7 +228,6 @@ class RestBindingTests(OfflineTestBase):
 
         # Stub the COS client at the import site so no network is touched.
         import qcloud_cos
-        import xmax_test.generation.offline.rest_adapter as rest
 
         put_objects: list[dict] = []
         real_client = qcloud_cos.CosS3Client
@@ -310,6 +309,44 @@ class RestBindingTests(OfflineTestBase):
 
 
 class RestFailureTests(OfflineTestBase):
+    def test_inflight_submitted_run_is_polled_without_duplicate_submit(self) -> None:
+        case = self.image_case()
+        self.run_repo.create_run(
+            {
+                "run_id": "run-inflight",
+                "run_batch_id": "run-batch-fake",
+                "case_id": case["case_id"],
+                "case_number": case["case_number"],
+                "status": "running",
+                "model_id": "x2.0",
+                "mode": "offline",
+                "origin": "xmax_offline",
+                "provenance": {},
+                "metrics": {"backend": "rest"},
+            }
+        )
+        self.run_repo.append_event(
+            "run-inflight",
+            "task_submitted",
+            payload={"external_task_id": "external-existing"},
+        )
+        transport = FakeOfflineTaskTransport(
+            poll_states=[
+                {
+                    "status": "completed",
+                    "result_url": "https://example.invalid/result.mp4",
+                    "credits": 20,
+                }
+            ]
+        )
+        run = self.adapter(transport=transport).run_case(case)
+
+        self.assertEqual(run["run_id"], "run-inflight")
+        self.assertEqual(run["status"], "completed")
+        self.assertNotIn("submit", transport.calls)
+        self.assertNotIn("upload_video", transport.calls)
+        self.assertIn("poll", transport.calls)
+
     def test_submit_failure_persists_terminal_error_run(self) -> None:
         transport = FakeOfflineTaskTransport(submit_error="rejected before billing")
         adapter = self.adapter(transport=transport)

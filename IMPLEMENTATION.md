@@ -11,23 +11,23 @@
 | 包 | 状态 | 已实现 | 外部接入/后续维护 |
 | --- | --- | --- | --- |
 | P0 Foundation | DONE | Python包、核心合同、Schema、Benchmark Loader、CLI检查 | 后续随合同扩展维护 |
-| P0.5 Persistence | DONE | SQLite迁移、Repository、Artifact Store、追加事件、Fake/测试 | 随数据合同做只增量迁移 |
+| P0.5 Persistence | DONE | SQLite迁移、Repository、Artifact Store、追加事件、持久化付费评测预算/预留/审计、Fake/测试 | 随数据合同做只增量迁移 |
 | P0.7 Stage Orchestration | DONE | 依赖解析、Selector冻结、Stage/Batch Manifest、续跑、CLI | 新阶段需沿用显式依赖规则 |
 | P1 Scene Weighting | DONE | 动态权重解析、Benchmark/Scenario校验、Fusion/Hard Gate集成 | 新权重只通过Benchmark版本发布 |
 | P2 Assets | DONE | Sheet/Base/Wiki/本地/HTTP适配器、快照、去重、媒体校验、CLI | 真实来源映射由Asset Source Pack提供 |
 | P2.5 Existing Result Ingestion | DONE | 飞书/本地/Manifest导入、Run归一、来源追溯、Fake和CLI | 真实Case字段由Existing Results Pack提供 |
 | P3 Planning | DONE | 配方解析、模式优先级、Case后缀、成本预览、可插拔组合策略、可修改重复数、Task Batch冻结 | 新玩法通过Recipe/Profile包接入；新分配法通过StrategyRegistry接入 |
-| P3.5 Task Execution | DONE | SQLite原子租约、过期回收、单任务生成→评测→飞书同步→对账、COS真实前检、断点续跑、CLI和全Fake E2E | 真实批量执行仍需预算批准和密钥 |
+| P3.5 Task Execution | DONE | SQLite原子租约、过期回收、单任务生成→评测→飞书同步→对账、COS真实前检、`evaluation_paused`断点、断点续跑、CLI和全Fake E2E | 真实批量执行仍需预算批准和密钥 |
 | P4 Offline Generation | DONE | 真实REST/COS、Session API边界、状态机、续跑、Fake | Session+RTC的真实RTC传输不内置，常规离线路径使用官方REST |
 | P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、互动Profile、Fake | 需Key的付费真实会话待运行时smoke |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
-| P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、免费额度自动回退、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
+| P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、25模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
 | P8 Evaluation | DONE | Orchestrator、细则级Judge路由与覆盖检查、批次级重复/跨输入评分、硬门槛、双总分、精确批次续跑和结果Schema | R5/R6等仍由实际样本是否具备异常脚本/长会话决定可评性 |
 | P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
 | P11 Release/Replay | DONE | Challenger、Holdout验证、回放、发布和回滚 | 发布仍需明确operator和验证文件 |
 | P12 Reporting | DONE | 精确Run/Evaluation Batch的版本对比与单版本报告、Case/维度/细则多统计量、人工修订、P0/P1/P2、JSON/Markdown | 对比阈值随Score Schema版本维护；无阈值时不臆造绝对合格线 |
-| P13 Unified CLI | DONE | RUNBOOK命令、`run`内强制ContextChecker、配置内容指纹缓存、稳定退出码、付费批准门 | 新命令须同步RUNBOOK和E2E |
+| P13 Unified CLI | DONE | RUNBOOK命令、`run`内强制ContextChecker、配置内容指纹缓存、稳定退出码、生成预算批准门、`evaluation-budget status/authorize/pause` | 新命令须同步RUNBOOK和E2E |
 
 ### 1.1 外部运行就绪度
 
@@ -36,7 +36,7 @@
 | XMAX离线REST/COS | 已实现 | Fake、合同、失败/续跑测试；2026-08-20按官方上传协议完成2次真实付费任务并成功下载结果 | 后续批量运行仍需`XMAX_API_KEY`、`cos-python-sdk-v5`和与冻结计划绑定的预算批准 |
 | XMAX实时SDK | 已实现新旧API双路 | `tsc --noEmit`、JS语法、无Key安全失败 | Key、预算批准、可用WebRTC环境；未做付费smoke |
 | 预处理/音频 | 已实现ffmpeg适配器 | Fake与PCM包络测试 | 当前机器PATH中需安装`ffmpeg`/`ffprobe` |
-| Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/多候选免费额度回退、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-21回读百炼账户额度并将候选收敛为27个“有明确余量+用完即停+官方支持视频结构化输出”的模型；结构化额度错误跨HTTP状态回退由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；额度与账户开关是外部动态状态，新一轮真实批测前仍需登录控制台重新核对 |
+| Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/25候选免费额度回退、唯一末位`qwen3-vl-flash`付费兜底、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入；SQLite按请求预留并执行99元本地硬上限 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-21登录百炼回读，删除无额度`qwen3.8-max`，当前总列表26个；结构化额度错误跨HTTP状态回退、预算暂停和流式排空由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；前25个保持免费用尽即停，付费前只关闭末位泛化`qwen3-vl-flash`的该开关，并人工充值、执行本地授权；本地估算不覆盖账户外部调用 |
 | Codex CLI MLLM | 保留可替换Provider | Fake与错误路径 | 仅在Judge Pack改配后启用 |
 | CV/Metric Judge | 动态Python插件协议、基础画质、音轨及运行事实Judge已完成 | Manifest/Schema/三档阈值/不伪造分测试 | 专项身份、姿态、跟踪模型可按维度替换Shadow MLLM路由 |
 | 飞书 | `lark-cli`真实命令适配已实现 | Fake、分页/幂等/策略测试；2026-08-20已真实完成Case upsert、百分比评分、三类附件上传和回读对账 | 换Base/Table时仍需真实字段映射和明确写入授权 |

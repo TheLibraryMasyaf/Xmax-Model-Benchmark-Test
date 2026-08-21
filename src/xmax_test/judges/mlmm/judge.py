@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from ...errors import ExternalServiceError, ValidationError
+from ...errors import (
+    EvaluationBudgetPausedError,
+    ExternalServiceError,
+    MlmmTimeoutError,
+    ValidationError,
+)
 from ...hashing import content_hash, sha256_text
+from ...time import utc_now
 
 
 class MlmmJudge:
@@ -79,7 +86,14 @@ class MlmmJudge:
         schema = _batch_output_schema(criteria_by_dimension)
         response = None
         last_error: Exception | None = None
-        for _attempt in range(1, self._max_retries + 2):
+        for attempt in range(1, self._max_retries + 2):
+            started = time.monotonic()
+            self._log_event(
+                "request_started",
+                prompt_hash=prompt_hash,
+                run_id=context.get("run_id", ""),
+                attempt=attempt,
+            )
             try:
                 response = self._provider.complete_json(
                     prompt=prompt,
@@ -93,10 +107,31 @@ class MlmmJudge:
                 )
                 if errors:
                     raise ValidationError(f"MLLM output schema error: {errors[0].message}")
+                self._log_event(
+                    "request_succeeded",
+                    prompt_hash=prompt_hash,
+                    run_id=context.get("run_id", ""),
+                    attempt=attempt,
+                    duration_seconds=round(time.monotonic() - started, 3),
+                    provider_id=response.provider_id,
+                    model=response.model,
+                    usage=response.usage,
+                )
                 break
             except Exception as exc:
+                self._log_event(
+                    "request_failed",
+                    prompt_hash=prompt_hash,
+                    run_id=context.get("run_id", ""),
+                    attempt=attempt,
+                    duration_seconds=round(time.monotonic() - started, 3),
+                    error_code=getattr(exc, "code", type(exc).__name__),
+                    error=str(exc),
+                )
                 last_error = exc
                 response = None
+                if isinstance(exc, (EvaluationBudgetPausedError, MlmmTimeoutError)):
+                    raise
         if response is None:
             raise ExternalServiceError(
                 f"MLLM provider produced no valid result after retries: {last_error}"
@@ -189,10 +224,6 @@ class MlmmJudge:
             "raw_text": response.raw_text,
             "prompt_hash": prompt_hash,
         }
-        if self._log_dir is not None:
-            self._log_dir.mkdir(parents=True, exist_ok=True)
-            with (self._log_dir / "mlmm-events.jsonl").open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         if self._artifacts is None:
             return None
         stored = self._artifacts.put_bytes(
@@ -201,6 +232,14 @@ class MlmmJudge:
             json.dumps(record, ensure_ascii=False).encode("utf-8"),
         )
         return stored["uri"]
+
+    def _log_event(self, event: str, **payload: Any) -> None:
+        if self._log_dir is None:
+            return
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        record = {"event": event, "timestamp": utc_now(), **payload}
+        with (self._log_dir / "mlmm-events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _batch_output_schema(criteria_by_dimension: dict[str, list[str]]) -> dict[str, Any]:

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from xmax_test.judges.mlmm.openai_compatible import OpenAiCompatibleProvider
@@ -26,6 +27,59 @@ class _Response:
 
 
 class OpenAiCompatibleProviderTests(unittest.TestCase):
+    def test_paid_fallback_must_be_unique_and_last(self) -> None:
+        gate = SimpleNamespace(policy=SimpleNamespace(model="paid"))
+        with self.assertRaisesRegex(Exception, "final"):
+            OpenAiCompatibleProvider(
+                endpoint="https://example.test/v1",
+                models=["paid", "free"],
+                api_key_env="TEST_QWEN_KEY",
+                budget_gate=gate,
+            )
+
+    def test_paid_fallback_reserves_and_settles_returned_usage(self) -> None:
+        class Gate:
+            policy = SimpleNamespace(model="qwen3-vl-flash")
+
+            def __init__(self):
+                self.events = []
+
+            def reserve_paid_call(self):
+                self.events.append("reserve")
+                return {"reservation_id": "reservation-1"}
+
+            def settle(self, reservation_id, usage):
+                self.events.append(("settle", reservation_id, usage))
+
+            def release(self, reservation_id, *, reason):
+                self.events.append(("release", reservation_id, reason))
+
+            def forfeit(self, reservation_id, *, reason):
+                self.events.append(("forfeit", reservation_id, reason))
+
+        gate = Gate()
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/v1",
+            model="qwen3-vl-flash",
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+            budget_gate=gate,
+        )
+        success = _Response(
+            {
+                "choices": [{"message": {"content": '{"ok":true}'}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3},
+            }
+        )
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", return_value=success):
+                response = provider.complete_json(
+                    prompt="judge", image_paths=[], output_schema={"type": "object"}
+                )
+        self.assertEqual(response.model, "qwen3-vl-flash")
+        self.assertEqual(gate.events[0], "reserve")
+        self.assertEqual(gate.events[1][0:2], ("settle", "reservation-1"))
+
     def test_direct_media_keeps_roles_and_native_video(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

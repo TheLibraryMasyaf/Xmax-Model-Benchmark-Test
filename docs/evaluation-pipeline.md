@@ -80,6 +80,8 @@ MLLM只能描述输入中可见内容；不得把Prompt、API错误或工程猜�
 
 MLLM批量Judge对一条Case的全部所属维度是原子操作。遇到`AllocationQuota.FreeTierOnly`时，Provider用下一个配置模型重发该Case的完整请求；所有候选都失败时，该Case评测失败且不保存、不上传残缺分数。禁止丢弃MLLM维度后用剩余CV/Metric结果重新归一化总分。
 
+唯一付费候选必须是模型列表最后一项。首次进入付费候选、99元本地上限无法预留下一次请求，或末位模型仍返回`FreeTierOnly`时，预算闸门抛出`xmax.evaluation_budget_paused`。当前Case不保存CV/Metric子集；后续Case在进入任何Judge前被拦截。流式生成和预处理继续排空，评测、同步和报告在此边界暂停，待人工充值确认与显式授权后续跑。
+
 ## 6. 融合
 
 融合顺序：
