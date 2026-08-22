@@ -376,6 +376,13 @@ def _is_free_tier_exhausted(status: int, body: str) -> bool:
         return True
     if "free tier of the model has been exhausted" in lowered:
         return True
+    # The Alibaba gateway also reports the same condition as
+    # ``insufficient_quota`` with the advisory "Free quota exhausted ... add
+    # funds or disable the 'use free tier only' mode".  The "free quota" /
+    # "free tier only" phrasing is what distinguishes it from a genuinely
+    # depleted paid account, so treat it as free-tier exhaustion too.
+    if "free quota exhausted" in lowered and "free tier only" in lowered:
+        return True
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:

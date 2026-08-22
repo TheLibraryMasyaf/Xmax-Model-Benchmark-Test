@@ -42,12 +42,31 @@ function mime(file) {
   if (file.endsWith(".webm")) return "video/webm";
   if (/\.jpe?g$/i.test(file)) return "image/jpeg";
   if (file.endsWith(".png")) return "image/png";
+  // Assets in the test database are stored as extension-less ``source.bin``
+  // blobs.  Fall back to content sniffing so the SDK receives the correct
+  // media type instead of application/octet-stream (which it rejects).
+  try {
+    const fd = fs.openSync(file, "r");
+    const head = Buffer.alloc(16);
+    fs.readSync(fd, head, 0, head.length, 0);
+    fs.closeSync(fd);
+    if (head.subarray(4, 8).toString("ascii") === "ftyp") return "video/mp4";
+    if (head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return "video/webm";
+    if (head.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))) return "image/jpeg";
+    if (head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  } catch (error) {
+    // ignore; fall through to octet-stream
+  }
   return "application/octet-stream";
 }
 
 const server = http.createServer((request, response) => {
   let file;
-  if (request.url === "/input") file = config.input_path;
+  // /input.mp4 serves the same media as /input but with a .mp4 suffix so the
+  // SDK's isVideoMediaFile() URL check passes, letting createVideoFileStream
+  // load it over HTTP (blob URLs for large MP4s fail to decode in headless
+  // Chrome with MEDIA_ELEMENT_ERROR: Format error).
+  if (request.url === "/input" || request.url === "/input.mp4") file = config.input_path;
   else if (request.url === "/reference") file = config.reference_path;
   else if (request.url === "/sdk/index.js") file = sdkBundle;
   else {
@@ -63,7 +82,7 @@ const server = http.createServer((request, response) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = server.address().port;
-const browser = await chromium.launch({ headless: config.headed !== true });
+const browser = await chromium.launch({ headless: config.headed !== true, channel: "chrome" });
 try {
   const page = await browser.newPage({ permissions: ["camera", "microphone"] });
   const browserLogs = [];
@@ -189,9 +208,10 @@ try {
       });
       source = { previewStream: ownedStream, destroy: () => ownedStream.getTracks().forEach((track) => track.stop()) };
     } else if (typeof client.realtime.connectMedia === "function") {
-      const response = await fetch("/input");
-      const inputBlob = await response.blob();
-      session = await client.realtime.connectMedia(inputBlob, {
+      // Pass the media URL directly instead of fetching it into a Blob: the
+      // SDK loads URLs over HTTP (crossOrigin=anonymous) which decodes
+      // reliably, whereas Blob-URL playback of MP4 fails in headless Chrome.
+      session = await client.realtime.connectMedia("/input.mp4", {
         model,
         playback: { playbackRate: 1 },
         context,

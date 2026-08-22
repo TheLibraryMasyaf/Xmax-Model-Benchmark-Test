@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -11,6 +13,19 @@ from pathlib import Path
 from typing import Any
 
 from ...errors import ExternalServiceError, MissingDependencyError
+
+# Chrome/WebCodecs can only decode H.264/AAC MP4; HEVC inputs (the default
+# export codec for edited XMAX feeds) must be transcoded before the browser
+# SDK can open a video track from them.
+_H264_TRANSCODE_DIR = "var/realtime-transcodes"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class BrowserRealtimeHarness:
@@ -31,18 +46,109 @@ class BrowserRealtimeHarness:
         self._headed = headed
         self._api_key = api_key
 
+    @staticmethod
+    def _video_codec(path: Path) -> str | None:
+        ffprobe = shutil.which("ffprobe")
+        if ffprobe is None:
+            return None
+        try:
+            completed = subprocess.run(
+                [
+                    ffprobe,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name",
+                    "-of",
+                    "csv=p=0",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if completed.returncode != 0:
+            return None
+        return completed.stdout.strip() or None
+
+    def _ensure_browser_compatible(
+        self, input_path: Path, sha256: str
+    ) -> tuple[Path, bool]:
+        """Return a browser-decodable copy of the input video.
+
+        HEVC/H.265 sources are transcoded to H.264 once and cached by content
+        hash so a 250-case realtime batch does not re-transcode the same feed.
+        Returns ``(path, transcoded)``.
+        """
+
+        codec = self._video_codec(input_path)
+        if codec in {"h264", "avc1", "h264_", None}:
+            # Unknown codec probe (no ffprobe) still goes through as-is; the
+            # harness reports a clear error if the browser rejects it.
+            return input_path, False
+        cache_root = (self._root / _H264_TRANSCODE_DIR).resolve()
+        cache_root.mkdir(parents=True, exist_ok=True)
+        cached = cache_root / f"{sha256}.mp4"
+        if cached.is_file() and cached.stat().st_size:
+            return cached, True
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise MissingDependencyError(
+                "ffmpeg is required to transcode HEVC inputs for realtime generation"
+            )
+        temporary = cached.with_suffix(f".tmp-{uuid.uuid4().hex[:8]}.mp4")
+        try:
+            completed = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    str(input_path),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "23",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-movflags",
+                    "+faststart",
+                    str(temporary),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ExternalServiceError(f"realtime transcode failed: {exc}") from exc
+        if completed.returncode != 0 or not temporary.is_file():
+            raise ExternalServiceError(
+                f"realtime transcode failed: {completed.stderr[-2000:]}"
+            )
+        os.replace(temporary, cached)
+        return cached, True
+
     def run_case(self, case: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         from shutil import which
 
         if which("node") is None:
             raise MissingDependencyError("node is required for realtime generation")
         input_asset = self._repository.get_asset(case["edited_video_asset_id"])
-        input_path = self._artifacts.resolve(input_asset["uri"])
+        input_path = Path(self._artifacts.resolve(input_asset["uri"])).resolve()
+        input_sha256 = input_asset.get("sha256") or _file_sha256(input_path)
+        input_path, _transcoded = self._ensure_browser_compatible(input_path, input_sha256)
         reference_path = None
         for asset_id in case.get("prompt_asset_ids", []):
             asset = self._repository.get_asset(asset_id)
             if asset.get("kind") == "prompt_image":
-                reference_path = self._artifacts.resolve(asset["uri"])
+                reference_path = Path(self._artifacts.resolve(asset["uri"])).resolve()
                 break
         with tempfile.TemporaryDirectory(prefix="xmax-realtime-") as directory:
             temp = Path(directory)
