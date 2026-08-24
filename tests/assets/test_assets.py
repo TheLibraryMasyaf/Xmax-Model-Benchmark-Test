@@ -44,6 +44,11 @@ class FakeProbe:
         return self._facts
 
 
+class PacketTimelineProbe(FakeProbe):
+    def packet_timeline(self, path: Path):
+        return {"duration_s": 8.597, "fps": 16.053}
+
+
 class AssetTestBase(unittest.TestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
@@ -69,6 +74,32 @@ class AssetTestBase(unittest.TestCase):
 
 
 class LocalSourceTests(AssetTestBase):
+    def test_missing_container_duration_uses_packet_timeline(self) -> None:
+        path = Path(self.directory.name) / "recorder.webm"
+        path.write_bytes(b"webm-packets")
+        validator = MediaValidator(
+            probe=PacketTimelineProbe(
+                {
+                    "streams": [
+                        {
+                            "codec_type": "video",
+                            "codec_name": "vp8",
+                            "width": 832,
+                            "height": 1504,
+                            "avg_frame_rate": "1000/1",
+                        }
+                    ],
+                    "format": {"format_name": "matroska,webm"},
+                }
+            )
+        )
+
+        media = validator.validate(path, "result_video")
+
+        self.assertEqual(media["duration_s"], 8.597)
+        self.assertEqual(media["fps"], 16.053)
+        self.assertEqual(media["duration_source"], "packet_timeline")
+
     def test_same_content_keeps_distinct_business_bindings(self) -> None:
         from xmax_test.assets.models import DownloadResult
         from xmax_test.hashing import file_sha256

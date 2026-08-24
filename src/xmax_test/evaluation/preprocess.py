@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..assets.validator import MediaValidator
 from ..errors import ContractError, ValidationError
 from ..hashing import content_hash
 from ..time import utc_now
@@ -18,7 +19,7 @@ from .contact_sheet import ContactSheetBuilder
 from .roi import RoiExtractor
 from .sampling import global_samples, local_high_fps_timestamps
 
-PROCESSOR_VERSION = "0.1.0"
+PROCESSOR_VERSION = "0.1.1"
 
 
 class PreprocessService:
@@ -30,6 +31,7 @@ class PreprocessService:
         frame_extractor: Any = None,
         contact_sheet: ContactSheetBuilder | None = None,
         roi: RoiExtractor | None = None,
+        media_validator: MediaValidator | None = None,
         global_frame_count: int = 8,
         window_before_s: float = 1.0,
         window_after_s: float = 2.0,
@@ -40,6 +42,7 @@ class PreprocessService:
         self._frame_extractor = frame_extractor
         self._contact_sheet = contact_sheet or ContactSheetBuilder()
         self._roi = roi or RoiExtractor()
+        self._media_validator = media_validator or MediaValidator()
         self._global_frame_count = global_frame_count
         self._window_before_s = window_before_s
         self._window_after_s = window_after_s
@@ -60,6 +63,9 @@ class PreprocessService:
         except Exception:
             case = {}
         duration_s = float(asset.get("media", {}).get("duration_s") or 0)
+        if duration_s <= 0:
+            asset = self._recover_missing_duration(asset)
+            duration_s = float(asset.get("media", {}).get("duration_s") or 0)
         if duration_s <= 0:
             raise ValidationError(
                 f"run {run['run_id']} result media has no duration; cannot sample"
@@ -196,6 +202,28 @@ class PreprocessService:
         preprocess["manifest_uri"] = uri
         self._repository.upsert_preprocess_run(preprocess)
         return preprocess
+
+    def _recover_missing_duration(self, asset: dict[str, Any]) -> dict[str, Any]:
+        """Recover derived media facts without modifying the source artifact."""
+
+        try:
+            path = self._artifacts.resolve(asset["uri"])
+            recovered = self._media_validator.validate(path, "result_video")
+        except Exception as exc:
+            raise ValidationError(
+                f"result media duration recovery failed for {asset.get('asset_id')}: {exc}"
+            ) from exc
+        if not recovered.get("duration_s"):
+            return asset
+        enriched = {
+            **asset,
+            "media": {
+                **dict(asset.get("media", {})),
+                **recovered,
+            },
+        }
+        self._repository.upsert_asset(enriched)
+        return self._repository.get_asset(asset["asset_id"])
 
     def _extract_frames(
         self,

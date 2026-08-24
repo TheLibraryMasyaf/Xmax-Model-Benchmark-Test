@@ -61,6 +61,68 @@ class FfprobeMediaProbe:
             raise ValidationError(f"ffprobe produced invalid JSON for {path}") from exc
         return data
 
+    def packet_timeline(self, path: Path) -> dict[str, float]:
+        """Recover duration/FPS when a WebM container omits stream duration.
+
+        MediaRecorder WebM output may have valid VP8 packets but no container
+        duration or average frame rate.  Reading packet timestamps is slower
+        than the normal probe, so it is deliberately used only as a fallback.
+        """
+
+        try:
+            result = subprocess.run(
+                [
+                    self._binary,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_packets",
+                    "-show_entries",
+                    "packet=pts_time,dts_time,duration_time",
+                    "-print_format",
+                    "json",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValidationError(f"ffprobe packet timeline failed for {path}: {exc}") from exc
+        if result.returncode != 0:
+            raise ValidationError(
+                f"ffprobe cannot read packet timeline for {path}: {result.stderr}"
+            )
+        import json
+
+        try:
+            packets = json.loads(result.stdout).get("packets", [])
+        except (AttributeError, json.JSONDecodeError) as exc:
+            raise ValidationError(f"ffprobe produced invalid packet JSON for {path}") from exc
+        timestamps: list[float] = []
+        end_times: list[float] = []
+        for packet in packets:
+            timestamp = _number(packet.get("pts_time"))
+            if timestamp is None:
+                timestamp = _number(packet.get("dts_time"))
+            if timestamp is None:
+                continue
+            timestamps.append(timestamp)
+            packet_duration = _number(packet.get("duration_time")) or 0.0
+            end_times.append(timestamp + max(0.0, packet_duration))
+        if not timestamps:
+            return {}
+        start = min(timestamps)
+        end = max(end_times or timestamps)
+        duration = max(0.0, end - min(0.0, start))
+        if duration <= 0:
+            return {}
+        return {
+            "duration_s": round(duration, 3),
+            "fps": round(len(timestamps) / duration, 3),
+        }
+
 
 class MediaValidator:
     """Validates media and produces Asset-ready metadata."""
@@ -83,7 +145,18 @@ class MediaValidator:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             raise ValidationError(f"media probe error for {path}: {exc}") from exc
-        return self._normalize(data, kind)
+        media = self._normalize(data, kind)
+        if (
+            (kind.endswith("_video") or kind == "result_video")
+            and not media.get("duration_s")
+        ):
+            packet_timeline = getattr(self._probe, "packet_timeline", None)
+            recovered = packet_timeline(path) if callable(packet_timeline) else {}
+            if recovered.get("duration_s"):
+                media["duration_s"] = recovered["duration_s"]
+                media["fps"] = recovered.get("fps") or media.get("fps")
+                media["duration_source"] = "packet_timeline"
+        return media
 
     def probe_sync(self, path: Path) -> dict[str, Any]:
         """Backward-compatible alias used by older call sites."""
@@ -147,5 +220,14 @@ def _duration(value: Any) -> float | None:
         return None
     try:
         return round(float(value), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _number(value: Any) -> float | None:
+    if value in (None, "", "N/A"):
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None

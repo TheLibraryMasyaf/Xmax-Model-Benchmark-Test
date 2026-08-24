@@ -497,6 +497,40 @@ class FusionTests(EvaluationTestBase):
 
 
 class OrchestratorTests(EvaluationTestBase):
+    def test_preprocess_recovers_missing_webm_duration(self) -> None:
+        class RecoveredMediaValidator:
+            def validate(self, path, kind):
+                self.path = path
+                self.kind = kind
+                return {
+                    "duration_s": 8.597,
+                    "duration_source": "packet_timeline",
+                    "fps": 16.053,
+                    "width": 832,
+                    "height": 1504,
+                    "video_codec": "vp8",
+                    "has_audio": False,
+                }
+
+        run = self.seed_run(mode="realtime")
+        self.artifacts.put_bytes("assets", "result-asset/source.bin", b"webm-packets")
+        asset = self.repository.get_asset("result-asset")
+        self.repository.upsert_asset({**asset, "media": {"duration_s": None}})
+        validator = RecoveredMediaValidator()
+        service = PreprocessService(
+            self.repository,
+            self.artifacts,
+            media_validator=validator,
+        )
+
+        preprocess = service.build(run)
+
+        self.assertEqual(preprocess["global_timestamps"][-1], 8.564)
+        recovered = self.repository.get_asset("result-asset")["media"]
+        self.assertEqual(recovered["duration_s"], 8.597)
+        self.assertEqual(recovered["duration_source"], "packet_timeline")
+        self.assertEqual(validator.kind, "result_video")
+
     def test_direct_media_inputs_keep_feed_prompt_reference_and_result_separate(
         self,
     ) -> None:
