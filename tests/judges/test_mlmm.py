@@ -8,7 +8,7 @@ from pathlib import Path
 from xmax_test.errors import EvaluationInfrastructurePausedError, MlmmTimeoutError
 from xmax_test.feedback.normalizer import MlmmHumanNormalizer
 from xmax_test.judges.mlmm.base import MlmmResponse
-from xmax_test.judges.mlmm.judge import MlmmJudge
+from xmax_test.judges.mlmm.judge import MlmmJudge, _batch_output_schema
 from xmax_test.judges.registry import JudgeRegistry
 from xmax_test.judges.worker import JudgeWorker
 
@@ -81,6 +81,16 @@ class FakeProvider:
 
 
 class MlmmBatchTests(unittest.TestCase):
+    def test_batch_schema_uses_natural_dimension_order(self) -> None:
+        schema = _batch_output_schema(
+            {"C10": ["C10.1"], "C2": ["C2.1"], "O1": ["O1.1"]}
+        )
+        branches = schema["properties"]["judgments"]["items"]["oneOf"]
+        self.assertEqual(
+            [branch["properties"]["dimension_id"]["const"] for branch in branches],
+            ["C2", "C10", "O1"],
+        )
+
     def test_one_provider_call_returns_multiple_dimension_judgments(self) -> None:
         provider = FakeProvider()
         judge = MlmmJudge(

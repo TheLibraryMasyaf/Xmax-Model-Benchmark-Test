@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -261,7 +262,11 @@ class MlmmJudge:
 
 
 def _batch_output_schema(criteria_by_dimension: dict[str, list[str]]) -> dict[str, Any]:
-    dimension_ids = sorted(criteria_by_dimension)
+    # Lexicographic ordering puts C10 before C2.  Some MLLMs then follow the
+    # schema branch order for C10, resume the human/numeric sequence at C2,
+    # and emit C10 a second time.  Keep the strict exact-cardinality schema,
+    # but present dimension IDs in their natural benchmark order.
+    dimension_ids = sorted(criteria_by_dimension, key=_natural_dimension_key)
 
     def judgment_schema(dimension_id: str) -> dict[str, Any]:
         criterion_ids = criteria_by_dimension[dimension_id]
@@ -334,6 +339,13 @@ def _batch_output_schema(criteria_by_dimension: dict[str, list[str]]) -> dict[st
         },
         "additionalProperties": False,
     }
+
+
+def _natural_dimension_key(dimension_id: str) -> tuple[str, int, str]:
+    match = re.fullmatch(r"([^0-9]*)([0-9]+)(.*)", dimension_id)
+    if match is None:
+        return (dimension_id, -1, "")
+    return (match.group(1), int(match.group(2)), match.group(3))
 
 
 def _evidence_schema() -> dict[str, Any]:

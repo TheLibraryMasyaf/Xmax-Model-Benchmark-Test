@@ -14,7 +14,7 @@
   "provisional": true,
   "review_after": "first_round_evaluation",
   "source_document": "../XMAX场景化评测标准.md",
-  "source_sha256": "d1289d93adc9ee30ab718bad9c9d5240761fff74fe69b249faa089c6770075da",
+  "source_sha256": "8b2f2064c490c20e074a5c0277285828084bdc7af7d13cf2c31272d0c187dfdd",
   "scoring_method": {
     "criterion_scale": [
       0,
