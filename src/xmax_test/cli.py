@@ -1753,7 +1753,8 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
     controller = composition.realtime_controller(
         run_batch_id=batch_id, model_id=model_id, headed=args.headed
     )
-    run_ids = []
+    run_ids: list[str] = []
+    errors: list[dict[str, Any]] = []
     for case in plan.get("cases", []):
         if case.get("generation_mode") != "realtime":
             continue
@@ -1762,7 +1763,24 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
             if existing:
                 run_ids.append(existing[0]["run_id"])
                 continue
-        run = controller.run_case(case, composition.realtime_case_config(case, headed=args.headed))
+        # A single realtime case must not abort the whole 250-case batch; the
+        # browser SDK or one feed can fail (media quirk, transient network,
+        # RTC hiccup) while the remaining cases are still valid.  Record the
+        # failure and keep draining; re-running with --resume only retries the
+        # missing/error cases.
+        try:
+            run = controller.run_case(case, composition.realtime_case_config(case, headed=args.headed))
+        except Exception as exc:
+            errors.append(
+                {
+                    "code": "xmax.realtime_case_error",
+                    "message": f"realtime case {case['case_id']} failed: {exc}",
+                    "stage": "generate",
+                    "retryable": True,
+                    "entity_id": case["case_id"],
+                }
+            )
+            continue
         run_ids.append(run["run_id"])
     for run_id in run_ids:
         composition.database.set_run_batch_id(run_id, batch_id)
@@ -1773,10 +1791,12 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
         item_entity_type="generation_run",
         item_ids=run_ids,
         producer_stage_run_id="cli-generate-rt",
+        errors=errors,
+        metadata={"realtime_case_errors": len(errors)},
     )
     composition.database.save_batch_manifest(manifest)
-    _emit(args, "generate.realtime", {"run_batch_id": batch_id, "run_ids": run_ids})
-    return 0
+    _emit(args, "generate.realtime", {"run_batch_id": batch_id, "run_ids": run_ids, "errors": errors})
+    return 0 if not errors else EXIT_PARTIAL
 
 
 def cmd_preprocess(composition: Composition, args: argparse.Namespace) -> int:
