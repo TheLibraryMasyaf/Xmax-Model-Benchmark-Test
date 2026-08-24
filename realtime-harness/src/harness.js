@@ -269,11 +269,22 @@ try {
     let trackIndex = 0;
     while ((performance.now() - started) < Number(config.duration_s ?? 3) * 1000) {
       const now = performance.now() - started;
-      if (trackIndex < scripted.length && now >= Number(scripted[trackIndex].at_ms ?? 0)) {
+      while (
+        trackIndex < scripted.length
+        && (performance.now() - started) >= Number(scripted[trackIndex].at_ms ?? 0)
+      ) {
+        const swipeId = scripted[trackIndex].swipe_id ?? null;
+        const phase = scripted[trackIndex].phase ?? "move";
+        if (phase === "start") {
+          events.push({ event: "drag_start", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: performance.now() - started, payload: { swipeId } });
+        }
         const points = scripted[trackIndex].points ?? [];
         let sendResult = "sent";
         try { await session.sendTracks(points); } catch { sendResult = "ignored"; }
-        events.push({ event: "tracks_frame", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: now, contentCoords: points, sendResult });
+        events.push({ event: "tracks_frame", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: performance.now() - started, contentCoords: points, swipeId, phase, sendResult });
+        if (phase === "end") {
+          events.push({ event: "drag_end", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: performance.now() - started, payload: { swipeId } });
+        }
         trackIndex += 1;
       }
       frames.push({ stream: "output", mediaTimeMs: remoteVideo.currentTime * 1000, arrivalTimeMs: performance.now(), width: remoteVideo.videoWidth, height: remoteVideo.videoHeight });

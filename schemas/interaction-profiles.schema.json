@@ -31,6 +31,42 @@
               },
               "additionalProperties": false
             }
+          },
+          "randomization": {
+            "type": "object",
+            "required": [
+              "kind",
+              "seed_scope",
+              "swipe_count",
+              "start_delay_ms",
+              "duration_ms",
+              "gap_ms",
+              "edge_margin",
+              "distance",
+              "curvature",
+              "jitter",
+              "easing"
+            ],
+            "properties": {
+              "kind": {"const": "seeded_user_swipes"},
+              "seed_scope": {"const": "case"},
+              "swipe_count": {"$ref": "#/$defs/integerRange"},
+              "start_delay_ms": {"$ref": "#/$defs/nonNegativeRange"},
+              "duration_ms": {"$ref": "#/$defs/positiveRange"},
+              "gap_ms": {"$ref": "#/$defs/nonNegativeRange"},
+              "end_padding_ms": {"type": "number", "minimum": 0},
+              "edge_margin": {"type": "number", "minimum": 0, "maximum": 0.25},
+              "distance": {"$ref": "#/$defs/unitRange"},
+              "curvature": {"$ref": "#/$defs/signedUnitRange"},
+              "jitter": {"type": "number", "minimum": 0, "maximum": 0.05},
+              "easing": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"enum": ["linear", "ease_in", "ease_out", "ease_in_out"]}
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -43,6 +79,51 @@
       "prefixItems": [
         {"type": "number", "minimum": 0, "maximum": 1},
         {"type": "number", "minimum": 0, "maximum": 1}
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "integerRange": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "integer", "minimum": 1, "maximum": 20},
+        {"type": "integer", "minimum": 1, "maximum": 20}
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "nonNegativeRange": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "minimum": 0},
+        {"type": "number", "minimum": 0}
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "positiveRange": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "exclusiveMinimum": 0},
+        {"type": "number", "exclusiveMinimum": 0}
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "unitRange": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "signedUnitRange": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "minimum": -1, "maximum": 1},
+        {"type": "number", "minimum": -1, "maximum": 1}
       ],
       "minItems": 2,
       "maxItems": 2

@@ -55,6 +55,8 @@ Feed截图是正式输入Asset，必须记录抽帧时间、哈希和来源Feed�
 
 自定义轨迹以约30 FPS发送，单指格式为`[[x,y]]`，多指格式为`[[x1,y1],[x2,y2],...]`。坐标基于`session.media.streamSetting`内容分辨率；执行器负责从测试脚本坐标映射到`[0,width-1] × [0,height-1]`。
 
+默认轨迹Profile为`pointer-track-30fps-v2`：每个Case用自身`case_id`作为稳定种子，生成4–6条方向、距离、时长、间隔、曲率和轻微抖动均不同的单指滑动。同一Case中断续跑可复现，重复Case因ID不同而获得不同轨迹；旧`v1`仅保留给已冻结历史Case。
+
 ## 5. 实时场景互动
 
 适用：召唤、DimX、以摄像头动作或手势驱动角色互动的Prompt。

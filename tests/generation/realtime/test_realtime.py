@@ -54,6 +54,34 @@ class RealtimeTestBase(unittest.TestCase):
 
 
 class RealtimeControllerTests(RealtimeTestBase):
+    @staticmethod
+    def randomized_profile() -> dict:
+        return {
+            "profiles": [
+                {
+                    "profile_id": "random-swipes",
+                    "version": "2",
+                    "event_kind": "pointer_tracks",
+                    "sample_fps": 30,
+                    "segments": [],
+                    "randomization": {
+                        "kind": "seeded_user_swipes",
+                        "seed_scope": "case",
+                        "swipe_count": [4, 6],
+                        "start_delay_ms": [180, 360],
+                        "duration_ms": [260, 520],
+                        "gap_ms": [80, 200],
+                        "end_padding_ms": 180,
+                        "edge_margin": 0.08,
+                        "distance": [0.22, 0.72],
+                        "curvature": [-0.18, 0.18],
+                        "jitter": 0.008,
+                        "easing": ["ease_in_out", "ease_out", "linear"],
+                    },
+                }
+            ]
+        }
+
     def test_versioned_pointer_profile_expands_to_30fps_tracks(self) -> None:
         resolver = InteractionProfileResolver(
             {
@@ -81,6 +109,53 @@ class RealtimeControllerTests(RealtimeTestBase):
         self.assertEqual(expanded["tracks"][0]["points"][0], [0, 0])
         self.assertEqual(expanded["tracks"][-1]["points"][0], [100, 50])
         self.assertEqual(len(expanded["tracks"][0]["points"]), 2)
+
+    def test_seeded_user_swipes_are_varied_reproducible_and_bounded(self) -> None:
+        resolver = InteractionProfileResolver(self.randomized_profile())
+        first = resolver.expand(
+            "random-swipes", width=1280, height=720, seed_key="case-a", duration_ms=3000
+        )["tracks"]
+        repeated = resolver.expand(
+            "random-swipes", width=1280, height=720, seed_key="case-a", duration_ms=3000
+        )["tracks"]
+        different = resolver.expand(
+            "random-swipes", width=1280, height=720, seed_key="case-b", duration_ms=3000
+        )["tracks"]
+
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, different)
+        swipe_ids = list(dict.fromkeys(frame["swipe_id"] for frame in first))
+        self.assertGreaterEqual(len(swipe_ids), 4)
+        self.assertLessEqual(len(swipe_ids), 6)
+        for swipe_id in swipe_ids:
+            frames = [frame for frame in first if frame["swipe_id"] == swipe_id]
+            self.assertEqual(frames[0]["phase"], "start")
+            self.assertEqual(frames[-1]["phase"], "end")
+        self.assertLessEqual(first[-1]["at_ms"], 3000)
+        self.assertTrue(
+            all(
+                0 <= coordinate <= limit
+                for frame in first
+                for point in frame["points"]
+                for coordinate, limit in zip(point, (1280, 720), strict=True)
+            )
+        )
+
+        endpoints = []
+        for swipe_id in swipe_ids:
+            frames = [frame for frame in first if frame["swipe_id"] == swipe_id]
+            start = frames[0]["points"][0]
+            end = frames[-1]["points"][0]
+            endpoints.append((end[0] - start[0], end[1] - start[1]))
+        direction_quadrants = {(dx >= 0, dy >= 0) for dx, dy in endpoints}
+        self.assertGreaterEqual(len(direction_quadrants), 3)
+
+    def test_random_swipe_profile_rejects_reversed_ranges(self) -> None:
+        pack = self.randomized_profile()
+        pack["profiles"][0]["randomization"]["swipe_count"] = [6, 4]
+        resolver = InteractionProfileResolver(pack)
+        with self.assertRaises(ContractError):
+            resolver.expand("random-swipes", width=1280, height=720, seed_key="case-a")
 
     def test_run_case_persists_completed_realtime_run(self) -> None:
         run = self.controller.run_case(self.case())

@@ -185,16 +185,24 @@ class Composition:
         pack = load_config(path, "interaction-profiles.schema.json")
         return InteractionProfileResolver(pack)
 
-    def realtime_case_config(self, case: dict[str, Any], *, headed: bool = False) -> dict[str, Any]:
+    def realtime_case_config(
+        self, case: dict[str, Any], *, headed: bool = False
+    ) -> dict[str, Any]:
         bindings = case.get("api_asset_bindings", {})
         width, height = 1280, 720
+        duration_s = float(case.get("generation_config", {}).get("duration_s") or 3)
         interaction = self.interactions.expand(
-            bindings.get("interaction_profile_id"), width=width, height=height
+            bindings.get("interaction_profile_id"),
+            width=width,
+            height=height,
+            seed_key=case.get("case_id"),
+            duration_ms=duration_s * 1000,
         )
         return {
             "headed": headed,
             "content_width": width,
             "content_height": height,
+            "duration_s": duration_s,
             "tracks": interaction["tracks"],
             "interaction_profile": interaction["profile"],
         }

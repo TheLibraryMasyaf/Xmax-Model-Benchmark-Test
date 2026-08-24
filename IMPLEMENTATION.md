@@ -19,7 +19,7 @@
 | P3 Planning | DONE | 配方解析、模式优先级、Case后缀、成本预览、可插拔组合策略、可修改重复数、Task Batch冻结 | 新玩法通过Recipe/Profile包接入；新分配法通过StrategyRegistry接入 |
 | P3.5 Task Execution | DONE | SQLite原子租约、过期回收、单任务生成→评测→飞书同步→对账、COS真实前检、`evaluation_paused`断点、断点续跑、CLI和全Fake E2E | 真实批量执行仍需预算批准和密钥 |
 | P4 Offline Generation | DONE | 真实REST/COS、Session API边界、状态机、续跑、Fake | Session+RTC的真实RTC传输不内置，常规离线路径使用官方REST |
-| P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、互动Profile、Fake | 需Key的付费真实会话待运行时smoke |
+| P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、版本化互动Profile、按Case稳定种子生成的4–6条随机用户滑动、Fake | 需Key的付费真实会话待运行时smoke |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
 | P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、15模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
 | P8 Evaluation | DONE | Orchestrator、细则级Judge路由与覆盖检查、批次级重复/跨输入评分、硬门槛、双总分、精确批次续跑和结果Schema | R5/R6等仍由实际样本是否具备异常脚本/长会话决定可评性 |

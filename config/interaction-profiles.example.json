@@ -1,16 +1,28 @@
 {
   "$schema": "../schemas/interaction-profiles.schema.json",
   "profile_pack_id": "replace-with-your-profile-pack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "profiles": [
     {
-      "profile_id": "pointer-track-30fps-v1",
-      "version": "0.1.0",
+      "profile_id": "pointer-track-30fps-v2",
+      "version": "0.2.0",
       "event_kind": "pointer_tracks",
       "sample_fps": 30,
-      "segments": [
-        {"start_ms": 500, "duration_ms": 1000, "from": [0.25, 0.5], "to": [0.75, 0.5], "fingers": 1}
-      ]
+      "segments": [],
+      "randomization": {
+        "kind": "seeded_user_swipes",
+        "seed_scope": "case",
+        "swipe_count": [4, 6],
+        "start_delay_ms": [180, 360],
+        "duration_ms": [260, 520],
+        "gap_ms": [80, 200],
+        "end_padding_ms": 180,
+        "edge_margin": 0.08,
+        "distance": [0.22, 0.72],
+        "curvature": [-0.18, 0.18],
+        "jitter": 0.008,
+        "easing": ["ease_in_out", "ease_out", "linear"]
+      }
     }
   ]
 }

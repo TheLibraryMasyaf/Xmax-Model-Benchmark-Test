@@ -81,11 +81,13 @@ RTC日志约两秒一次，只适合趋势；冻结、重复帧和短时响应�
 
 - 有`remoteContainer`时可启用`render.drag.enabled`，用`onStart/onEnd`记录交互边界。
 - 自动化或自定义区域调用`sendTracks()`；互动期间约以30 FPS发送当前全部触点。
+- 默认`pointer-track-30fps-v2`按Case ID生成4–6条可复现的单指滑动；不同重复Case使用不同种子，同一Case续跑保持轨迹不变。
+- 随机滑动覆盖不同方向、距离、时长、间隔、速度曲线、轻微弧线和手部微抖，并保留画面边缘安全区；它只模拟拖动，不混入点击或长按。
 - 单指是`[[x,y]]`，多指是`[[x1,y1],[x2,y2],...]`。
 - 坐标基于`session.media.streamSetting`的内容分辨率，不是DOM容器尺寸；范围从`[0,0]`到`[width-1,height-1]`。
 - 轨迹不保证每次送达，且没有运行中的任务时会被忽略，所以必须保存发送事实并从输出逐帧数据测量实际响应。
 
-事件格式至少包含`context_set`、`task_start`、`drag_start`、`tracks_frame`、`drag_end`和`task_stop`。每个`tracks_frame`保存屏幕坐标、映射后内容坐标、全部触点、发送结果以及输出首次对应变化时间。
+事件格式至少包含`context_set`、`task_start`、`drag_start`、`tracks_frame`、`drag_end`和`task_stop`。每个随机滑动都有稳定`swipe_id`；每个`tracks_frame`保存轨迹阶段、映射后内容坐标、全部触点、发送结果以及输出首次对应变化时间。Harness会补发当前调度周期内全部到期帧，避免短滑动因单次循环只发一帧而被截断。
 
 ## 7. 音频
 
