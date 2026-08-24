@@ -7,7 +7,10 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from xmax_test.errors import EvaluationBudgetPausedError
+from xmax_test.errors import (
+    EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
+)
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 from xmax_test.tasks import TaskAllocator, TaskWorker
 from xmax_test.time import FixedClock
@@ -165,6 +168,30 @@ class TaskTests(unittest.TestCase):
             self.repository.test_task_summary(self.batch["task_batch_id"])["counts"],
             {"pending": 2},
         )
+
+    def test_infrastructure_pause_stops_batch_after_one_task(self) -> None:
+        class BrokenEvaluation:
+            def __init__(self):
+                self.available = False
+
+            def __call__(self, task):
+                if not self.available:
+                    raise EvaluationInfrastructurePausedError("provider offline")
+                return {"run_id": f"run-{task['case_id']}"}
+
+        runtime = BrokenEvaluation()
+        worker = TaskWorker(self.repository, runtime)
+        summary = worker.run_batch(
+            self.batch["task_batch_id"], lease_owner="worker-a"
+        )
+
+        self.assertEqual(len(summary["processed_task_ids"]), 1)
+        self.assertEqual(summary["counts"], {"evaluation_paused": 1, "pending": 1})
+        self.assertEqual(summary["evaluation_paused"][0]["pause_scope"], "evaluation_batch")
+
+        runtime.available = True
+        resumed = worker.run_batch(self.batch["task_batch_id"], lease_owner="worker-b")
+        self.assertEqual(resumed["counts"], {"completed": 2})
 
 
 if __name__ == "__main__":

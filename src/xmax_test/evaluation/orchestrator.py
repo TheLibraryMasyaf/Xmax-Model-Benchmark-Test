@@ -13,7 +13,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..errors import ContractError, EvaluationBudgetPausedError
+from ..errors import (
+    ContractError,
+    EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
+)
 from ..hashing import content_hash
 from ..time import utc_now
 from .aggregation import aggregate_evaluation_results
@@ -84,14 +88,17 @@ class EvaluationOrchestrator:
                 result = self.evaluate_run(run, evaluation_batch_id, preprocess=preprocess)
                 results.append(result)
             except Exception as exc:
-                if isinstance(exc, EvaluationBudgetPausedError):
+                if isinstance(
+                    exc,
+                    (EvaluationBudgetPausedError, EvaluationInfrastructurePausedError),
+                ):
                     raise
                 errors.append(
                     {
-                        "code": "xmax.contract_error",
+                        "code": getattr(exc, "code", "xmax.contract_error"),
                         "message": f"{run.get('run_id')}: {exc}",
                         "stage": "evaluate",
-                        "retryable": False,
+                        "retryable": bool(getattr(exc, "retryable", False)),
                         "entity_id": run.get("run_id"),
                     }
                 )

@@ -3,7 +3,11 @@ from __future__ import annotations
 import threading
 import unittest
 
-from xmax_test.errors import EvaluationBudgetPausedError, RealtimeUnavailableError
+from xmax_test.errors import (
+    EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
+    RealtimeUnavailableError,
+)
 from xmax_test.pipeline.streaming import StreamingPipelineCoordinator
 
 
@@ -171,6 +175,38 @@ class StreamingPipelineTests(unittest.TestCase):
         self.assertEqual(len(outcome.errors["evaluate"]), 1)
         self.assertEqual(
             outcome.errors["evaluate"][0]["code"], "xmax.evaluation_budget_paused"
+        )
+        self.assertEqual(outcome.metadata["evaluation_gate"]["deferred_count"], 6)
+
+    def test_infrastructure_pause_defers_evaluation_but_generation_keeps_draining(self) -> None:
+        generated: list[str] = []
+        evaluated: list[str] = []
+
+        def generate(case):
+            generated.append(case["case_id"])
+            return {"run_id": f"run-{case['case_id']}", "status": "completed"}
+
+        def preprocess(run):
+            return {"run_id": run["run_id"], "preprocess_id": f"prep-{run['run_id']}"}
+
+        def evaluate(run, preprocess):
+            evaluated.append(run["run_id"])
+            raise EvaluationInfrastructurePausedError("provider network unavailable")
+
+        outcome = StreamingPipelineCoordinator(
+            generate_case=generate,
+            preprocess_run=preprocess,
+            evaluate_run=evaluate,
+            queue_size=1,
+        ).run([{"case_id": str(index)} for index in range(6)])
+
+        self.assertEqual(generated, [str(index) for index in range(6)])
+        self.assertEqual(evaluated, ["run-0"])
+        self.assertEqual(len(outcome.preprocess), 6)
+        self.assertEqual(len(outcome.errors["evaluate"]), 1)
+        self.assertEqual(
+            outcome.errors["evaluate"][0]["code"],
+            "xmax.evaluation_infrastructure_paused",
         )
         self.assertEqual(outcome.metadata["evaluation_gate"]["deferred_count"], 6)
 

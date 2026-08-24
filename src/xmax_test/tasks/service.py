@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ..errors import EvaluationBudgetPausedError
+from ..errors import EvaluationBudgetPausedError, EvaluationInfrastructurePausedError
 from ..hashing import content_hash
 from ..time import utc_now
 
@@ -104,6 +104,7 @@ class TaskWorker:
         # Run transport/dependency checks before claiming even one task.  A
         # batch-wide infrastructure failure must leave every task untouched,
         # rather than manufacturing hundreds of per-Case error rows.
+        self._repository.requeue_evaluation_infrastructure_paused_tasks(task_batch_id)
         if self._evaluation_available():
             self._repository.requeue_evaluation_paused_tasks(task_batch_id)
         self._preflight(self._repository.list_test_tasks(task_batch_id=task_batch_id))
@@ -124,6 +125,8 @@ class TaskWorker:
                 errors.append(result.get("last_error") or {"task_id": task["task_id"]})
             elif result["status"] == "evaluation_paused":
                 paused.append(result.get("last_error") or {"task_id": task["task_id"]})
+                if (result.get("last_error") or {}).get("pause_scope") == "evaluation_batch":
+                    break
         return {
             **self._repository.test_task_summary(task_batch_id),
             "processed_task_ids": processed,
@@ -153,9 +156,14 @@ class TaskWorker:
                 "retryable": bool(getattr(exc, "retryable", True)),
                 "task_id": task["task_id"],
             }
+            if isinstance(exc, EvaluationInfrastructurePausedError):
+                error["pause_scope"] = "evaluation_batch"
             status = (
                 "evaluation_paused"
-                if isinstance(exc, EvaluationBudgetPausedError)
+                if isinstance(
+                    exc,
+                    (EvaluationBudgetPausedError, EvaluationInfrastructurePausedError),
+                )
                 else "error"
             )
             return self._repository.update_test_task(

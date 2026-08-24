@@ -11,18 +11,30 @@ import csv
 import json
 import mimetypes
 import os
+import random
 import socket
 import threading
+import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
 from ...errors import (
     ConfigError,
     EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
     ExternalServiceError,
+    MlmmAuthenticationError,
+    MlmmInvalidRequestError,
+    MlmmQuotaSafetyError,
+    MlmmRateLimitError,
     MlmmTimeoutError,
+    MlmmTransportError,
 )
 from .base import MlmmResponse
 
@@ -47,6 +59,12 @@ class OpenAiCompatibleProvider:
         image_options: dict[str, Any] | None = None,
         max_base64_bytes: int = 10_000_000,
         budget_gate: Any = None,
+        transport_max_retries: int = 2,
+        retry_backoff_seconds: float = 1.0,
+        retry_backoff_max_seconds: float = 8.0,
+        retry_jitter_seconds: float = 0.25,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        random_fn: Callable[[float, float], float] = random.uniform,
     ) -> None:
         credentials = _read_key_value_csv(credential_csv) if credential_csv else {}
         self._endpoint = _chat_completions_endpoint(
@@ -69,6 +87,22 @@ class OpenAiCompatibleProvider:
         self._image_options = dict(image_options or {})
         self._max_base64_bytes = int(max_base64_bytes)
         self._budget_gate = budget_gate
+        self._transport_max_retries = int(transport_max_retries)
+        self._retry_backoff_seconds = float(retry_backoff_seconds)
+        self._retry_backoff_max_seconds = float(retry_backoff_max_seconds)
+        self._retry_jitter_seconds = float(retry_jitter_seconds)
+        self._sleep = sleep_fn
+        self._random = random_fn
+        if self._transport_max_retries < 0:
+            raise ConfigError("transport_max_retries must be at least zero")
+        if self._retry_backoff_seconds < 0 or self._retry_backoff_max_seconds < 0:
+            raise ConfigError("MLLM retry backoff values cannot be negative")
+        if self._retry_backoff_max_seconds < self._retry_backoff_seconds:
+            raise ConfigError(
+                "retry_backoff_max_seconds must be greater than or equal to retry_backoff_seconds"
+            )
+        if self._retry_jitter_seconds < 0:
+            raise ConfigError("retry_jitter_seconds cannot be negative")
         self._paid_model = budget_gate.policy.model if budget_gate is not None else None
         if self._paid_model is not None:
             if configured_models.count(self._paid_model) != 1:
@@ -122,9 +156,18 @@ class OpenAiCompatibleProvider:
             **self._extra_headers,
         }
         attempted: list[str] = []
+        transport_attempts: list[dict[str, Any]] = []
+        transport_failures: dict[str, int] = {}
         while True:
             model_index, current_model = self._current_model()
-            attempted.append(current_model)
+            if not attempted or attempted[-1] != current_model:
+                attempted.append(current_model)
+            transport_attempts.append(
+                {
+                    "model": current_model,
+                    "attempt": transport_failures.get(current_model, 0) + 1,
+                }
+            )
             paid_reservation = None
             if current_model == self._paid_model:
                 paid_reservation = self._budget_gate.reserve_paid_call()
@@ -157,44 +200,48 @@ class OpenAiCompatibleProvider:
                         raw_text = response.read().decode("utf-8")
                 finally:
                     socket.setdefaulttimeout(previous_socket_timeout)
-                if _is_free_tier_exhausted(200, raw_text):
+                failure = _classify_provider_error(200, raw_text, {})
+                if failure is not None:
                     if paid_reservation is not None:
                         self._budget_gate.release(
                             paid_reservation["reservation_id"],
-                            reason="provider rejected paid fallback under FreeTierOnly",
+                            reason=f"provider returned {failure.kind} in a success envelope",
                         )
-                        state = self._budget_gate.pause(
-                            "qwen3-vl-flash still has FreeTierOnly enabled in Alibaba console"
-                        )
-                        raise self._budget_gate._paused_error(state)
-                    if self._advance_model(model_index):
-                        continue
-                    raise ExternalServiceError(
-                        "all configured MLLM models exhausted their free tier"
+                    self._handle_provider_failure(
+                        failure,
+                        model_index=model_index,
+                        current_model=current_model,
+                        paid_reservation=paid_reservation,
+                        transport_failures=transport_failures,
                     )
+                    continue
                 break
             except urllib.error.HTTPError as exc:
-                error_body = exc.read().decode("utf-8", errors="replace")
+                try:
+                    error_body = exc.read().decode("utf-8", errors="replace")
+                finally:
+                    exc.close()
+                failure = _classify_provider_error(exc.code, error_body, exc.headers or {})
                 if paid_reservation is not None:
                     self._budget_gate.release(
                         paid_reservation["reservation_id"],
                         reason=f"provider rejected request with HTTP {exc.code}",
                     )
-                if _is_free_tier_exhausted(exc.code, error_body):
-                    if current_model == self._paid_model:
-                        state = self._budget_gate.pause(
-                            "qwen3-vl-flash still has FreeTierOnly enabled in Alibaba console"
-                        )
-                        raise self._budget_gate._paused_error(state) from exc
-                    if self._advance_model(model_index):
-                        continue
-                    raise ExternalServiceError(
-                        "all configured MLLM models exhausted their free tier"
-                    ) from exc
-                raise ExternalServiceError(
-                    f"MLLM API request failed with HTTP {exc.code}: "
-                    f"{_safe_error_summary(error_body)}"
-                ) from exc
+                try:
+                    self._handle_provider_failure(
+                        failure
+                        or _ProviderFailure(
+                            "provider_error",
+                            _safe_error_summary(error_body),
+                        ),
+                        model_index=model_index,
+                        current_model=current_model,
+                        paid_reservation=paid_reservation,
+                        transport_failures=transport_failures,
+                    )
+                except Exception as classified:
+                    raise classified from exc
+                continue
             except EvaluationBudgetPausedError:
                 raise
             except (TimeoutError, socket.timeout) as exc:
@@ -203,8 +250,16 @@ class OpenAiCompatibleProvider:
                         paid_reservation["reservation_id"],
                         reason="paid request timed out; billing outcome is ambiguous",
                     )
+                elif self._retry_free_transport(
+                    current_model,
+                    retry_after=None,
+                    transport_failures=transport_failures,
+                ):
+                    continue
                 raise MlmmTimeoutError(
-                    f"MLLM API request exceeded the {self._timeout}s timeout: {exc}"
+                    f"MLLM API request exceeded the {self._timeout}s timeout after "
+                    f"{transport_failures.get(current_model, 0) + 1} attempts on "
+                    f"model={current_model}: {exc}"
                 ) from exc
             except urllib.error.URLError as exc:
                 if paid_reservation is not None:
@@ -221,14 +276,34 @@ class OpenAiCompatibleProvider:
                         paid_reservation["reservation_id"],
                         reason="network failure before a confirmed provider response",
                     )
-                raise ExternalServiceError(f"MLLM API request failed: {exc}") from exc
+                elif self._retry_free_transport(
+                    current_model,
+                    retry_after=None,
+                    transport_failures=transport_failures,
+                ):
+                    continue
+                raise MlmmTransportError(
+                    "MLLM network failure exhausted same-model retries: "
+                    f"model={current_model} error={exc}"
+                ) from exc
             except OSError as exc:
                 if paid_reservation is not None:
                     self._budget_gate.release(
                         paid_reservation["reservation_id"],
                         reason="local transport failure before a confirmed provider response",
                     )
-                raise ExternalServiceError(f"MLLM API request failed: {exc}") from exc
+                elif self._retry_free_transport(
+                    current_model,
+                    retry_after=None,
+                    transport_failures=transport_failures,
+                ):
+                    continue
+                raise MlmmTransportError(
+                    "MLLM local transport failure exhausted same-model retries: "
+                    f"model={current_model} error={exc}"
+                ) from exc
+        paid_call = paid_reservation is not None
+        paid_reservation_finalized = False
         try:
             envelope = json.loads(raw_text)
             usage = envelope.get("usage", {})
@@ -243,14 +318,20 @@ class OpenAiCompatibleProvider:
                         paid_reservation["reservation_id"],
                         reason="paid response omitted billable token usage",
                     )
+                paid_reservation_finalized = True
             message = envelope["choices"][0]["message"]["content"]
             payload = json.loads(message) if isinstance(message, str) else message
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            if paid_reservation is not None:
-                self._budget_gate.forfeit(
-                    paid_reservation["reservation_id"],
-                    reason="paid response was incompatible and billing outcome is ambiguous",
-                )
+            if paid_call:
+                if paid_reservation is not None and not paid_reservation_finalized:
+                    self._budget_gate.forfeit(
+                        paid_reservation["reservation_id"],
+                        reason="paid response was incompatible and billing outcome is ambiguous",
+                    )
+                raise EvaluationInfrastructurePausedError(
+                    "paid MLLM response was incompatible after a billable request; "
+                    "automatic paid retry is disabled"
+                ) from exc
             raise ExternalServiceError(
                 f"MLLM API returned an incompatible response: {exc}"
             ) from exc
@@ -262,6 +343,7 @@ class OpenAiCompatibleProvider:
             usage=envelope.get("usage", {}),
             metadata={
                 "model_fallback_attempts": attempted,
+                "transport_attempts": transport_attempts,
                 "paid_fallback": current_model == self._paid_model,
                 "input_mode": input_mode,
                 "media_roles": [item.get("role", "unknown") for item in (media_inputs or [])]
@@ -269,6 +351,97 @@ class OpenAiCompatibleProvider:
                 else [],
             },
         )
+
+    def _handle_provider_failure(
+        self,
+        failure: _ProviderFailure,
+        *,
+        model_index: int,
+        current_model: str,
+        paid_reservation: dict[str, Any] | None,
+        transport_failures: dict[str, int],
+    ) -> None:
+        if failure.kind == "free_tier_exhausted":
+            if current_model == self._paid_model:
+                state = self._budget_gate.pause(
+                    "paid fallback still has 'use free tier only' enabled in the provider console"
+                )
+                raise self._budget_gate._paused_error(state)
+            if self._advance_model(model_index):
+                return
+            raise MlmmQuotaSafetyError(
+                "all configured MLLM models exhausted their confirmed free tier; "
+                "no untried fallback remains"
+            )
+        if failure.kind == "quota_review_required":
+            if current_model == self._paid_model:
+                state = self._budget_gate.pause(
+                    "paid fallback returned an unrecognized quota/account-balance response: "
+                    f"{failure.summary}"
+                )
+                raise self._budget_gate._paused_error(state)
+            raise MlmmQuotaSafetyError(
+                "MLLM evaluation paused on an unrecognized quota-like response; "
+                "no model rotation or paid authorization was attempted: "
+                f"model={current_model} error={failure.summary}"
+            )
+        if failure.kind == "authentication_failed":
+            raise MlmmAuthenticationError(
+                f"MLLM authentication/authorization failed for model={current_model}: "
+                f"{failure.summary}"
+            )
+        if failure.kind == "invalid_request":
+            raise MlmmInvalidRequestError(
+                f"MLLM request was rejected for model={current_model}: {failure.summary}"
+            )
+        if failure.kind in {"rate_limited", "service_unavailable", "transport"}:
+            # Paid attempts are never retried automatically: even an explicit
+            # rejection can be difficult to reconcile against the provider's
+            # external account ledger.  The reservation was already released
+            # by the caller for an HTTP rejection.
+            if paid_reservation is None and self._retry_free_transport(
+                current_model,
+                retry_after=failure.retry_after_seconds,
+                transport_failures=transport_failures,
+            ):
+                return
+            error_type = (
+                MlmmRateLimitError
+                if failure.kind == "rate_limited"
+                else MlmmTransportError
+            )
+            raise error_type(
+                f"MLLM {failure.kind} exhausted same-model retries: "
+                f"model={current_model} error={failure.summary}"
+            )
+        raise ExternalServiceError(
+            f"MLLM API returned an unclassified provider error for model={current_model}: "
+            f"{failure.summary}"
+        )
+
+    def _retry_free_transport(
+        self,
+        model: str,
+        *,
+        retry_after: float | None,
+        transport_failures: dict[str, int],
+    ) -> bool:
+        failure_count = int(transport_failures.get(model, 0))
+        if model == self._paid_model or failure_count >= self._transport_max_retries:
+            return False
+        delay = self._retry_delay(failure_count, retry_after=retry_after)
+        transport_failures[model] = failure_count + 1
+        self._sleep(delay)
+        return True
+
+    def _retry_delay(self, failure_count: int, *, retry_after: float | None) -> float:
+        if retry_after is not None:
+            return min(max(0.0, retry_after), self._retry_backoff_max_seconds)
+        exponential = min(
+            self._retry_backoff_seconds * (2**failure_count),
+            self._retry_backoff_max_seconds,
+        )
+        return exponential + self._random(0.0, self._retry_jitter_seconds)
 
     def _direct_media_content(self, media_inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         content: list[dict[str, Any]] = []
@@ -347,6 +520,117 @@ class OpenAiCompatibleProvider:
             return True
 
 
+@dataclass(frozen=True)
+class _ProviderFailure:
+    kind: str
+    summary: str
+    retry_after_seconds: float | None = None
+
+
+def _classify_provider_error(
+    status: int,
+    body: str,
+    headers: Mapping[str, Any],
+) -> _ProviderFailure | None:
+    """Normalize provider/gateway variants without granting billing authority.
+
+    Only a confirmed free-tier signal may rotate models.  Other quota-like
+    responses fail closed so an operator/monitor can inspect the new response
+    before the rule corpus is extended.
+    """
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        payload = None
+    if status < 400 and not (isinstance(payload, dict) and payload.get("error")):
+        return None
+
+    sources: list[dict[str, Any]] = []
+    if isinstance(payload, dict):
+        sources.append(payload)
+        error = payload.get("error")
+        if isinstance(error, dict):
+            sources.insert(0, error)
+    codes = " ".join(
+        str(source.get(key) or "")
+        for source in sources
+        for key in ("code", "type")
+    ).lower()
+    messages = " ".join(str(source.get("message") or "") for source in sources).lower()
+    lowered = f"{codes} {messages} {body.lower()}"
+    summary = _safe_error_summary(body)
+
+    confirmed_free_tier = (
+        "allocationquota.freetieronly" in lowered
+        or "free_quota_exhausted" in codes
+        or "free tier of the model has been exhausted" in lowered
+        or (
+            any(phrase in lowered for phrase in ("free quota exhausted", "free quota is exhausted"))
+            and "free tier only" in lowered
+        )
+    )
+    if confirmed_free_tier:
+        return _ProviderFailure("free_tier_exhausted", summary)
+
+    if status == 429 or any(
+        token in codes for token in ("throttl", "rate_limit", "ratelimit", "too_many_requests")
+    ):
+        return _ProviderFailure(
+            "rate_limited",
+            summary,
+            retry_after_seconds=_retry_after_seconds(headers),
+        )
+
+    quota_like = any(
+        token in lowered
+        for token in (
+            "quota",
+            "insufficient funds",
+            "add funds",
+            "account balance",
+            "credit exhausted",
+            "credits exhausted",
+        )
+    )
+    if quota_like:
+        return _ProviderFailure("quota_review_required", summary)
+
+    if status in {401, 403} or any(
+        token in codes
+        for token in ("unauthorized", "authentication", "invalid_api_key", "access_denied")
+    ):
+        return _ProviderFailure("authentication_failed", summary)
+
+    if status == 408 or status >= 500:
+        return _ProviderFailure(
+            "service_unavailable",
+            summary,
+            retry_after_seconds=_retry_after_seconds(headers),
+        )
+
+    if 400 <= status < 500:
+        return _ProviderFailure("invalid_request", summary)
+
+    return _ProviderFailure("provider_error", summary)
+
+
+def _retry_after_seconds(headers: Mapping[str, Any]) -> float | None:
+    value = headers.get("Retry-After") or headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(str(value).strip()))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(str(value))
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
 def _read_key_value_csv(path: str | Path) -> dict[str, str]:
     csv_path = Path(path)
     if not csv_path.is_file():
@@ -370,31 +654,8 @@ def _chat_completions_endpoint(value: str) -> str:
 
 
 def _is_free_tier_exhausted(status: int, body: str) -> bool:
-    del status  # Alibaba's structured error code is authoritative across gateways.
-    lowered = body.lower()
-    if "allocationquota.freetieronly" in lowered:
-        return True
-    if "free tier of the model has been exhausted" in lowered:
-        return True
-    # The Alibaba gateway also reports the same condition as
-    # ``insufficient_quota`` with the advisory "Free quota exhausted ... add
-    # funds or disable the 'use free tier only' mode".  The "free quota" /
-    # "free tier only" phrasing is what distinguishes it from a genuinely
-    # depleted paid account, so treat it as free-tier exhaustion too.
-    if "free quota exhausted" in lowered and "free tier only" in lowered:
-        return True
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(payload, dict):
-        return False
-    error = payload.get("error")
-    sources = [payload, error] if isinstance(error, dict) else [payload]
-    return any(
-        str(source.get("code") or "").lower() == "allocationquota.freetieronly"
-        for source in sources
-    )
+    failure = _classify_provider_error(status, body, {})
+    return failure is not None and failure.kind == "free_tier_exhausted"
 
 
 def _safe_error_summary(body: str) -> str:

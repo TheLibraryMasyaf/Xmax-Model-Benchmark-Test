@@ -10,7 +10,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from xmax_test.benchmark import load_benchmark_contract
-from xmax_test.errors import ContractError
+from xmax_test.errors import ContractError, EvaluationInfrastructurePausedError
 from xmax_test.evaluation.aggregation import aggregate_evaluation_results
 from xmax_test.evaluation.fusion import JudgmentFusion
 from xmax_test.evaluation.gates import HardGateEvaluator
@@ -632,6 +632,20 @@ class OrchestratorTests(EvaluationTestBase):
         )
         self.assertEqual(manifest["entity_type"], "evaluation_batch")
         self.assertTrue(manifest["metadata"]["aggregate"]["criterion_summary"])
+
+    def test_infrastructure_pause_stops_batch_without_per_run_errors(self) -> None:
+        runs = [self.seed_run(case_id="case-a"), self.seed_run(case_id="case-b")]
+        orchestrator = self.orchestrator()
+        calls = []
+
+        def pause(run, evaluation_batch_id, *, preprocess=None):
+            calls.append(run["run_id"])
+            raise EvaluationInfrastructurePausedError("provider unavailable")
+
+        orchestrator.evaluate_run = pause
+        with self.assertRaises(EvaluationInfrastructurePausedError):
+            orchestrator.evaluate_runs(runs)
+        self.assertEqual(calls, ["run-case-a"])
 
     def test_evaluation_result_passes_schema(self) -> None:
         self.registry.register(MetricJudge("C1", 1.0))

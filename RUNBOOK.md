@@ -91,6 +91,8 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 
 预算未授权、达到99元上限或末位仍被百炼`FreeTierOnly`拦截时，CLI返回退出码6和`xmax.evaluation_budget_paused`。评测会在所有Judge前关闭，`evaluation_paused`任务保留已有Run/Preprocess；生成可继续，评分同步和报告不继续。充值后每次都必须重新执行`authorize --recharge-confirmed`，它会开启新的本地99元授权周期。该数字是按百炼返回Token usage计算的本项目保守估算，不包含同一阿里云账户下其他程序的消费；仍应同时使用百炼账户余额/预算告警。
 
+如果返回`xmax.evaluation_infrastructure_paused`、`xmax.mlmm_rate_limited`、`xmax.mlmm_transport_exhausted`、`xmax.mlmm_authentication_failed`或`xmax.mlmm_quota_review_required`，这是评测基础设施暂停，不是付费授权请求。先核对脱敏错误、网络或凭据，修复后用原命令`--resume`；不要因为这类错误执行`evaluation-budget authorize`。只有已验证的免费额度错误会切到下一免费模型，未知quota会安全停批。
+
 显式设`execution_mode=batch`可恢复“整批生成完再预处理/评测”。只列出单阶段时，无论该字段为何都不会暗中执行下游。
 
 小批次可在`filters`中使用`feed_limit`、`prompt_limit`、`feed_asset_ids`或`prompt_record_numbers`。Feed和Prompt先按飞书业务编号、再按稳定ID排序后截取；过滤条件属于计划哈希，不能复用到全量计划。仓库提供`config/run-smoke-5x5.example.json`作为前5个Feed × 前5个Prompt、每组合1次的安全模板。它默认`dry_run=true`；复制为本轮请求、完成`context-check`和预算确认后才能改为false。

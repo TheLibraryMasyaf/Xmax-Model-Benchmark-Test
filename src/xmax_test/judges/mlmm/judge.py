@@ -11,7 +11,9 @@ from jsonschema import Draft202012Validator
 
 from ...errors import (
     EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
     ExternalServiceError,
+    MlmmInvalidRequestError,
     MlmmTimeoutError,
     ValidationError,
 )
@@ -106,6 +108,11 @@ class MlmmJudge:
                     key=lambda error: list(error.path),
                 )
                 if errors:
+                    if response.metadata.get("paid_fallback") is True:
+                        raise EvaluationInfrastructurePausedError(
+                            "paid MLLM output failed local schema validation; "
+                            "automatic paid retry is disabled"
+                        )
                     raise ValidationError(f"MLLM output schema error: {errors[0].message}")
                 self._log_event(
                     "request_succeeded",
@@ -130,7 +137,18 @@ class MlmmJudge:
                 )
                 last_error = exc
                 response = None
-                if isinstance(exc, (EvaluationBudgetPausedError, MlmmTimeoutError)):
+                # Provider-level transport retries are already bounded.  A
+                # batch pause, timeout or permanent request rejection must not
+                # be multiplied again by the Judge's schema-output retry loop.
+                if isinstance(
+                    exc,
+                    (
+                        EvaluationBudgetPausedError,
+                        EvaluationInfrastructurePausedError,
+                        MlmmInvalidRequestError,
+                        MlmmTimeoutError,
+                    ),
+                ):
                     raise
         if response is None:
             raise ExternalServiceError(

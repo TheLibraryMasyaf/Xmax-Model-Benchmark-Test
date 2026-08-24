@@ -161,7 +161,55 @@ class EvaluationBudgetPausedError(ApprovalRequiredError):
     stage = "evaluate"
 
 
-class MlmmTimeoutError(ExternalServiceError):
+class EvaluationInfrastructurePausedError(ExternalServiceError):
+    """Evaluation stopped globally after a bounded provider-side failure.
+
+    This is distinct from the paid-budget gate: retrying does not require a
+    recharge authorization, but the operator should first verify that the
+    provider/network condition has recovered.  Orchestrators must treat it as
+    a batch pause rather than manufacturing one error per remaining Case.
+    """
+
+    code = "xmax.evaluation_infrastructure_paused"
+    retryable = True
+    stage = "evaluate"
+
+
+class MlmmTransportError(EvaluationInfrastructurePausedError):
+    """A retryable MLLM transport failure exhausted provider-level retries."""
+
+    code = "xmax.mlmm_transport_exhausted"
+
+
+class MlmmRateLimitError(MlmmTransportError):
+    """The provider kept rate-limiting the same model after bounded backoff."""
+
+    code = "xmax.mlmm_rate_limited"
+
+
+class MlmmAuthenticationError(EvaluationInfrastructurePausedError):
+    """Provider credentials or account authorization are invalid."""
+
+    code = "xmax.mlmm_authentication_failed"
+    retryable = False
+
+
+class MlmmQuotaSafetyError(EvaluationInfrastructurePausedError):
+    """A quota-like response was not safe to interpret as free-tier exhaustion."""
+
+    code = "xmax.mlmm_quota_review_required"
+    retryable = False
+
+
+class MlmmInvalidRequestError(ExternalServiceError):
+    """The provider rejected the business input; retrying it unchanged is unsafe."""
+
+    code = "xmax.mlmm_invalid_request"
+    retryable = False
+    stage = "evaluate"
+
+
+class MlmmTimeoutError(EvaluationInfrastructurePausedError):
     """One MLLM request reached its bounded transport timeout."""
 
     code = "xmax.mlmm_timeout"

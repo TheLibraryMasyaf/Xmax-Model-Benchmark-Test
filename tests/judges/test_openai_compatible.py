@@ -9,7 +9,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from xmax_test.errors import (
+    EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
+    MlmmAuthenticationError,
+    MlmmInvalidRequestError,
+    MlmmQuotaSafetyError,
+    MlmmRateLimitError,
+    MlmmTransportError,
+)
 from xmax_test.judges.mlmm.openai_compatible import OpenAiCompatibleProvider
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "provider_errors"
 
 
 class _Response:
@@ -289,6 +300,7 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
             endpoint="https://example.test/compatible-mode/v1",
             model="qwen3-vl-plus",
             api_key_env="TEST_QWEN_KEY",
+            transport_max_retries=0,
         )
         rate_limit = urllib.error.HTTPError(
             "https://example.test",
@@ -299,7 +311,7 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
         )
         with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
             with mock.patch("urllib.request.urlopen", side_effect=rate_limit):
-                with self.assertRaisesRegex(Exception, "HTTP 429"):
+                with self.assertRaises(MlmmRateLimitError):
                     provider.complete_json(
                         prompt="return JSON",
                         image_paths=[],
@@ -340,6 +352,369 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
 
         self.assertEqual([item["model"] for item in requests], ["model-a", "model-b"])
         self.assertEqual(response.model, "model-b")
+
+    def test_live_insufficient_quota_fixture_rotates_to_next_free_model(self) -> None:
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["free-a", "free-b"],
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+        )
+        live_body = (FIXTURES / "alibaba_free_quota_insufficient_quota.json").read_bytes()
+        requests = []
+        success = _Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(
+                    "https://example.test", 403, "forbidden", {}, io.BytesIO(live_body)
+                )
+            return success
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                response = provider.complete_json(
+                    prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                )
+
+        self.assertEqual([item["model"] for item in requests], ["free-a", "free-b"])
+        self.assertEqual(response.model, "free-b")
+
+    def test_unknown_quota_like_response_fails_closed_without_rotation(self) -> None:
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["free-a", "free-b"],
+            api_key_env="TEST_QWEN_KEY",
+        )
+        unknown = urllib.error.HTTPError(
+            "https://example.test",
+            403,
+            "forbidden",
+            {},
+            io.BytesIO(
+                b'{"error":{"code":"insufficient_quota","message":"account quota unavailable"}}'
+            ),
+        )
+        requests = []
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            raise unknown
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                with self.assertRaises(MlmmQuotaSafetyError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+
+        self.assertEqual([item["model"] for item in requests], ["free-a"])
+
+    def test_rate_limit_honors_retry_after_on_same_model(self) -> None:
+        sleeps = []
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            model="free-a",
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+            transport_max_retries=1,
+            sleep_fn=sleeps.append,
+            random_fn=lambda start, end: 0.0,
+        )
+        rate_limit = urllib.error.HTTPError(
+            "https://example.test",
+            429,
+            "rate limited",
+            {"Retry-After": "3"},
+            io.BytesIO(b'{"error":{"code":"Throttling.AllocationQuota","message":"TPM"}}'),
+        )
+        success = _Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
+        requests = []
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            if len(requests) == 1:
+                raise rate_limit
+            return success
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                response = provider.complete_json(
+                    prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                )
+
+        self.assertEqual([item["model"] for item in requests], ["free-a", "free-a"])
+        self.assertEqual(sleeps, [3.0])
+        self.assertEqual(response.metadata["transport_attempts"][-1]["attempt"], 2)
+
+    def test_network_failures_back_off_without_rotating_model(self) -> None:
+        sleeps = []
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            model="free-a",
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+            transport_max_retries=2,
+            retry_backoff_seconds=1,
+            retry_backoff_max_seconds=4,
+            retry_jitter_seconds=0,
+            sleep_fn=sleeps.append,
+        )
+        success = _Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
+        requests = []
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            if len(requests) <= 2:
+                raise urllib.error.URLError("temporary DNS failure")
+            return success
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                provider.complete_json(
+                    prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                )
+
+        self.assertEqual([item["model"] for item in requests], ["free-a"] * 3)
+        self.assertEqual(sleeps, [1.0, 2.0])
+
+    def test_exhausted_network_retries_pause_evaluation(self) -> None:
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            model="free-a",
+            api_key_env="TEST_QWEN_KEY",
+            transport_max_retries=1,
+            sleep_fn=lambda seconds: None,
+        )
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("offline"),
+            ) as urlopen:
+                with self.assertRaises(MlmmTransportError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+        self.assertEqual(urlopen.call_count, 2)
+
+    def test_authentication_failure_is_not_retried_or_rotated(self) -> None:
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["free-a", "free-b"],
+            api_key_env="TEST_QWEN_KEY",
+            transport_max_retries=5,
+            sleep_fn=lambda seconds: None,
+        )
+        unauthorized = urllib.error.HTTPError(
+            "https://example.test",
+            401,
+            "unauthorized",
+            {},
+            io.BytesIO(b'{"error":{"code":"invalid_api_key","message":"bad key"}}'),
+        )
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=unauthorized) as urlopen:
+                with self.assertRaises(MlmmAuthenticationError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_invalid_request_is_not_retried_or_rotated(self) -> None:
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["free-a", "free-b"],
+            api_key_env="TEST_QWEN_KEY",
+            transport_max_retries=5,
+            sleep_fn=lambda seconds: None,
+        )
+        invalid = urllib.error.HTTPError(
+            "https://example.test",
+            400,
+            "bad request",
+            {},
+            io.BytesIO(b'{"error":{"code":"invalid_parameter","message":"bad media"}}'),
+        )
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=invalid) as urlopen:
+                with self.assertRaises(MlmmInvalidRequestError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_twenty_five_free_models_stop_at_unapproved_paid_boundary(self) -> None:
+        class ClosedGate:
+            policy = SimpleNamespace(model="paid-model")
+
+            def reserve_paid_call(self):
+                raise EvaluationBudgetPausedError("paid fallback requires authorization")
+
+        free_models = [f"free-{index:02d}" for index in range(25)]
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=[*free_models, "paid-model"],
+            api_key_env="TEST_QWEN_KEY",
+            budget_gate=ClosedGate(),
+        )
+        requests = []
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            raise urllib.error.HTTPError(
+                "https://example.test",
+                403,
+                "quota",
+                {},
+                io.BytesIO(
+                    b'{"error":{"code":"AllocationQuota.FreeTierOnly",'
+                    b'"message":"The free tier of the model has been exhausted"}}'
+                ),
+            )
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                with self.assertRaises(EvaluationBudgetPausedError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+
+        self.assertEqual([item["model"] for item in requests], free_models)
+
+    def test_paid_transport_rejection_releases_once_and_is_not_retried(self) -> None:
+        class Gate:
+            policy = SimpleNamespace(model="paid-model")
+
+            def __init__(self):
+                self.events = []
+
+            def reserve_paid_call(self):
+                self.events.append("reserve")
+                return {"reservation_id": "reservation-1"}
+
+            def release(self, reservation_id, *, reason):
+                self.events.append(("release", reservation_id, reason))
+
+            def forfeit(self, reservation_id, *, reason):
+                self.events.append(("forfeit", reservation_id, reason))
+
+        gate = Gate()
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            model="paid-model",
+            api_key_env="TEST_QWEN_KEY",
+            budget_gate=gate,
+            transport_max_retries=5,
+            sleep_fn=lambda seconds: None,
+        )
+        unavailable = urllib.error.HTTPError(
+            "https://example.test",
+            503,
+            "unavailable",
+            {},
+            io.BytesIO(b'{"error":{"code":"service_unavailable","message":"retry later"}}'),
+        )
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=unavailable) as urlopen:
+                with self.assertRaises(MlmmTransportError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(gate.events[0], "reserve")
+        self.assertEqual(gate.events[1][0:2], ("release", "reservation-1"))
+
+    def test_incompatible_paid_response_is_settled_once_and_not_retried(self) -> None:
+        class Gate:
+            policy = SimpleNamespace(model="paid-model")
+
+            def __init__(self):
+                self.events = []
+
+            def reserve_paid_call(self):
+                self.events.append("reserve")
+                return {"reservation_id": "reservation-1"}
+
+            def settle(self, reservation_id, usage):
+                self.events.append(("settle", reservation_id, usage))
+
+            def forfeit(self, reservation_id, *, reason):
+                self.events.append(("forfeit", reservation_id, reason))
+
+        gate = Gate()
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            model="paid-model",
+            api_key_env="TEST_QWEN_KEY",
+            budget_gate=gate,
+        )
+        incompatible = _Response({"usage": {"prompt_tokens": 20}, "choices": []})
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", return_value=incompatible) as urlopen:
+                with self.assertRaises(EvaluationInfrastructurePausedError):
+                    provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(gate.events[0], "reserve")
+        self.assertEqual(gate.events[1][0:2], ("settle", "reservation-1"))
+        self.assertEqual(len(gate.events), 2)
+
+    def test_thousand_case_transport_stress_keeps_stable_fallback_model(self) -> None:
+        sleeps = []
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["free-a", "free-b"],
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+            transport_max_retries=1,
+            retry_backoff_seconds=0,
+            retry_backoff_max_seconds=0,
+            retry_jitter_seconds=0,
+            sleep_fn=sleeps.append,
+        )
+        success = _Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
+        state = {"network_calls": 0, "inject_rate_limit": False}
+        requested_models = []
+
+        def urlopen(request, timeout):
+            state["network_calls"] += 1
+            requested_models.append(json.loads(request.data)["model"])
+            if state["network_calls"] == 1:
+                raise urllib.error.HTTPError(
+                    "https://example.test",
+                    403,
+                    "quota",
+                    {},
+                    io.BytesIO(b'{"error":{"code":"AllocationQuota.FreeTierOnly"}}'),
+                )
+            if state["inject_rate_limit"]:
+                state["inject_rate_limit"] = False
+                raise urllib.error.HTTPError(
+                    "https://example.test",
+                    429,
+                    "rate limited",
+                    {"Retry-After": "0"},
+                    io.BytesIO(b'{"error":{"code":"Throttling.AllocationQuota"}}'),
+                )
+            return success
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                for case_index in range(1000):
+                    state["inject_rate_limit"] = case_index > 0 and case_index % 100 == 0
+                    response = provider.complete_json(
+                        prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                    )
+                    self.assertEqual(response.model, "free-b")
+
+        self.assertEqual(requested_models[0], "free-a")
+        self.assertEqual(set(requested_models[1:]), {"free-b"})
+        self.assertEqual(state["network_calls"], 1010)
+        self.assertEqual(len(sleeps), 9)
 
 
 if __name__ == "__main__":

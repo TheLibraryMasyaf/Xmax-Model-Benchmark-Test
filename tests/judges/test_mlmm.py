@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from xmax_test.errors import MlmmTimeoutError
+from xmax_test.errors import EvaluationInfrastructurePausedError, MlmmTimeoutError
 from xmax_test.feedback.normalizer import MlmmHumanNormalizer
 from xmax_test.judges.mlmm.base import MlmmResponse
 from xmax_test.judges.mlmm.judge import MlmmJudge
@@ -192,6 +192,45 @@ class MlmmBatchTests(unittest.TestCase):
             judge.evaluate(
                 {
                     "run_id": "run-timeout",
+                    "prompt": "blind batch",
+                    "dimension_contracts": [
+                        {
+                            "dimension_id": "C2",
+                            "version": "v1",
+                            "criteria": [{"criterion_id": "C2.1"}],
+                        }
+                    ],
+                }
+            )
+        self.assertEqual(len(provider.calls), 1)
+
+    def test_paid_schema_failure_is_not_retried_by_judge(self) -> None:
+        class PaidInvalidProvider(FakeProvider):
+            def complete_json(self, **kwargs):
+                self.calls.append(kwargs)
+                payload = {"judgments": []}
+                return MlmmResponse(
+                    payload=payload,
+                    raw_text=json.dumps(payload),
+                    provider_id=self.provider_id,
+                    model="paid-model",
+                    usage={"input_tokens": 10},
+                    metadata={"paid_fallback": True},
+                )
+
+        provider = PaidInvalidProvider()
+        judge = MlmmJudge(
+            provider,
+            judge_id="mlmm",
+            version="2",
+            supported_dimensions=["C2"],
+            supported_modes=["offline"],
+            max_retries=5,
+        )
+        with self.assertRaises(EvaluationInfrastructurePausedError):
+            judge.evaluate(
+                {
+                    "run_id": "run-paid-invalid",
                     "prompt": "blind batch",
                     "dimension_contracts": [
                         {

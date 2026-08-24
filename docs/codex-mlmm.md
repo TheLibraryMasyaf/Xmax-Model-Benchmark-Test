@@ -45,15 +45,15 @@ OpenAI兼容Provider把视频编码为`video_url`、图片编码为`image_url`�
 
 以下项不进入当前调用链：控制台明确显示“无免费额度”的模型；剩余额度显示为`-`的泛化别名；当前请求的非思考结构化输出协议不匹配的Thinking专用规格；以及仅WebSocket实时协议的Omni模型。全模态HTTP模型虽然当前显示100万Token，但账户的“免费额度用完即停”尚未开启，因此未注册为回退候选。
 
-请求使用 `response_format={"type":"json_object"}` 和 `enable_thinking=false`，本地再用JSON Schema严格校验。结构化错误码 `AllocationQuota.FreeTierOnly` 是额度耗尽的唯一权威信号，即使中间网关返回的不是HTTP 403也会切换模型。切换后完整重发当前Case，不跳过、不保存前一模型的半成品。HTTP 429的RPM/TPM限流不切模型。末位`qwen3-vl-flash`第一次被选中时，如果项目预算尚未显式授权，则在发出请求前暂停；不会自动从免费链切入付费。
+请求使用 `response_format={"type":"json_object"}` 和 `enable_thinking=false`，本地再用JSON Schema严格校验。免费额度耗尽按版本化规则识别：包括`AllocationQuota.FreeTierOnly`，以及百炼网关实际返回的`insufficient_quota + Free quota exhausted + free tier only`组合，不依赖固定HTTP状态。只有命中已验证规则才切换模型；未知quota类返回使整个评测批次安全暂停，不切模型、不进入付费。切换后完整重发当前Case，不跳过、不保存前一模型的半成品。末位`qwen3-vl-flash`第一次被选中时，如果项目预算尚未显式授权，则在发出请求前暂停。
 
 付费兜底由`provider.paid_fallback`配置，默认本地硬上限99元。价格阶梯来自[阿里云百炼Qwen3-VL-Flash官方计费页](https://help.aliyun.com/zh/model-studio/qwen3-vl-flash)，作为版本化配置保存，价格变化时先更新配置和测试。系统在每次末位调用前保守预留0.36元，成功后按百炼返回的输入、缓存输入和输出Token结算；超时因计费结果不明确而按整笔预留计入，明确HTTP拒绝或连接前失败则释放。达到无法再预留下一次调用的边界时，预算持久化为`paused`，后续Case在任何CV/Metric/MLLM Judge开始前停止。这里统计的是本项目数据库中的保守估算，不是阿里云账户总账；其他程序的调用不会被计入。
 
-超时设为180秒。`xmax.mlmm_timeout`不在Judge层自动重试，避免一次视频卡住多个15分钟周期；每次尝试写`request_started/request_succeeded/request_failed`时间、耗时、模型和错误码到`var/logs/mlmm/mlmm-events.jsonl`，不记录密钥。
+超时设为180秒。429、408、5xx、DNS和连接错误只在同一免费模型上做有上限的指数退避，优先遵守`Retry-After`；网络错误不触发模型切换。默认参数为`transport_max_retries=2`、`retry_backoff_seconds=1`、`retry_backoff_max_seconds=8`、`retry_jitter_seconds=0.25`。重试耗尽、认证失败或未知quota会暂停后续评测，streaming中的生成和预处理仍可排空。Judge层不再对已经耗尽Provider重试的错误二次放大。付费请求不做自动网络重试，避免无法对账的重复计费。每次尝试写`request_started/request_succeeded/request_failed`时间、耗时、模型和错误码到`var/logs/mlmm/mlmm-events.jsonl`，不记录密钥。
 
 2026-08-20已用一个真实离线Case做原生多输入烟测：同一请求传入Feed视频、Prompt文字、Prompt图片和Result视频，`qwen3-vl-plus`正确回传四个角色且`role_confusion=false`；调用消耗5089输入Token、273输出Token。该烟测只验证输入能力和角色隔离，不作为正式Benchmark评分。
 
-进程重启后会从第一个模型重新检测；已耗尽模型返回结构化额度错误后会立即跳过，不假设固定HTTP状态。付费预算状态保存在SQLite，重启不会解除暂停。每次返回保存实际 `provider_model`、Token usage和 `model_fallback_attempts`，便于报告对账。
+进程重启后会从第一个模型重新检测；已耗尽模型返回结构化额度错误后会立即跳过，不假设固定HTTP状态。付费预算状态保存在SQLite，重启不会解除暂停。每次返回保存实际 `provider_model`、Token usage、`model_fallback_attempts`和`transport_attempts`，便于报告对账。
 
 ### Codex CLI可替换配置
 

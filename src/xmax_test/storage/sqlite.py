@@ -531,6 +531,18 @@ class SqliteMetadataRepository:
             )
         return int(cursor.rowcount)
 
+    def requeue_evaluation_infrastructure_paused_tasks(self, task_batch_id: str) -> int:
+        """Requeue safety-paused evaluations on the next explicit Worker run."""
+
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE test_tasks SET status='pending', last_error=NULL, updated_at=? "
+                "WHERE task_batch_id=? AND status='evaluation_paused' "
+                "AND last_error LIKE '%\"pause_scope\": \"evaluation_batch\"%'",
+                (self._clock.now(), task_batch_id),
+            )
+        return int(cursor.rowcount)
+
     def test_task_summary(self, task_batch_id: str) -> dict[str, Any]:
         rows = self._conn.execute(
             "SELECT status, COUNT(*) AS count FROM test_tasks "

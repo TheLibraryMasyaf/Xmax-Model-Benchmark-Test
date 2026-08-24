@@ -58,6 +58,10 @@
         "image_options": {"type": "object"},
         "max_base64_bytes": {"type": "integer", "minimum": 1},
         "timeout_seconds": {"type": "integer", "minimum": 1},
+        "transport_max_retries": {"type": "integer", "minimum": 0},
+        "retry_backoff_seconds": {"type": "number", "minimum": 0},
+        "retry_backoff_max_seconds": {"type": "number", "minimum": 0},
+        "retry_jitter_seconds": {"type": "number", "minimum": 0},
         "paid_fallback": {
           "type": "object",
           "required": [

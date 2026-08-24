@@ -9,7 +9,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..errors import EvaluationBudgetPausedError, RealtimeUnavailableError
+from ..errors import (
+    EvaluationBudgetPausedError,
+    EvaluationInfrastructurePausedError,
+    RealtimeUnavailableError,
+)
 
 StageCallable = Callable[..., dict[str, Any]]
 
@@ -177,7 +181,7 @@ class StreamingPipelineCoordinator:
                 self._mark(lock, timings, stage, "first_item_started")
                 try:
                     result = function(*arguments)
-                except EvaluationBudgetPausedError as exc:
+                except (EvaluationBudgetPausedError, EvaluationInfrastructurePausedError) as exc:
                     if stage != "evaluate":
                         self._add_error(outcome, lock, stage, run.get("run_id"), exc)
                         continue

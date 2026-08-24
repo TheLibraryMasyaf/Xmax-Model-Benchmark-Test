@@ -320,6 +320,14 @@ class Composition:
                 image_options=provider_config.get("image_options", {}),
                 max_base64_bytes=int(provider_config.get("max_base64_bytes", 10_000_000)),
                 budget_gate=budget_gate,
+                transport_max_retries=int(provider_config.get("transport_max_retries", 2)),
+                retry_backoff_seconds=float(
+                    provider_config.get("retry_backoff_seconds", 1.0)
+                ),
+                retry_backoff_max_seconds=float(
+                    provider_config.get("retry_backoff_max_seconds", 8.0)
+                ),
+                retry_jitter_seconds=float(provider_config.get("retry_jitter_seconds", 0.25)),
             )
         if provider_name == "python_plugin":
             provider_entrypoint = provider_config.get("entrypoint", "")
@@ -1661,6 +1669,8 @@ def cmd_task(composition: Composition, args: argparse.Namespace) -> int:
     )
     _emit(args, "task.run", data, ok=data.get("status") == "completed")
     if data.get("status") == "evaluation_paused":
+        if (data.get("last_error") or {}).get("pause_scope") == "evaluation_batch":
+            return EXIT_EXTERNAL_FAILURE
         return EXIT_APPROVAL_REQUIRED
     return 0 if data.get("status") == "completed" else EXIT_PARTIAL
 
@@ -1697,6 +1707,11 @@ def cmd_worker(composition: Composition, args: argparse.Namespace) -> int:
     ok = not data.get("errors") and not data.get("evaluation_paused")
     _emit(args, "worker.run", data, ok=ok)
     if data.get("evaluation_paused"):
+        if any(
+            item.get("pause_scope") == "evaluation_batch"
+            for item in data["evaluation_paused"]
+        ):
+            return EXIT_EXTERNAL_FAILURE
         return EXIT_APPROVAL_REQUIRED
     return 0 if ok else EXIT_PARTIAL
 

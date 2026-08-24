@@ -36,7 +36,7 @@
 | XMAX离线REST/COS | 已实现 | Fake、合同、失败/续跑测试；2026-08-20按官方上传协议完成2次真实付费任务并成功下载结果 | 后续批量运行仍需`XMAX_API_KEY`、`cos-python-sdk-v5`和与冻结计划绑定的预算批准 |
 | XMAX实时SDK | 已实现新旧API双路 | `tsc --noEmit`、JS语法、无Key安全失败 | Key、预算批准、可用WebRTC环境；未做付费smoke |
 | 预处理/音频 | 已实现ffmpeg适配器 | Fake与PCM包络测试 | 当前机器PATH中需安装`ffmpeg`/`ffprobe` |
-| Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/25候选免费额度回退、唯一末位`qwen3-vl-flash`付费兜底、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入；SQLite按请求预留并执行99元本地硬上限 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-21登录百炼回读，删除无额度`qwen3.8-max`，当前总列表26个；结构化额度错误跨HTTP状态回退、预算暂停和流式排空由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；前25个保持免费用尽即停，付费前只关闭末位泛化`qwen3-vl-flash`的该开关，并人工充值、执行本地授权；本地估算不覆盖账户外部调用 |
+| Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/25候选免费额度回退、唯一末位`qwen3-vl-flash`付费兜底、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入；SQLite按请求预留并执行99元本地硬上限 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-21登录百炼回读，删除无额度`qwen3.8-max`，当前总列表26个；已验证quota规则跨HTTP状态回退、未知quota停批、同模型网络退避、25免费模型到付费闸门和流式排空由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；前25个保持免费用尽即停，付费前只关闭末位泛化`qwen3-vl-flash`的该开关，并人工充值、执行本地授权；本地估算不覆盖账户外部调用 |
 | Codex CLI MLLM | 保留可替换Provider | Fake与错误路径 | 仅在Judge Pack改配后启用 |
 | CV/Metric Judge | 动态Python插件协议、基础画质、音轨及运行事实Judge已完成 | Manifest/Schema/三档阈值/不伪造分测试 | 专项身份、姿态、跟踪模型可按维度替换Shadow MLLM路由 |
 | 飞书 | `lark-cli`真实命令适配已实现 | Fake、分页/幂等/策略测试；2026-08-20已真实完成Case upsert、百分比评分、三类附件上传和回读对账 | 换Base/Table时仍需真实字段映射和明确写入授权 |

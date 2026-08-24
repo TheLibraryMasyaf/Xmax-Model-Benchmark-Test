@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Free quota exhausted. Please add funds or disable the 'use free tier only' mode to continue.",
+    "type": "insufficient_quota",
+    "param": null,
+    "code": "insufficient_quota"
+  }
+}

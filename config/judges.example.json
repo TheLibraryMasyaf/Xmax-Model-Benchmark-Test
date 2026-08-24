@@ -58,6 +58,10 @@
         "max_base64_bytes": 10000000,
         "request_options": {"enable_thinking": false},
         "timeout_seconds": 180,
+        "transport_max_retries": 2,
+        "retry_backoff_seconds": 1.0,
+        "retry_backoff_max_seconds": 8.0,
+        "retry_jitter_seconds": 0.25,
         "paid_fallback": {
           "enabled": true,
           "budget_id": "qwen3-vl-flash-paid",
