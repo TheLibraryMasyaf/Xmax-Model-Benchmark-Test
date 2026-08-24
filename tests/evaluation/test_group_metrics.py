@@ -46,8 +46,10 @@ class BatchGroupEvaluatorTests(unittest.TestCase):
             criterion = self.criterion(by_dimension["O4"], criterion_id)
             self.assertFalse(criterion["applicable"])
             self.assertIsNone(criterion["score"])
+            self.assertEqual(criterion["raw_metrics"]["member_run_ids"], ["run-a1"])
         c1 = self.criterion(by_dimension["C1"], "C1.2")
         self.assertFalse(c1["applicable"])
+        self.assertEqual(c1["raw_metrics"]["member_run_ids"], ["run-a1"])
 
     def test_results_outside_frozen_run_set_are_rejected(self) -> None:
         cases = {"case-a1": self.case("feed-a", 1)}

@@ -22,7 +22,7 @@ xmax-test report single-version --request config/single-version-report.json
 
 命令会生成同名Markdown和JSON，并强制校验批次中的模型版本，不扫描历史全库。模板`report-templates/single-version-evaluation-report.md`是人读字段合同；CLI按同一口径动态渲染全量维度、细则、Case和P0/P1/P2证据包，不留未替换占位符。
 
-确定性报告器只生成可复核统计、可信度诊断和证据包，并写`analysis_required=true`；它不得用固定脚本冒充执行Agent生成针对性建议。最终建议必须由执行Agent读取证据包、代表性媒体和Benchmark锚点后撰写。若发现组级统计超过Manifest成员、多个玩法退化到同一场景或评测覆盖不完整，报告可信度降为`diagnostic`，不得作为正式结论发布。
+确定性报告器只生成可复核统计、可信度诊断和证据包，并写`analysis_required=true`；它不得用固定脚本冒充执行Agent生成针对性建议。最终建议必须由执行Agent读取证据包、代表性媒体和Benchmark锚点后撰写。组级细则还必须记录实际参与计算的`member_run_ids`，报告器会按Feed、Prompt、配方、场景与模式重建预期组合并逐项比对；缺少来源、引用Manifest外Run或成员不一致都会把报告降为`diagnostic`，不得作为正式结论发布。
 
 ## 2. 分数口径
 
@@ -64,7 +64,8 @@ xmax-test report single-version --request config/single-version-report.json
 
 ## 6. 完成检查
 
-- 总分、全量适用维度、细则覆盖说明、强项、短板和P0/P1/P2建议都已填写。
+- 确定性统计、全量适用维度、细则覆盖说明、强项/短板候选和P0/P1/P2证据包都已生成。
+- 执行Agent已查看代表性媒体与证据包，并填写针对本批次的建议动作、验收依据和复测范围；未完成时保留`analysis_required=true`，不能把报告当作最终分析交付。
 - 所有请求场景有独立小节。
 - 生成失败、不可评、Hard Gate和人工修订没有被平均值隐藏。
 - 每个Good Case/Bad Case都有可回读证据。

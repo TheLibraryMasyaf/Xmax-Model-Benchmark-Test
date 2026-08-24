@@ -37,8 +37,12 @@ class ReconcileService:
 
         if run_ids is not None:
             local_runs = [self._repository.get_run(run_id) for run_id in run_ids]
+        elif run_batch_id is not None:
+            from ..pipeline.manifests import frozen_run_batch
+
+            local_runs = frozen_run_batch(self._repository, run_batch_id)
         else:
-            local_runs = self._repository.list_runs(run_batch_id=run_batch_id)
+            local_runs = self._repository.list_runs()
         local_by_key = {
             (run.get("case_number", ""), run.get("model_id", "")): run for run in local_runs
         }

@@ -16,7 +16,7 @@ from xmax_test.reporting.classification import bucket_pairs, classify_pair
 from xmax_test.reporting.comparison import ModelComparisonService
 from xmax_test.reporting.renderer import render_markdown, template_hash
 from xmax_test.reporting.service import ModelUpdateReportService
-from xmax_test.reporting.single_version import SingleVersionReportService
+from xmax_test.reporting.single_version import SingleVersionReportService, _credibility
 from xmax_test.scenarios import load_scenario_pack
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 
@@ -200,6 +200,34 @@ class ReportRepositoryProxy:
 
 
 class ComparisonTests(ReportingTestBase):
+    def test_comparison_ignores_evaluation_rows_not_in_frozen_manifest(self) -> None:
+        self.repository.save_evaluation_result(
+            {
+                "evaluation_id": "eval-x2.0-dirty-history",
+                "evaluation_batch_id": "eval-batch-x2.0",
+                "run_id": "run-x2.0",
+                "benchmark_version": "old",
+                "dimension_results": [],
+                "criterion_results": [],
+                "canonical_score": 5.0,
+                "scenario_score": 5.0,
+                "case_score_percent": 5.0,
+                "applied_gate_ids": [],
+                "final_verdict": None,
+            }
+        )
+
+        compared = ModelComparisonService(
+            self.repository, self.benchmark, self.pack, TEST_SCHEMA
+        ).compare(
+            baseline_model_version="x2.0",
+            candidate_model_version="x2.1",
+            **self.selectors(),
+            requested_scene_ids=["core-selfie-appearance"],
+        )
+
+        self.assertEqual(compared["overall"]["canonical"]["delta_points"], 20.0)
+
     def test_paired_samples_compute_dual_score_deltas(self) -> None:
         compared = ModelComparisonService(
             self.repository, self.benchmark, self.pack, TEST_SCHEMA
@@ -400,6 +428,57 @@ class ClassificationTests(ReportingTestBase):
 
 
 class RenderTests(ReportingTestBase):
+    def test_credibility_rejects_wrong_group_members_even_below_batch_size(self) -> None:
+        cases = [
+            {
+                "run_id": "run-a",
+                "status": "completed",
+                "mode": "offline",
+                "feed_asset_id": "feed-a",
+                "prompt_asset_ids": [],
+                "prompt_text": "动作A",
+                "operation_recipe_id": "recipe",
+                "scenario_id": "scene",
+            },
+            {
+                "run_id": "run-b",
+                "status": "completed",
+                "mode": "offline",
+                "feed_asset_id": "feed-b",
+                "prompt_asset_ids": [],
+                "prompt_text": "动作B",
+                "operation_recipe_id": "recipe",
+                "scenario_id": "scene",
+            },
+        ]
+        evaluations = {
+            "run-a": {
+                "run_id": "run-a",
+                "criterion_results": [
+                    {
+                        "criterion_id": "O4.1",
+                        "raw_metrics": [
+                            {
+                                "values": {
+                                    "attempt_count": 2,
+                                    "member_run_ids": ["run-a", "run-b"],
+                                }
+                            }
+                        ],
+                    }
+                ],
+            },
+            "run-b": {"run_id": "run-b", "criterion_results": []},
+        }
+
+        result = _credibility(cases, evaluations, run_count=2)
+
+        self.assertEqual(result["status"], "diagnostic")
+        self.assertIn(
+            "group_scope_membership_mismatch",
+            {item["code"] for item in result["issues"]},
+        )
+
     def test_single_version_report_uses_exact_batches_and_has_criteria_section(
         self,
     ) -> None:
@@ -420,6 +499,7 @@ class RenderTests(ReportingTestBase):
         self.assertIn("## 细则结果", markdown)
         self.assertIn("## P0 证据包（待Agent分析）", markdown)
         self.assertTrue(payload["analysis_required"])
+        self.assertEqual(payload["report_schema_version"], "single-version-report/1.1")
         self.assertNotIn("Recommendation:", markdown)
 
     def test_full_report_writes_json_and_markdown_without_placeholders(self) -> None:

@@ -13,8 +13,10 @@ from jsonschema import Draft202012Validator
 
 from ..errors import ContractError
 from ..evaluation.aggregation import aggregate_evaluation_results
+from ..evaluation.group_metrics import GROUP_CRITERION_SCOPES
 from ..feedback.overrides import HumanOverrideService
 from ..hashing import content_hash
+from ..pipeline.manifests import frozen_evaluation_batch, frozen_run_batch
 from ..time import utc_now
 
 
@@ -50,16 +52,12 @@ class SingleVersionReportService:
         evaluation_manifest = self._repository.get_batch_manifest(
             "evaluation_batch", evaluation_batch_id
         )
-        evaluation_ids = set(evaluation_manifest.get("item_ids", []))
         evaluations = {
             item["run_id"]: self._overrides.effective_result(item)
-            for item in self._repository.list_evaluation_results(
-                evaluation_batch_id=evaluation_batch_id
-            )
-            if item.get("evaluation_id") in evaluation_ids
+            for item in frozen_evaluation_batch(self._repository, evaluation_batch_id)
         }
         runs = sorted(
-            [self._repository.get_run(run_id) for run_id in run_manifest.get("item_ids", [])],
+            frozen_run_batch(self._repository, run_batch_id),
             key=lambda item: _natural_key(
                 str(item.get("case_number") or item.get("run_id") or "")
             ),
@@ -115,7 +113,7 @@ class SingleVersionReportService:
         priorities = _evidence_packets(cases, dimensions, criteria)
         credibility = _credibility(cases, evaluations, len(runs))
         report = {
-            "report_schema_version": "single-version-report/1.0",
+            "report_schema_version": "single-version-report/1.1",
             "report_id": report_id,
             "status": (
                 "complete"
@@ -215,6 +213,9 @@ class SingleVersionReportService:
             "human_override": evaluation.get("human_override") if evaluation else None,
             "result_asset_id": run.get("result_asset_id"),
             "operation_recipe_id": case.get("operation_recipe_id"),
+            "feed_asset_id": case.get("feed_asset_id"),
+            "prompt_asset_ids": list(case.get("prompt_asset_ids", [])),
+            "prompt_text": case.get("prompt_text", ""),
         }
 
 
@@ -324,10 +325,65 @@ def _credibility(
                 "description": "多个玩法配方被压缩到同一个场景，场景权重结果仅可诊断使用。",
             }
         )
+    selected_run_ids = {item["run_id"] for item in cases}
+    cases_by_run = {item["run_id"]: item for item in cases}
     for evaluation in evaluations.values():
         for criterion in evaluation.get("criterion_results", []):
-            for raw in criterion.get("raw_metrics", []):
-                values = raw.get("values") or {}
+            criterion_id = str(criterion.get("criterion_id") or "")
+            scope = GROUP_CRITERION_SCOPES.get(criterion_id)
+            if scope is None:
+                continue
+            raw_records = criterion.get("raw_metrics", [])
+            if not isinstance(raw_records, list):
+                raw_records = []
+            raw_values = [
+                raw["values"]
+                for raw in raw_records
+                if isinstance(raw, dict) and isinstance(raw.get("values"), dict)
+            ]
+            member_ids: set[str] = set()
+            for values in raw_values:
+                members = values.get("member_run_ids", [])
+                if isinstance(members, list):
+                    member_ids.update(str(member_id) for member_id in members)
+            if not member_ids:
+                issues.append(
+                    {
+                        "code": "group_scope_provenance_missing",
+                        "severity": "error",
+                        "description": f"组级细则 {criterion_id} 缺少冻结成员Run ID，无法验证统计范围。",
+                    }
+                )
+                continue
+            outside = sorted(member_ids - selected_run_ids, key=_natural_key)
+            if outside:
+                issues.append(
+                    {
+                        "code": "group_scope_outside_manifest",
+                        "severity": "error",
+                        "description": (
+                            f"组级细则 {criterion_id} 引用了manifest之外的Run："
+                            + ", ".join(outside)
+                        ),
+                    }
+                )
+                continue
+            expected = _expected_group_members(
+                cases, cases_by_run.get(str(evaluation.get("run_id") or "")), scope
+            )
+            if member_ids != expected:
+                issues.append(
+                    {
+                        "code": "group_scope_membership_mismatch",
+                        "severity": "error",
+                        "description": (
+                            f"组级细则 {criterion_id} 实际引用 {len(member_ids)} 条Run，"
+                            f"按冻结组合合同应为 {len(expected)} 条。"
+                        ),
+                    }
+                )
+                continue
+            for values in raw_values:
                 observed = max(
                     int(values.get("run_count") or 0),
                     int(values.get("attempt_count") or 0),
@@ -361,6 +417,41 @@ def _credibility(
         ),
         "issues": issues,
     }
+
+
+def _expected_group_members(
+    cases: list[dict[str, Any]],
+    target: dict[str, Any] | None,
+    scope: str,
+) -> set[str]:
+    if target is None:
+        return set()
+
+    def repeat_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            item.get("mode"),
+            item.get("feed_asset_id"),
+            tuple(item.get("prompt_asset_ids", [])),
+            item.get("prompt_text", ""),
+            item.get("operation_recipe_id"),
+        )
+
+    def transfer_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            item.get("mode"),
+            tuple(item.get("prompt_asset_ids", [])),
+            item.get("prompt_text", ""),
+            item.get("operation_recipe_id"),
+            item.get("scenario_id"),
+        )
+
+    if scope == "batch":
+        return {
+            item["run_id"] for item in cases if item.get("mode") == target.get("mode")
+        }
+    key_function = repeat_key if scope == "repeat_group" else transfer_key
+    target_key = key_function(target)
+    return {item["run_id"] for item in cases if key_function(item) == target_key}
 
 
 def _natural_key(value: Any) -> tuple[Any, ...]:

@@ -13,6 +13,7 @@ from typing import Any
 
 from ..feedback.overrides import HumanOverrideService
 from ..hashing import content_hash
+from ..pipeline.manifests import frozen_evaluation_batch, frozen_run_batch
 
 
 class ModelComparisonService:
@@ -147,18 +148,14 @@ class ModelComparisonService:
         evaluation_batch_id: str,
     ) -> list[dict[str, Any]]:
         runs = []
-        run_manifest = self._repository.get_batch_manifest("run_batch", run_batch_id)
         selected_evaluations = {
             item["run_id"]: item
-            for item in self._repository.list_evaluation_results(
-                evaluation_batch_id=evaluation_batch_id
-            )
+            for item in frozen_evaluation_batch(self._repository, evaluation_batch_id)
         }
-        for run_id in run_manifest.get("item_ids", []):
-            run = self._repository.get_run(run_id)
+        for run in frozen_run_batch(self._repository, run_batch_id):
             if run.get("model_id") != model_version:
                 continue
-            result = selected_evaluations.get(run_id)
+            result = selected_evaluations.get(run["run_id"])
             if result is None:
                 if run.get("status") == "error":
                     run["_evaluation"] = {

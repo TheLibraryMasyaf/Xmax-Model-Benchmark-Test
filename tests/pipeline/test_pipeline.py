@@ -10,7 +10,6 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from xmax_test.contracts import PipelineStage
-from xmax_test.cli import _runs_from_batch_manifest
 from xmax_test.errors import (
     ApprovalRequiredError,
     ContractError,
@@ -22,6 +21,9 @@ from xmax_test.pipeline.manifests import (
     ManifestStore,
     build_batch_manifest,
     build_stage_manifest,
+    collision_safe_batch_manifest,
+    frozen_evaluation_batch,
+    frozen_run_batch,
 )
 from xmax_test.pipeline.models import (
     StageExecutionRequest,
@@ -171,8 +173,174 @@ class SelectorTests(PipelineTestBase):
                 batch_id="batch-dirty",
             )
         )
-        runs = _runs_from_batch_manifest(self.repository, "batch-dirty")
+        runs = frozen_run_batch(self.repository, "batch-dirty")
         self.assertEqual([run["run_id"] for run in runs], ["run-current"])
+
+    def test_run_can_be_referenced_by_resume_batch_without_mutating_origin(self) -> None:
+        self.repository.create_run(
+            {
+                "run_id": "run-reused",
+                "run_batch_id": "batch-origin",
+                "case_id": "case-reused",
+                "case_number": "case-reused",
+                "model_id": "x2.0",
+                "mode": "offline",
+                "origin": "xmax_offline",
+                "status": "completed",
+                "provenance": {
+                    "source_type": "test",
+                    "source_locator": "run-reused",
+                    "source_hash": "run-reused",
+                },
+            }
+        )
+        for batch_id in ("batch-origin", "batch-resume"):
+            self.repository.save_batch_manifest(
+                build_batch_manifest(
+                    entity_type="run_batch",
+                    item_entity_type="generation_run",
+                    item_ids=["run-reused"],
+                    producer_stage_run_id="stage-test",
+                    batch_id=batch_id,
+                )
+            )
+
+        self.assertEqual(
+            [item["run_id"] for item in frozen_run_batch(self.repository, "batch-resume")],
+            ["run-reused"],
+        )
+        self.assertEqual(
+            self.repository.get_run("run-reused")["run_batch_id"], "batch-origin"
+        )
+
+    def test_evaluation_batch_loading_ignores_dirty_history(self) -> None:
+        for evaluation_id in ("eval-current", "eval-old-history"):
+            self.repository.save_evaluation_result(
+                {
+                    "evaluation_id": evaluation_id,
+                    "evaluation_batch_id": "eval-dirty",
+                    "run_id": f"run-{evaluation_id}",
+                    "benchmark_version": "test",
+                    "dimension_results": [],
+                    "criterion_results": [],
+                }
+            )
+        self.repository.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="evaluation_batch",
+                item_entity_type="evaluation_result",
+                item_ids=["eval-current"],
+                producer_stage_run_id="stage-test",
+                batch_id="eval-dirty",
+            )
+        )
+
+        self.assertEqual(
+            [
+                item["evaluation_id"]
+                for item in frozen_evaluation_batch(self.repository, "eval-dirty")
+            ],
+            ["eval-current"],
+        )
+
+    def test_evaluation_batch_rejects_two_results_for_one_run(self) -> None:
+        for evaluation_id in ("eval-first", "eval-second"):
+            self.repository.save_evaluation_result(
+                {
+                    "evaluation_id": evaluation_id,
+                    "evaluation_batch_id": "eval-ambiguous",
+                    "run_id": "run-same",
+                    "benchmark_version": "test",
+                    "dimension_results": [],
+                    "criterion_results": [],
+                }
+            )
+        self.repository.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="evaluation_batch",
+                item_entity_type="evaluation_result",
+                item_ids=["eval-first", "eval-second"],
+                producer_stage_run_id="stage-test",
+                batch_id="eval-ambiguous",
+            )
+        )
+
+        with self.assertRaisesRegex(ContractError, "exactly one EvaluationResult"):
+            frozen_evaluation_batch(self.repository, "eval-ambiguous")
+
+    def test_evaluation_can_be_referenced_by_resume_manifest(self) -> None:
+        self.repository.save_evaluation_result(
+            {
+                "evaluation_id": "eval-reused",
+                "evaluation_batch_id": "eval-origin",
+                "run_id": "run-reused",
+                "benchmark_version": "test",
+                "dimension_results": [],
+                "criterion_results": [],
+            }
+        )
+        self.repository.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="evaluation_batch",
+                item_entity_type="evaluation_result",
+                item_ids=["eval-reused"],
+                producer_stage_run_id="stage-resume",
+                batch_id="eval-resume",
+            )
+        )
+
+        items = frozen_evaluation_batch(self.repository, "eval-resume")
+
+        self.assertEqual([item["evaluation_id"] for item in items], ["eval-reused"])
+        self.assertEqual(items[0]["evaluation_batch_id"], "eval-origin")
+
+    def test_batch_id_cannot_be_reused_for_different_frozen_members(self) -> None:
+        first = build_batch_manifest(
+            entity_type="run_batch",
+            item_entity_type="generation_run",
+            item_ids=["run-a"],
+            producer_stage_run_id="stage-a",
+            batch_id="batch-collision",
+        )
+        second = build_batch_manifest(
+            entity_type="run_batch",
+            item_entity_type="generation_run",
+            item_ids=["run-b"],
+            producer_stage_run_id="stage-b",
+            batch_id="batch-collision",
+        )
+        self.repository.save_batch_manifest(first)
+        with self.assertRaisesRegex(ContractError, "identity collision"):
+            self.repository.save_batch_manifest(second)
+
+    def test_resume_versions_changed_frozen_members_instead_of_overwriting(self) -> None:
+        partial = build_batch_manifest(
+            entity_type="run_batch",
+            item_entity_type="generation_run",
+            item_ids=["run-a"],
+            producer_stage_run_id="stage-generate",
+            batch_id="batch-resume",
+        )
+        self.repository.save_batch_manifest(partial)
+        completed = build_batch_manifest(
+            entity_type="run_batch",
+            item_entity_type="generation_run",
+            item_ids=["run-a", "run-b"],
+            producer_stage_run_id="stage-generate",
+            batch_id="batch-resume",
+        )
+
+        versioned = collision_safe_batch_manifest(self.repository, completed)
+
+        self.assertNotEqual(versioned["batch_id"], partial["batch_id"])
+        self.assertTrue(versioned["batch_id"].startswith("batch-resume-"))
+        self.assertEqual(
+            versioned["metadata"]["resumed_from_frozen_batch_id"], "batch-resume"
+        )
+        self.assertEqual(
+            self.repository.get_batch_manifest("run_batch", "batch-resume")["item_ids"],
+            ["run-a"],
+        )
 
     def test_filters_resolve_to_frozen_snapshot(self) -> None:
         self.repository.create_run(

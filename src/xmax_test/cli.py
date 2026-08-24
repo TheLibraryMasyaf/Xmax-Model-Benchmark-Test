@@ -25,7 +25,6 @@ from .errors import (
     EXIT_MISSING_DEPENDENCY,
     EXIT_PARTIAL,
     ConfigError,
-    ContractError,
     XmaxTestError,
 )
 from .scenarios import load_scenario_pack
@@ -912,7 +911,7 @@ def _generate_executor(
     stream_state: dict[str, Any] | None = None,
 ):
     from .contracts import PipelineStage
-    from .pipeline.manifests import build_batch_manifest
+    from .pipeline.manifests import build_batch_manifest, collision_safe_batch_manifest
     from .pipeline.models import StageExecutionRequest, StageExecutionResult
 
     def execute(req: StageExecutionRequest) -> StageExecutionResult:
@@ -936,7 +935,7 @@ def _generate_executor(
             )
         plan = composition.database.get_test_plan(plan_ref.entity_id)
         model_id = composition.project.get("default_model", "x2.0")
-        batch_id = f"runs-{plan.get('plan_hash', '')[:12]}"
+        batch_id = f"runs-{plan.get('plan_hash', '')[:8]}-{req.stage_run_id[-8:]}"
         cases = _smoke_cases(plan.get("cases", []), req.smoke_limit)
         offline_adapter = None
         realtime_controller = None
@@ -1063,7 +1062,8 @@ def _generate_executor(
             )
 
             def on_generated(run: dict[str, Any]) -> None:
-                composition.database.set_run_batch_id(run["run_id"], batch_id)
+                if not run.get("stream_reused"):
+                    composition.database.set_run_batch_id(run["run_id"], batch_id)
 
             def evaluate_one(run: dict[str, Any], preprocess: dict[str, Any]) -> dict[str, Any]:
                 existing = evaluation_repository.list_evaluation_results(  # type: ignore[union-attr]
@@ -1117,18 +1117,29 @@ def _generate_executor(
             runs = []
             for case in cases:
                 run = generate_case(case)
-                composition.database.set_run_batch_id(run["run_id"], batch_id)
+                if not run.get("stream_reused"):
+                    composition.database.set_run_batch_id(run["run_id"], batch_id)
                 runs.append(run)
 
         run_ids = [run["run_id"] for run in runs]
-        manifest = build_batch_manifest(
-            entity_type="run_batch",
-            item_entity_type="generation_run",
-            item_ids=run_ids,
-            producer_stage_run_id=req.stage_run_id,
-            batch_id=batch_id,
-            metadata=metadata,
+        manifest = collision_safe_batch_manifest(
+            composition.database,
+            build_batch_manifest(
+                entity_type="run_batch",
+                item_entity_type="generation_run",
+                item_ids=run_ids,
+                producer_stage_run_id=req.stage_run_id,
+                batch_id=batch_id,
+                metadata=metadata,
+            ),
         )
+        final_batch_id = manifest["batch_id"]
+        if final_batch_id != batch_id:
+            for run in runs:
+                if not run.get("stream_reused"):
+                    composition.database.set_run_batch_id(run["run_id"], final_batch_id)
+            if streaming:
+                state["run_batch_id"] = final_batch_id
         return StageExecutionResult(
             status="partial" if errors else "completed",
             output_refs=[],
@@ -1204,7 +1215,9 @@ def _preprocess_executor(
             preprocess_ids = [item["preprocess_id"] for item in stream_state.get("preprocess", [])]
             errors = list(stream_state.get("errors", {}).get("preprocess", []))
         else:
-            for run in composition.database.list_runs(run_batch_id=run_batch_ref.entity_id):
+            for run in _runs_from_batch_manifest(
+                composition.database, run_batch_ref.entity_id
+            ):
                 try:
                     result = service.build(run)
                     preprocess_ids.append(result["preprocess_id"])
@@ -1246,7 +1259,7 @@ def _evaluate_executor(
 ):
     from .contracts import PipelineStage
     from .evaluation.aggregation import aggregate_evaluation_results
-    from .pipeline.manifests import build_batch_manifest
+    from .pipeline.manifests import build_batch_manifest, collision_safe_batch_manifest
     from .pipeline.models import StageExecutionRequest, StageExecutionResult
 
     def execute(req: StageExecutionRequest) -> StageExecutionResult:
@@ -1289,20 +1302,24 @@ def _evaluate_executor(
             runs = _runs_from_batch_manifest(composition.database, run_batch_ref.entity_id)
             results = orchestrator.finalize_batch_context(runs, results)
             aggregate = aggregate_evaluation_results(results)
-            manifest = build_batch_manifest(
-                entity_type="evaluation_batch",
-                item_entity_type="evaluation_result",
-                item_ids=[item["evaluation_id"] for item in results],
-                producer_stage_run_id=req.stage_run_id,
-                batch_id=evaluation_batch_id,
-                metadata={
-                    **stream_state.get("metadata", {}),
-                    "execution_mode": "streaming",
-                    "streamed_during_generation": True,
-                    "score_source": "criterion_results",
-                    "aggregate": aggregate,
-                },
+            manifest = collision_safe_batch_manifest(
+                composition.database,
+                build_batch_manifest(
+                    entity_type="evaluation_batch",
+                    item_entity_type="evaluation_result",
+                    item_ids=[item["evaluation_id"] for item in results],
+                    producer_stage_run_id=req.stage_run_id,
+                    batch_id=evaluation_batch_id,
+                    metadata={
+                        **stream_state.get("metadata", {}),
+                        "execution_mode": "streaming",
+                        "streamed_during_generation": True,
+                        "score_source": "criterion_results",
+                        "aggregate": aggregate,
+                    },
+                ),
             )
+            stream_state["evaluation_batch_id"] = manifest["batch_id"]
             return StageExecutionResult(
                 status="partial" if errors else "completed",
                 output_refs=[],
@@ -1332,7 +1349,7 @@ def _evaluate_executor(
                     }
                 ],
             )
-        summary = orchestrator.evaluate_runs(runs, preprocess_by_run)
+        summary = orchestrator.evaluate_runs(runs, preprocess_by_run, resume=req.resume)
         manifest = build_batch_manifest(
             entity_type="evaluation_batch",
             item_entity_type="evaluation_result",
@@ -1401,7 +1418,11 @@ def _report_executor(composition: Composition, request: dict[str, Any], args: ar
 
 def _sync_executor(composition: Composition, request: dict[str, Any], args: argparse.Namespace):
     from .contracts import PipelineStage
-    from .pipeline.manifests import build_batch_manifest
+    from .pipeline.manifests import (
+        build_batch_manifest,
+        frozen_evaluation_batch,
+        frozen_run_batch,
+    )
     from .pipeline.models import StageExecutionRequest, StageExecutionResult
 
     def execute(req: StageExecutionRequest) -> StageExecutionResult:
@@ -1420,34 +1441,7 @@ def _sync_executor(composition: Composition, request: dict[str, Any], args: argp
         evaluations: dict[str, dict[str, Any]] = {}
         for ref in req.input_refs:
             if ref.entity_type == "evaluation_batch":
-                evaluation_manifest = composition.database.get_batch_manifest(
-                    "evaluation_batch", ref.entity_id
-                )
-                results = [
-                    composition.database.get_evaluation_result(evaluation_id)
-                    for evaluation_id in evaluation_manifest.get("item_ids", [])
-                ]
-                wrong_batch = [
-                    item.get("evaluation_id")
-                    for item in results
-                    if item.get("evaluation_batch_id") != ref.entity_id
-                ]
-                if wrong_batch:
-                    return StageExecutionResult(
-                        status="error",
-                        output_refs=[],
-                        errors=[
-                            {
-                                "code": "xmax.contract_error",
-                                "message": (
-                                    f"evaluation batch manifest {ref.entity_id} contains results "
-                                    f"bound to another batch: {wrong_batch}"
-                                ),
-                                "stage": "sync",
-                                "retryable": False,
-                            }
-                        ],
-                    )
+                results = frozen_evaluation_batch(composition.database, ref.entity_id)
                 for item in results:
                     previous = evaluations.get(item["run_id"])
                     if previous and previous.get("evaluation_id") != item.get("evaluation_id"):
@@ -1469,10 +1463,7 @@ def _sync_executor(composition: Composition, request: dict[str, Any], args: argp
                     evaluations[item["run_id"]] = item
                 runs.extend(composition.database.get_run(item["run_id"]) for item in results)
             elif ref.entity_type == "run_batch":
-                manifest = composition.database.get_batch_manifest("run_batch", ref.entity_id)
-                runs.extend(
-                    composition.database.get_run(run_id) for run_id in manifest.get("item_ids", [])
-                )
+                runs.extend(frozen_run_batch(composition.database, ref.entity_id))
         runs = list({run["run_id"]: run for run in runs}.values())
         if not runs:
             return StageExecutionResult(
@@ -1755,33 +1746,51 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
         )
     plan = composition.database.get_test_plan(args.plan_id)
     model_id = composition.project.get("default_model", "x2.0")
-    batch_id = f"runs-{plan.get('plan_hash', '')[:12]}"
-    adapter = composition.offline_adapter(run_batch_id=batch_id, model_id=model_id)
+    provisional_batch_id = f"pending-offline-{plan.get('plan_hash', '')[:12]}"
+    adapter = composition.offline_adapter(
+        run_batch_id=provisional_batch_id, model_id=model_id
+    )
     if any(case.get("generation_mode") == "offline" for case in plan.get("cases", [])):
         adapter.preflight()
-    run_ids = []
+    runs: list[dict[str, Any]] = []
     for case in plan.get("cases", []):
         if case.get("generation_mode") != "offline":
             continue
         if args.resume:
-            existing = composition.database.list_runs(case_id=case["case_id"], status="completed")
+            existing = [
+                run
+                for run in composition.database.list_runs(
+                    case_id=case["case_id"], status="completed"
+                )
+                if run.get("model_id") == model_id and run.get("mode") == "offline"
+            ]
             if existing:
-                run_ids.append(existing[0]["run_id"])
+                reused = max(
+                    existing,
+                    key=lambda item: (item.get("created_at", ""), item["run_id"]),
+                )
+                runs.append({**reused, "batch_reused": True})
                 continue
         run = adapter.run_case(case)
-        run_ids.append(run["run_id"])
-    for run_id in run_ids:
-        composition.database.set_run_batch_id(run_id, batch_id)
+        runs.append(run)
     from .pipeline.manifests import build_batch_manifest
 
     manifest = build_batch_manifest(
         entity_type="run_batch",
         item_entity_type="generation_run",
-        item_ids=run_ids,
+        item_ids=[run["run_id"] for run in runs],
         producer_stage_run_id="cli-generate",
+        metadata={"generation_mode": "offline", "plan_id": plan.get("plan_id")},
     )
+    for run in runs:
+        if not run.get("batch_reused"):
+            composition.database.set_run_batch_id(run["run_id"], manifest["batch_id"])
     composition.database.save_batch_manifest(manifest)
-    _emit(args, "generate.offline", {"run_batch_id": batch_id, "run_ids": run_ids})
+    _emit(
+        args,
+        "generate.offline",
+        {"run_batch_id": manifest["batch_id"], "run_ids": manifest["item_ids"]},
+    )
     return 0
 
 
@@ -1794,19 +1803,29 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
         )
     plan = composition.database.get_test_plan(args.plan_id)
     model_id = composition.project.get("default_model", "x2.0")
-    batch_id = f"runs-{plan.get('plan_hash', '')[:12]}"
+    provisional_batch_id = f"pending-realtime-{plan.get('plan_hash', '')[:12]}"
     controller = composition.realtime_controller(
-        run_batch_id=batch_id, model_id=model_id, headed=args.headed
+        run_batch_id=provisional_batch_id, model_id=model_id, headed=args.headed
     )
-    run_ids: list[str] = []
+    runs: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for case in plan.get("cases", []):
         if case.get("generation_mode") != "realtime":
             continue
         if args.resume:
-            existing = composition.database.list_runs(case_id=case["case_id"], status="completed")
+            existing = [
+                run
+                for run in composition.database.list_runs(
+                    case_id=case["case_id"], status="completed"
+                )
+                if run.get("model_id") == model_id and run.get("mode") == "realtime"
+            ]
             if existing:
-                run_ids.append(existing[0]["run_id"])
+                reused = max(
+                    existing,
+                    key=lambda item: (item.get("created_at", ""), item["run_id"]),
+                )
+                runs.append({**reused, "batch_reused": True})
                 continue
         # A single realtime case must not abort the whole 250-case batch; the
         # browser SDK or one feed can fail (media quirk, transient network,
@@ -1826,20 +1845,33 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
                 }
             )
             continue
-        run_ids.append(run["run_id"])
-    for run_id in run_ids:
-        composition.database.set_run_batch_id(run_id, batch_id)
+        runs.append(run)
     from .pipeline.manifests import build_batch_manifest
 
     manifest = build_batch_manifest(
         entity_type="run_batch",
         item_entity_type="generation_run",
-        item_ids=run_ids,
+        item_ids=[run["run_id"] for run in runs],
         producer_stage_run_id="cli-generate-rt",
-        metadata={"realtime_case_errors": errors},
+        metadata={
+            "generation_mode": "realtime",
+            "plan_id": plan.get("plan_id"),
+            "realtime_case_errors": errors,
+        },
     )
+    for run in runs:
+        if not run.get("batch_reused"):
+            composition.database.set_run_batch_id(run["run_id"], manifest["batch_id"])
     composition.database.save_batch_manifest(manifest)
-    _emit(args, "generate.realtime", {"run_batch_id": batch_id, "run_ids": run_ids, "errors": errors})
+    _emit(
+        args,
+        "generate.realtime",
+        {
+            "run_batch_id": manifest["batch_id"],
+            "run_ids": manifest["item_ids"],
+            "errors": errors,
+        },
+    )
     return 0 if not errors else EXIT_PARTIAL
 
 
@@ -1881,20 +1913,9 @@ def cmd_evaluate(composition: Composition, args: argparse.Namespace) -> int:
 def _runs_from_batch_manifest(repository: Any, run_batch_id: str) -> list[dict[str, Any]]:
     """Load the exact frozen Run set; never widen scope via a database filter."""
 
-    manifest = repository.get_batch_manifest("run_batch", run_batch_id)
-    run_ids = list(manifest.get("item_ids", []))
-    if len(run_ids) != len(set(run_ids)):
-        raise ContractError(f"run batch manifest {run_batch_id} contains duplicate run IDs")
-    runs = [repository.get_run(run_id) for run_id in run_ids]
-    mismatched = [
-        run["run_id"] for run in runs if run.get("run_batch_id") != run_batch_id
-    ]
-    if mismatched:
-        raise ContractError(
-            f"run batch manifest {run_batch_id} contains Runs bound to another batch: "
-            + ", ".join(mismatched)
-        )
-    return runs
+    from .pipeline.manifests import frozen_run_batch
+
+    return frozen_run_batch(repository, run_batch_id)
 
 
 def cmd_evaluation_budget(composition: Composition, args: argparse.Namespace) -> int:
@@ -1939,14 +1960,14 @@ def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
     runs: list[dict[str, Any]] = []
     evaluations: dict[str, dict[str, Any]] = {}
     if args.evaluation_batch_id:
-        results = composition.database.list_evaluation_results(
-            evaluation_batch_id=args.evaluation_batch_id
-        )
+        from .pipeline.manifests import frozen_evaluation_batch
+
+        results = frozen_evaluation_batch(composition.database, args.evaluation_batch_id)
         evaluations = {item["run_id"]: item for item in results}
         runs = [composition.database.get_run(item["run_id"]) for item in results]
         selector_label = args.evaluation_batch_id
     elif args.run_batch_id:
-        runs = composition.database.list_runs(run_batch_id=args.run_batch_id)
+        runs = _runs_from_batch_manifest(composition.database, args.run_batch_id)
         selector_label = args.run_batch_id
     else:
         selector_path = composition.root / args.selector
@@ -1960,9 +1981,9 @@ def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
             entity_type = frozen["entity_type"]
             for entity_id in frozen["resolved_entity_ids"]:
                 if entity_type == "evaluation_batch":
-                    results = composition.database.list_evaluation_results(
-                        evaluation_batch_id=entity_id
-                    )
+                    from .pipeline.manifests import frozen_evaluation_batch
+
+                    results = frozen_evaluation_batch(composition.database, entity_id)
                     for item in results:
                         previous = evaluations.get(item["run_id"])
                         if previous and previous.get("evaluation_id") != item.get("evaluation_id"):
@@ -1973,7 +1994,7 @@ def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
                         evaluations[item["run_id"]] = item
                     runs.extend(composition.database.get_run(item["run_id"]) for item in results)
                 elif entity_type == "run_batch":
-                    runs.extend(composition.database.list_runs(run_batch_id=entity_id))
+                    runs.extend(_runs_from_batch_manifest(composition.database, entity_id))
                 else:
                     raise XmaxTestError(
                         f"sync selector must target run_batch or evaluation_batch, got {entity_type}"
@@ -1982,13 +2003,13 @@ def cmd_sync(composition: Composition, args: argparse.Namespace) -> int:
         else:
             selector_label = args.selector
             if args.selector.startswith("eval"):
-                results = composition.database.list_evaluation_results(
-                    evaluation_batch_id=args.selector
-                )
+                from .pipeline.manifests import frozen_evaluation_batch
+
+                results = frozen_evaluation_batch(composition.database, args.selector)
                 evaluations = {item["run_id"]: item for item in results}
                 runs = [composition.database.get_run(item["run_id"]) for item in results]
             else:
-                runs = composition.database.list_runs(run_batch_id=args.selector)
+                runs = _runs_from_batch_manifest(composition.database, args.selector)
     runs = list({item["run_id"]: item for item in runs}.values())
     if not runs:
         raise XmaxTestError(f"sync selector matched no runs: {selector_label}")
@@ -2014,7 +2035,10 @@ def cmd_reconcile(composition: Composition, args: argparse.Namespace) -> int:
             run_ids=manifest.get("item_ids", []), evaluations=selected
         )
     else:
-        outcome = composition.feishu_reconcile().reconcile(run_batch_id=args.run_batch_id)
+        runs = _runs_from_batch_manifest(composition.database, args.run_batch_id)
+        outcome = composition.feishu_reconcile().reconcile(
+            run_ids=[run["run_id"] for run in runs]
+        )
     _emit(args, "reconcile", outcome, ok=outcome.get("ok", False))
     return 0 if outcome.get("ok") else EXIT_PARTIAL
 
@@ -2653,7 +2677,7 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
 def _replay_run(composition: Composition, args: argparse.Namespace) -> int:
     from .evaluation.replay import ReplayService
 
-    runs = composition.database.list_runs(run_batch_id=args.run_batch_id)
+    runs = _runs_from_batch_manifest(composition.database, args.run_batch_id)
     service = ReplayService(
         composition.database,
         composition.evaluation_orchestrator(),

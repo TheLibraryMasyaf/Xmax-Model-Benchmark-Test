@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from xmax_test.benchmark import load_benchmark_contract
-from xmax_test.cli import Composition, _execute_run_request
+from xmax_test.cli import Composition, _execute_run_request, cmd_generate_offline
 from xmax_test.errors import ValidationError
 from xmax_test.feishu.client import FakeFeishuSyncClient
 from xmax_test.generation.offline.rest_adapter import FakeOfflineTaskTransport
@@ -333,6 +333,38 @@ class FakeRunE2ETestBase(unittest.TestCase):
 
 
 class FullPipelineTests(FakeRunE2ETestBase):
+    def test_standalone_generate_returns_the_persisted_exact_batch(self) -> None:
+        self.seed_assets("standalone")
+        plan = self.build_plan("x2.0")
+        args = SimpleNamespace(
+            plan_id=plan["plan_id"],
+            budget_approved=True,
+            resume=False,
+            json=True,
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(cmd_generate_offline(self.composition, args), 0)
+        data = json.loads(output.getvalue())["data"]
+        manifest = self.composition.database.get_batch_manifest(
+            "run_batch", data["run_batch_id"]
+        )
+        self.assertEqual(manifest["item_ids"], data["run_ids"])
+        self.assertEqual(
+            [
+                self.composition.database.get_run(run_id)["run_batch_id"]
+                for run_id in manifest["item_ids"]
+            ],
+            [manifest["batch_id"]] * len(manifest["item_ids"]),
+        )
+
+        args.resume = True
+        resumed_output = io.StringIO()
+        with redirect_stdout(resumed_output):
+            self.assertEqual(cmd_generate_offline(self.composition, args), 0)
+        resumed = json.loads(resumed_output.getvalue())["data"]
+        self.assertEqual(resumed, data)
+
     def test_task_worker_runs_one_frozen_case_through_sync_and_reconcile(self) -> None:
         self.seed_assets("task-worker")
         plan = self.build_plan("x2.0")

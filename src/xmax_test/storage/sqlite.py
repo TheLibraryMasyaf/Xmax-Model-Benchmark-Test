@@ -1450,18 +1450,28 @@ class SqliteMetadataRepository:
         return json.loads(row["payload"]) if row is not None else None
 
     def save_batch_manifest(self, manifest: dict[str, Any]) -> None:
-        with self._conn:
+        identity = (manifest.get("entity_type"), manifest.get("batch_id"))
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO batch_manifests(entity_type, batch_id, content_hash, "
                 "payload, created_at) VALUES (?, ?, ?, ?, ?)",
                 (
-                    manifest.get("entity_type"),
-                    manifest.get("batch_id"),
+                    *identity,
                     manifest.get("content_hash", ""),
                     _json(manifest),
                     manifest.get("created_at", utc_now()),
                 ),
             )
+            existing = self._conn.execute(
+                "SELECT content_hash FROM batch_manifests WHERE entity_type=? AND batch_id=?",
+                identity,
+            ).fetchone()
+            if existing["content_hash"] != manifest.get("content_hash", ""):
+                raise ContractError(
+                    "batch manifest identity collision: "
+                    f"{manifest.get('entity_type')}/{manifest.get('batch_id')} "
+                    "already exists with different frozen members"
+                )
 
     def get_batch_manifest(self, entity_type: str, batch_id: str) -> dict[str, Any]:
         row = self._conn.execute(

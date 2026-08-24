@@ -4,15 +4,18 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from jsonschema import Draft202012Validator
 
 from xmax_test.errors import (
+    ContractError,
     EvaluationBudgetPausedError,
     EvaluationInfrastructurePausedError,
 )
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 from xmax_test.tasks import TaskAllocator, TaskWorker
+from xmax_test.tasks.runtime import PipelineTaskRuntime
 from xmax_test.time import FixedClock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -132,6 +135,38 @@ class TaskTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["result_refs"]["run_id"], "run-after-claim")
+
+    def test_runtime_recovers_only_run_for_the_current_case(self) -> None:
+        for run_id, case_id in (("run-a", "case-a"), ("run-b", "case-b")):
+            self.repository.create_run(
+                {
+                    "run_id": run_id,
+                    "run_batch_id": "runs-shared",
+                    "case_id": case_id,
+                    "case_number": case_id,
+                    "model_id": "x2.0",
+                    "mode": "offline",
+                    "origin": "xmax_offline",
+                    "status": "completed",
+                    "provenance": {
+                        "source_type": "test",
+                        "source_locator": run_id,
+                        "source_hash": run_id,
+                    },
+                }
+            )
+        runtime = PipelineTaskRuntime(
+            SimpleNamespace(database=self.repository), lease_owner="worker-a"
+        )
+
+        recovered = runtime._existing_run({}, "runs-shared", "case-a")
+
+        self.assertEqual(recovered["run_id"], "run-a")
+
+        with self.assertRaisesRegex(ContractError, "does not belong to Case"):
+            runtime._existing_run(
+                {"run_id": "run-b"}, "runs-shared", "case-a"
+            )
 
     def test_budget_pause_is_not_a_failed_task_and_can_be_requeued(self) -> None:
         class PausedRuntime:

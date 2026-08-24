@@ -32,6 +32,8 @@
 
 每次阶段执行都必须写`schemas/stage-manifest.schema.json`，至少保存：阶段Run ID、输入引用、输出引用、输入哈希、配置哈希、生产者版本、状态、Attempt和时间。每个输出批次另写`schemas/batch-manifest.schema.json`，列出冻结成员、上游批次和内容哈希。
 
+批次成员关系只以Batch Manifest的`item_ids`为准。`GenerationRun.run_batch_id`和`EvaluationResult.evaluation_batch_id`记录产物首次创建时的来源批次，不是可扫描的成员索引；恢复运行可以在新Manifest中引用已完成产物，但不得改写其来源字段。若部分批次已经封口，而恢复后成员集合发生变化，系统必须派生带内容哈希后缀的新Batch ID并保留旧Manifest，不能覆盖或静默忽略差异。同一个Batch ID写入不同成员集合会触发合同错误。
+
 标准输出引用实体是：`asset_batch`、`test_plan`、`task_batch`、`run_batch`、`preprocess_batch`、`evaluation_batch`、`human_signal_batch`、`report_bundle`和`sync_batch`。`ingest`的外部输入快照使用`source_snapshot`。Stage Manifest只保存引用和哈希，不把大文件嵌入JSON。
 
 `sync`必须从Run Batch Manifest的`item_ids`读取精确Run集合，不能仅按可复用的`run_batch_id`查询整库，否则会把同一计划的旧失败Attempt混入当前同步。`reconcile`只对Sync Batch列出的Run做回读核对；共享Case表中与本批无关的历史行不计为当前批次的orphan。

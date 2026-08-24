@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..errors import ExternalServiceError
+from ..errors import ContractError, ExternalServiceError
 from ..hashing import content_hash
 
 
@@ -57,7 +57,7 @@ class PipelineTaskRuntime:
         run_batch_id = f"runs-{task_id[5:17]}"
         refs = dict(task.get("result_refs", {}))
 
-        run = self._existing_run(refs, run_batch_id)
+        run = self._existing_run(refs, run_batch_id, case.get("case_id"))
         if run is None:
             self.preflight([task])
             self._status(task_id, "generating")
@@ -143,11 +143,28 @@ class PipelineTaskRuntime:
             return None
         return content_hash({"content": path.read_text(encoding="utf-8")})
 
-    def _existing_run(self, refs: dict[str, Any], run_batch_id: str) -> dict[str, Any] | None:
+    def _existing_run(
+        self, refs: dict[str, Any], run_batch_id: str, case_id: str | None
+    ) -> dict[str, Any] | None:
         if refs.get("run_id"):
-            return self._repository.get_run(refs["run_id"])
-        runs = self._repository.list_runs(run_batch_id=run_batch_id)
-        return runs[-1] if runs else None
+            run = self._repository.get_run(refs["run_id"])
+            if not case_id or run.get("case_id") != case_id:
+                raise ContractError(
+                    f"task Run ref {run.get('run_id')} does not belong to Case {case_id}"
+                )
+            if run.get("run_batch_id") != run_batch_id:
+                raise ContractError(
+                    f"task Run ref {run.get('run_id')} does not belong to batch {run_batch_id}"
+                )
+            return run
+        if not case_id:
+            return None
+        runs = self._repository.list_runs(run_batch_id=run_batch_id, case_id=case_id)
+        return (
+            max(runs, key=lambda item: (item.get("created_at", ""), item["run_id"]))
+            if runs
+            else None
+        )
 
     def _status(self, task_id: str, status: str) -> None:
         self._repository.update_test_task(task_id, status, lease_owner=self._lease_owner)

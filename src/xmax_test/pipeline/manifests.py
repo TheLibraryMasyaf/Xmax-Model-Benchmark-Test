@@ -14,11 +14,117 @@ from pathlib import Path
 from typing import Any
 
 from ..contracts import EntityRef
+from ..errors import ContractError
 from ..hashing import content_hash
 from ..time import utc_now
 
 MANIFEST_VERSION = "1.0"
 PRODUCER_VERSION = "0.3.0"
+
+
+def frozen_run_batch(repository: Any, run_batch_id: str) -> list[dict[str, Any]]:
+    """Return only the immutable Run members named by a Run Batch Manifest."""
+
+    return _frozen_batch_items(
+        repository,
+        entity_type="run_batch",
+        batch_id=run_batch_id,
+        getter=repository.get_run,
+        item_id_field="run_id",
+        # A completed Run may be referenced by a later resume batch.  The
+        # Manifest is the membership contract; generation_runs.run_batch_id is
+        # only the Run's creation-batch provenance and must not be rewritten.
+        binding_field=None,
+    )
+
+
+def frozen_evaluation_batch(
+    repository: Any, evaluation_batch_id: str
+) -> list[dict[str, Any]]:
+    """Return only the immutable EvaluationResult members named by its Manifest."""
+
+    items = _frozen_batch_items(
+        repository,
+        entity_type="evaluation_batch",
+        batch_id=evaluation_batch_id,
+        getter=repository.get_evaluation_result,
+        item_id_field="evaluation_id",
+        # Resume batches may reuse an already completed EvaluationResult and
+        # then recompute only the group context. Membership is defined by the
+        # immutable Manifest, not by rewriting the result's origin batch.
+        binding_field=None,
+    )
+    run_ids = [str(item.get("run_id") or "") for item in items]
+    if not all(run_ids) or len(run_ids) != len(set(run_ids)):
+        raise ContractError(
+            f"evaluation_batch manifest {evaluation_batch_id} must contain exactly "
+            "one EvaluationResult per non-empty Run ID"
+        )
+    return items
+
+
+def collision_safe_batch_manifest(
+    repository: Any, manifest: dict[str, Any]
+) -> dict[str, Any]:
+    """Version a batch identity when the requested ID is already frozen.
+
+    A partial generation/evaluation attempt may freeze a smaller member set.
+    Resume must keep that Manifest immutable, so a changed member set receives
+    a deterministic content-hash suffix instead of being silently ignored or
+    overwriting history.
+    """
+
+    existing_by_id = {
+        item["batch_id"]: item
+        for item in repository.list_batch_manifests(manifest.get("entity_type"))
+    }
+    batch_id = str(manifest.get("batch_id") or "")
+    existing = existing_by_id.get(batch_id)
+    if existing is None or existing.get("content_hash") == manifest.get("content_hash"):
+        return manifest
+    digest = str(manifest.get("content_hash") or "")
+    for length in (8, 12, 16, 24, 32, 64):
+        candidate_id = f"{batch_id}-{digest[:length]}"
+        candidate = existing_by_id.get(candidate_id)
+        if candidate is None or candidate.get("content_hash") == digest:
+            return {
+                **manifest,
+                "batch_id": candidate_id,
+                "metadata": {
+                    **manifest.get("metadata", {}),
+                    "resumed_from_frozen_batch_id": batch_id,
+                },
+            }
+    raise ContractError(
+        f"cannot allocate collision-safe identity for {manifest.get('entity_type')}/{batch_id}"
+    )
+
+
+def _frozen_batch_items(
+    repository: Any,
+    *,
+    entity_type: str,
+    batch_id: str,
+    getter: Any,
+    item_id_field: str,
+    binding_field: str | None,
+) -> list[dict[str, Any]]:
+    manifest = repository.get_batch_manifest(entity_type, batch_id)
+    item_ids = list(manifest.get("item_ids", []))
+    if len(item_ids) != len(set(item_ids)):
+        raise ContractError(f"{entity_type} manifest {batch_id} contains duplicate item IDs")
+    items = [getter(item_id) for item_id in item_ids]
+    mismatched_ids = [
+        str(item.get(item_id_field) or "")
+        for item in items
+        if binding_field is not None and item.get(binding_field) != batch_id
+    ]
+    if mismatched_ids:
+        raise ContractError(
+            f"{entity_type} manifest {batch_id} contains items bound to another batch: "
+            + ", ".join(mismatched_ids)
+        )
+    return items
 
 
 def _stage_run_id(clock: Any) -> str:

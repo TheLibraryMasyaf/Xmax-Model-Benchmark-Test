@@ -13,7 +13,7 @@ from collections import defaultdict
 from typing import Any
 
 GROUP_JUDGE_ID = "batch-group-metrics"
-GROUP_JUDGE_VERSION = "1.0.0"
+GROUP_JUDGE_VERSION = "1.1.0-frozen-members"
 GROUP_CRITERION_SCOPES = {
     "C1.2": "batch",
     "O4.1": "repeat_group",
@@ -106,7 +106,9 @@ class BatchGroupEvaluator:
         }
         if len(distinct_inputs) < 2:
             criterion = self._not_applicable(
-                "C1.2", "batch contains fewer than two distinct input combinations"
+                "C1.2",
+                "batch contains fewer than two distinct input combinations",
+                group,
             )
         else:
             completed = [item for item in group if item.get("status") == "completed"]
@@ -130,6 +132,7 @@ class BatchGroupEvaluator:
                 score,
                 {
                     "run_count": len(group),
+                    "member_run_ids": sorted(item["run_id"] for item in group),
                     "distinct_input_count": len(distinct_inputs),
                     "completed_count": len(completed),
                     "retry_count": retries,
@@ -156,7 +159,7 @@ class BatchGroupEvaluator:
         }
         if len(distinct_feeds) < 2:
             transfer_item = self._not_applicable(
-                "O4.2", "batch contains fewer than two distinct Feed inputs"
+                "O4.2", "batch contains fewer than two distinct Feed inputs", transfer
             )
         else:
             transfer_item = self._stability_criterion("O4.2", transfer, results)
@@ -172,7 +175,7 @@ class BatchGroupEvaluator:
         completed = [item for item in repeat if item.get("status") == "completed"]
         failures = attempts - len(completed)
         if attempts == 0:
-            retry = self._not_applicable("O5.2", "no attempts in frozen group")
+            retry = self._not_applicable("O5.2", "no attempts in frozen group", repeat)
         else:
             retry_score = 2.0 if failures == 0 else (1.0 if failures == 1 else 0.0)
             retry = self._criterion(
@@ -180,6 +183,7 @@ class BatchGroupEvaluator:
                 retry_score,
                 {
                     "attempt_count": attempts,
+                    "member_run_ids": sorted(item["run_id"] for item in repeat),
                     "failed_attempts": failures,
                     "completed_attempts": len(completed),
                 },
@@ -198,6 +202,7 @@ class BatchGroupEvaluator:
             cost = self._not_applicable(
                 "O5.3",
                 "no fully or partially assessed completed result in repeat group",
+                repeat,
             )
         else:
             attempts_per_satisfactory = attempts / max(satisfactory, 1)
@@ -212,6 +217,7 @@ class BatchGroupEvaluator:
                 score,
                 {
                     "attempt_count": attempts,
+                    "member_run_ids": sorted(item["run_id"] for item in repeat),
                     "satisfactory_count": satisfactory,
                     "attempts_per_satisfactory": round(attempts_per_satisfactory, 4),
                     "total_credits": credits,
@@ -230,6 +236,7 @@ class BatchGroupEvaluator:
             return self._not_applicable(
                 criterion_id,
                 "fewer than two attempts are available for group stability",
+                runs,
             )
         completed = [item for item in runs if item.get("status") == "completed"]
         qualities = [
@@ -251,6 +258,7 @@ class BatchGroupEvaluator:
             score,
             {
                 "attempt_count": len(runs),
+                "member_run_ids": sorted(item["run_id"] for item in runs),
                 "completed_count": len(completed),
                 "success_ratio": round(success_ratio, 4),
                 "quality_spread_0_2": round(spread, 4),
@@ -310,7 +318,9 @@ class BatchGroupEvaluator:
         }
 
     @staticmethod
-    def _not_applicable(criterion_id: str, reason: str) -> dict[str, Any]:
+    def _not_applicable(
+        criterion_id: str, reason: str, runs: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         return {
             "criterion_id": criterion_id,
             "verdict": "not_applicable",
@@ -319,7 +329,9 @@ class BatchGroupEvaluator:
             "assessable": False,
             "applicable": False,
             "evidence": [{"description": reason}],
-            "raw_metrics": {},
+            "raw_metrics": {
+                "member_run_ids": sorted(item["run_id"] for item in runs),
+            },
             "aggregation_scope": BatchGroupEvaluator._aggregation_scope(criterion_id),
         }
 
