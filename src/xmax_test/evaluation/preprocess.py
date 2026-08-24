@@ -19,7 +19,7 @@ from .contact_sheet import ContactSheetBuilder
 from .roi import RoiExtractor
 from .sampling import global_samples, local_high_fps_timestamps
 
-PROCESSOR_VERSION = "0.1.1"
+PROCESSOR_VERSION = "0.1.0"
 
 
 class PreprocessService:
@@ -32,6 +32,7 @@ class PreprocessService:
         contact_sheet: ContactSheetBuilder | None = None,
         roi: RoiExtractor | None = None,
         media_validator: MediaValidator | None = None,
+        provider_media_normalizer: Any = None,
         global_frame_count: int = 8,
         window_before_s: float = 1.0,
         window_after_s: float = 2.0,
@@ -43,6 +44,7 @@ class PreprocessService:
         self._contact_sheet = contact_sheet or ContactSheetBuilder()
         self._roi = roi or RoiExtractor()
         self._media_validator = media_validator or MediaValidator()
+        self._provider_media_normalizer = provider_media_normalizer
         self._global_frame_count = global_frame_count
         self._window_before_s = window_before_s
         self._window_after_s = window_after_s
@@ -77,6 +79,10 @@ class PreprocessService:
             "window_after_s": self._window_after_s,
             "producer_version": PROCESSOR_VERSION,
         }
+        if self._needs_provider_normalization(asset):
+            parameters["provider_media_normalizer"] = str(
+                getattr(self._provider_media_normalizer, "version", "unknown")
+            )
         config_hash = content_hash(parameters)
         input_hash = content_hash(
             {
@@ -173,9 +179,21 @@ class PreprocessService:
             }
         )
         rois = self._roi.extract({"index": 0, "run_id": run["run_id"]})
+        provider_media: dict[str, Any] = {}
+        if self._needs_provider_normalization(asset):
+            normalized = self._provider_media_normalizer.normalize(run["run_id"], asset)
+            if normalized:
+                provider_media["result_video"] = normalized
 
         preprocess = {
-            "preprocess_id": f"prep-{input_hash[:12]}",
+            "preprocess_id": "prep-"
+            + content_hash(
+                {
+                    "input_hash": input_hash,
+                    "config_hash": config_hash,
+                    "producer_version": PROCESSOR_VERSION,
+                }
+            )[:12],
             "run_id": run["run_id"],
             "input_hash": input_hash,
             "config_hash": config_hash,
@@ -192,6 +210,7 @@ class PreprocessService:
             "sheets": input_sheets + [global_sheet] + event_sheets,
             "evidence_groups": evidence_groups,
             "rois": rois,
+            "provider_media": provider_media,
             "created_at": utc_now(),
         }
         uri = self._artifacts.put_bytes(
@@ -202,6 +221,13 @@ class PreprocessService:
         preprocess["manifest_uri"] = uri
         self._repository.upsert_preprocess_run(preprocess)
         return preprocess
+
+    def _needs_provider_normalization(self, asset: dict[str, Any]) -> bool:
+        if self._provider_media_normalizer is None:
+            return False
+        return str(asset.get("uri") or "").lower().endswith(".webm") or str(
+            asset.get("mime_type") or ""
+        ) == "video/webm"
 
     def _recover_missing_duration(self, asset: dict[str, Any]) -> dict[str, Any]:
         """Recover derived media facts without modifying the source artifact."""

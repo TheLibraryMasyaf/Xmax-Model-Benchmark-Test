@@ -227,7 +227,12 @@ class EvaluationOrchestrator:
             "user_prompt": case.get("prompt_text", ""),
             "evidence_images": evidence_images,
             "evidence_groups": evidence_groups,
-            "media_inputs": self._media_inputs(case, run, operation_contract),
+            "media_inputs": self._media_inputs(
+                case,
+                run,
+                operation_contract,
+                preprocess=preprocess,
+            ),
             "operation_contract": operation_contract,
             "output_schema": self._judgment_schema(),
         }
@@ -437,6 +442,8 @@ class EvaluationOrchestrator:
         case: dict[str, Any],
         run: dict[str, Any],
         operation_contract: dict[str, Any] | None = None,
+        *,
+        preprocess: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Resolve original, role-labelled media for direct-video MLLM providers.
 
@@ -483,10 +490,37 @@ class EvaluationOrchestrator:
                 result.append(item)
         if run.get("result_asset_id"):
             asset_id = run["result_asset_id"]
-            item = self._media_input("result_video", asset_id, media_urls.get(asset_id))
+            provider_media = (preprocess or {}).get("provider_media", {}).get("result_video")
+            item = (
+                self._provider_media_input("result_video", provider_media, asset_id)
+                if provider_media
+                else self._media_input("result_video", asset_id, media_urls.get(asset_id))
+            )
             if item:
                 result.append(item)
         return result
+
+    def _provider_media_input(
+        self,
+        role: str,
+        provider_media: dict[str, Any],
+        source_asset_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            uri = str(provider_media.get("uri") or "")
+            path = self._artifacts.resolve(uri)
+            if not path.is_file():
+                return None
+            return {
+                "role": role,
+                "kind": "video",
+                "path": str(path.resolve()),
+                "asset_id": source_asset_id,
+                "derived_from_asset_id": source_asset_id,
+                "normalizer_version": provider_media.get("normalizer_version"),
+            }
+        except Exception:
+            return None
 
     def _operation_contract(self, case: dict[str, Any], mode: str) -> dict[str, Any]:
         evaluation = dict(case.get("evaluation_operation_contract") or {})

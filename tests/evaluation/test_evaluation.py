@@ -497,6 +497,62 @@ class FusionTests(EvaluationTestBase):
 
 
 class OrchestratorTests(EvaluationTestBase):
+    def test_webm_provider_normalizer_is_versioned_without_preprocess_id_collision(self) -> None:
+        class FakeNormalizer:
+            def __init__(self, artifacts, version):
+                self.artifacts = artifacts
+                self.version = version
+
+            def normalize(self, run_id, asset):
+                stored = self.artifacts.put_bytes(
+                    "preprocessing",
+                    f"{run_id}/{self.version}.mp4",
+                    f"mp4-{self.version}".encode(),
+                )
+                return {
+                    "uri": stored["uri"],
+                    "mime_type": "video/mp4",
+                    "bytes": stored["bytes"],
+                    "source_asset_id": asset["asset_id"],
+                    "normalizer_version": self.version,
+                }
+
+        run = self.seed_run(mode="realtime")
+        stored = self.artifacts.put_bytes("assets", "result.webm", b"webm-source")
+        self.repository.upsert_asset(
+            {
+                "asset_id": "result-webm",
+                "kind": "result_video",
+                "uri": stored["uri"],
+                "sha256": stored["sha256"],
+                "bytes": stored["bytes"],
+                "mime_type": "video/webm",
+                "status": "ready",
+                "media": {"duration_s": 8.0, "width": 832, "height": 1504},
+            }
+        )
+        run = {**run, "result_asset_id": "result-webm"}
+        first = PreprocessService(
+            self.repository,
+            self.artifacts,
+            provider_media_normalizer=FakeNormalizer(self.artifacts, "webm-h264-v1"),
+        ).build(run)
+        second = PreprocessService(
+            self.repository,
+            self.artifacts,
+            provider_media_normalizer=FakeNormalizer(self.artifacts, "webm-h264-v2"),
+        ).build(run)
+
+        self.assertNotEqual(first["preprocess_id"], second["preprocess_id"])
+        self.assertEqual(
+            first["provider_media"]["result_video"]["normalizer_version"],
+            "webm-h264-v1",
+        )
+        self.assertEqual(
+            second["provider_media"]["result_video"]["normalizer_version"],
+            "webm-h264-v2",
+        )
+
     def test_preprocess_recovers_missing_webm_duration(self) -> None:
         class RecoveredMediaValidator:
             def validate(self, path, kind):
@@ -637,6 +693,31 @@ class OrchestratorTests(EvaluationTestBase):
         )
         self.assertEqual(urls["feed-a"], feed_url)
         self.assertEqual(urls["result-asset"], result_url)
+
+    def test_direct_media_prefers_normalized_provider_result(self) -> None:
+        run = self.seed_run(mode="realtime")
+        derived = self.artifacts.put_bytes(
+            "preprocessing",
+            f"{run['run_id']}/provider-media/result.mp4",
+            b"provider-mp4",
+        )
+        case = self.repository.get_test_case(run["case_id"])
+        media = self.orchestrator()._media_inputs(
+            case,
+            run,
+            preprocess={
+                "provider_media": {
+                    "result_video": {
+                        "uri": derived["uri"],
+                        "normalizer_version": "webm-h264-v2",
+                    }
+                }
+            },
+        )
+        result = next(item for item in media if item["role"] == "result_video")
+        self.assertTrue(result["path"].endswith("result.mp4"))
+        self.assertEqual(result["asset_id"], "result-asset")
+        self.assertEqual(result["normalizer_version"], "webm-h264-v2")
 
     def test_preprocess_groups_feed_and_result_evidence(self) -> None:
         run = self.seed_run()

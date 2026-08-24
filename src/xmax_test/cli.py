@@ -429,16 +429,20 @@ class Composition:
         )
 
     def preprocess_service(self, repository: Any | None = None) -> Any:
-        from .evaluation.frames import FfmpegFrameExtractor
+        from .evaluation.frames import FfmpegFrameExtractor, FfmpegProviderMediaNormalizer
         from .evaluation.preprocess import PreprocessService
 
         extractor = self.inject.get("frame_extractor")
+        provider_media_normalizer = self.inject.get("provider_media_normalizer")
         if extractor is None and not self.inject:
             extractor = FfmpegFrameExtractor(self.artifacts)
+        if provider_media_normalizer is None and not self.inject:
+            provider_media_normalizer = FfmpegProviderMediaNormalizer(self.artifacts)
         return PreprocessService(
             repository or self.database,
             self.artifacts,
             frame_extractor=extractor,
+            provider_media_normalizer=provider_media_normalizer,
             clock=self.clock,
         )
 

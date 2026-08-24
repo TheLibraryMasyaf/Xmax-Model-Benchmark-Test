@@ -8,6 +8,83 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import MissingDependencyError, ValidationError
+from ..hashing import file_sha256
+
+
+class FfmpegProviderMediaNormalizer:
+    """Create a provider-compatible MP4 while preserving the source WebM."""
+
+    version = "webm-h264-v2"
+
+    def __init__(self, artifacts: Any, binary: str = "ffmpeg", timeout_s: int = 180) -> None:
+        self._artifacts = artifacts
+        self._binary = binary
+        self._timeout = timeout_s
+
+    def normalize(self, run_id: str, asset: dict[str, Any]) -> dict[str, Any] | None:
+        uri = str(asset.get("uri") or "")
+        mime = str(asset.get("mime_type") or "")
+        if not (uri.lower().endswith(".webm") or mime == "video/webm"):
+            return None
+        source = self._artifacts.resolve(uri)
+        if not source.is_file():
+            raise ValidationError(f"provider media source is missing: {uri}")
+        source_hash = str(asset.get("sha256") or file_sha256(source))
+        relative = f"{run_id}/provider-media/{self.version}/{source_hash[:16]}.mp4"
+        target_uri = self._artifacts.uri("preprocessing", relative)
+        target = self._artifacts.resolve(target_uri)
+        if not target.is_file():
+            with tempfile.TemporaryDirectory(prefix="xmax-provider-media-") as directory:
+                output = Path(directory) / "result.mp4"
+                try:
+                    result = subprocess.run(
+                        [
+                            self._binary,
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-i",
+                            str(source),
+                            "-map",
+                            "0:v:0",
+                            "-an",
+                            "-vf",
+                            "fps=24",
+                            "-r",
+                            "24",
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            "veryfast",
+                            "-crf",
+                            "28",
+                            "-pix_fmt",
+                            "yuv420p",
+                            "-movflags",
+                            "+faststart",
+                            "-y",
+                            str(output),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=self._timeout,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    raise ValidationError(f"provider media normalization failed: {exc}") from exc
+                if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
+                    raise ValidationError(
+                        "provider media normalization produced no MP4: "
+                        f"{result.stderr[-500:]}"
+                    )
+                self._artifacts.put_file("preprocessing", output, relative)
+        return {
+            "uri": target_uri,
+            "mime_type": "video/mp4",
+            "bytes": target.stat().st_size,
+            "source_asset_id": asset.get("asset_id"),
+            "source_sha256": source_hash,
+            "normalizer_version": self.version,
+        }
 
 
 class FfmpegFrameExtractor:
