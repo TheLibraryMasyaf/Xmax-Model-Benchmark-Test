@@ -14,6 +14,13 @@ from typing import Any
 
 GROUP_JUDGE_ID = "batch-group-metrics"
 GROUP_JUDGE_VERSION = "1.0.0"
+GROUP_CRITERION_SCOPES = {
+    "C1.2": "batch",
+    "O4.1": "repeat_group",
+    "O4.2": "cross_input_group",
+    "O5.2": "repeat_group",
+    "O5.3": "repeat_group",
+}
 
 
 class BatchGroupEvaluator:
@@ -25,6 +32,17 @@ class BatchGroupEvaluator:
         runs: list[dict[str, Any]],
         results: list[dict[str, Any]],
     ) -> dict[str, list[dict[str, Any]]]:
+        run_ids = [str(run.get("run_id") or "") for run in runs]
+        if not all(run_ids) or len(run_ids) != len(set(run_ids)):
+            raise ValueError("group evaluation requires unique non-empty frozen run IDs")
+        result_run_ids = [str(result.get("run_id") or "") for result in results]
+        if len(result_run_ids) != len(set(result_run_ids)):
+            raise ValueError("group evaluation received duplicate results for one Run")
+        outside = sorted(set(result_run_ids) - set(run_ids))
+        if outside:
+            raise ValueError(
+                "group evaluation results are outside the frozen Run set: " + ", ".join(outside)
+            )
         cases = {
             run["run_id"]: self._repository.get_test_case(run["case_id"])
             for run in runs
@@ -288,6 +306,7 @@ class BatchGroupEvaluator:
             "applicable": True,
             "evidence": [{"description": description}],
             "raw_metrics": metrics,
+            "aggregation_scope": BatchGroupEvaluator._aggregation_scope(criterion_id),
         }
 
     @staticmethod
@@ -301,7 +320,12 @@ class BatchGroupEvaluator:
             "applicable": False,
             "evidence": [{"description": reason}],
             "raw_metrics": {},
+            "aggregation_scope": BatchGroupEvaluator._aggregation_scope(criterion_id),
         }
+
+    @staticmethod
+    def _aggregation_scope(criterion_id: str) -> str:
+        return GROUP_CRITERION_SCOPES.get(criterion_id, "run")
 
     @staticmethod
     def _judgment(

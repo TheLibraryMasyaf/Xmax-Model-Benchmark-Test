@@ -9,7 +9,7 @@
 {
   "$schema": "./schemas/benchmark.schema.json",
   "schema_version": "1.1",
-  "benchmark_version": "0.2.0-draft",
+  "benchmark_version": "0.2.1-draft",
   "status": "shadow",
   "provisional": true,
   "review_after": "first_round_evaluation",
@@ -52,7 +52,8 @@
           "metric"
         ],
         "secondary_kinds": [
-          "cv"
+          "cv",
+          "mlmm"
         ],
         "fallback_policy": "no_automated_judge"
       },
@@ -2820,6 +2821,11 @@
   ],
   "change_log": [
     {
+      "version": "0.2.1-draft",
+      "date": "2026-08-24",
+      "summary": "为C1.1结果有效性增加MLLM视觉复核路由，使错误页、持续黑屏、空白或原画直出可以触发无效结果硬门槛；旧结果通过新评测批次Replay。"
+    },
+    {
       "version": "0.2.0-draft",
       "date": "2026-08-21",
       "summary": "提高C8/C9/C10等直接影响观看感受的维度权重，降低部分纯技术和成本维度权重；同步更新通用与全部场景权重规则。"
@@ -2838,7 +2844,7 @@
 
 适用于XMAX基于原视频、摄像头流、参考图片或参考视频的离线与实时生成，不包含纯文本直接生成视频。
 
-当前`benchmark_version = 0.2.0-draft`，所有维度、Profile、规则、Gate和Score Schema均为Shadow。系统可以在第一轮测试中产出Shadow分数和诊断，但不能把它当作稳定的正式排行榜结论。
+当前`benchmark_version = 0.2.1-draft`，所有维度、Profile、规则、Gate和Score Schema均为Shadow。系统可以在第一轮测试中产出Shadow分数和诊断，但不能把它当作稳定的正式排行榜结论。
 
 ## 2. 评分方法
 
@@ -2905,7 +2911,7 @@
 
 ## 7. 第一轮测试后的调整要求
 
-第一轮至少检查：分数分布、维度覆盖率、Judge一致性、场景排序变化、人工修订率、权重敏感性和Hard Gate误触发。调整时创建新的Benchmark/Profile/Rule/Score Schema版本并Replay旧Run，不修改`0.2.0-draft`历史。
+第一轮至少检查：分数分布、维度覆盖率、Judge一致性、场景排序变化、人工修订率、权重敏感性和Hard Gate误触发。调整时创建新的Benchmark/Profile/Rule/Score Schema版本并Replay旧Run，不修改历史版本。
 
 “明显提升、持平、劣化”的报告阈值当前不预设；先观察首轮分布，再补充`comparison_policy`，避免无数据时制造虚假精度。
 

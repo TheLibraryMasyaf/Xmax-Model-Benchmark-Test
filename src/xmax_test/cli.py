@@ -25,6 +25,7 @@ from .errors import (
     EXIT_MISSING_DEPENDENCY,
     EXIT_PARTIAL,
     ConfigError,
+    ContractError,
     XmaxTestError,
 )
 from .scenarios import load_scenario_pack
@@ -1285,7 +1286,7 @@ def _evaluate_executor(
             results = list(stream_state.get("evaluations", []))
             errors = list(stream_state.get("errors", {}).get("evaluate", []))
             evaluation_batch_id = stream_state["evaluation_batch_id"]
-            runs = composition.database.list_runs(run_batch_id=run_batch_ref.entity_id)
+            runs = _runs_from_batch_manifest(composition.database, run_batch_ref.entity_id)
             results = orchestrator.finalize_batch_context(runs, results)
             aggregate = aggregate_evaluation_results(results)
             manifest = build_batch_manifest(
@@ -1309,7 +1310,7 @@ def _evaluate_executor(
                 errors=errors,
                 metadata=manifest["metadata"],
             )
-        runs = composition.database.list_runs(run_batch_id=run_batch_ref.entity_id)
+        runs = _runs_from_batch_manifest(composition.database, run_batch_ref.entity_id)
         preprocess_manifest = composition.database.get_batch_manifest(
             "preprocess_batch", preprocess_batch_ref.entity_id
         )
@@ -1419,9 +1420,34 @@ def _sync_executor(composition: Composition, request: dict[str, Any], args: argp
         evaluations: dict[str, dict[str, Any]] = {}
         for ref in req.input_refs:
             if ref.entity_type == "evaluation_batch":
-                results = composition.database.list_evaluation_results(
-                    evaluation_batch_id=ref.entity_id
+                evaluation_manifest = composition.database.get_batch_manifest(
+                    "evaluation_batch", ref.entity_id
                 )
+                results = [
+                    composition.database.get_evaluation_result(evaluation_id)
+                    for evaluation_id in evaluation_manifest.get("item_ids", [])
+                ]
+                wrong_batch = [
+                    item.get("evaluation_id")
+                    for item in results
+                    if item.get("evaluation_batch_id") != ref.entity_id
+                ]
+                if wrong_batch:
+                    return StageExecutionResult(
+                        status="error",
+                        output_refs=[],
+                        errors=[
+                            {
+                                "code": "xmax.contract_error",
+                                "message": (
+                                    f"evaluation batch manifest {ref.entity_id} contains results "
+                                    f"bound to another batch: {wrong_batch}"
+                                ),
+                                "stage": "sync",
+                                "retryable": False,
+                            }
+                        ],
+                    )
                 for item in results:
                     previous = evaluations.get(item["run_id"])
                     if previous and previous.get("evaluation_id") != item.get("evaluation_id"):
@@ -1820,7 +1846,7 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
 def cmd_preprocess(composition: Composition, args: argparse.Namespace) -> int:
     service = composition.preprocess_service()
     preprocess_ids = []
-    for run in composition.database.list_runs(run_batch_id=args.run_batch_id):
+    for run in _runs_from_batch_manifest(composition.database, args.run_batch_id):
         result = service.build(run)
         preprocess_ids.append(result["preprocess_id"])
     from .pipeline.manifests import build_batch_manifest
@@ -1846,10 +1872,29 @@ def cmd_preprocess(composition: Composition, args: argparse.Namespace) -> int:
 
 def cmd_evaluate(composition: Composition, args: argparse.Namespace) -> int:
     orchestrator = composition.evaluation_orchestrator()
-    runs = composition.database.list_runs(run_batch_id=args.run_batch_id)
+    runs = _runs_from_batch_manifest(composition.database, args.run_batch_id)
     summary = orchestrator.evaluate_runs(runs, resume=args.resume)
     _emit(args, "evaluate", summary, ok=not summary.get("errors"))
     return 0 if not summary.get("errors") else EXIT_PARTIAL
+
+
+def _runs_from_batch_manifest(repository: Any, run_batch_id: str) -> list[dict[str, Any]]:
+    """Load the exact frozen Run set; never widen scope via a database filter."""
+
+    manifest = repository.get_batch_manifest("run_batch", run_batch_id)
+    run_ids = list(manifest.get("item_ids", []))
+    if len(run_ids) != len(set(run_ids)):
+        raise ContractError(f"run batch manifest {run_batch_id} contains duplicate run IDs")
+    runs = [repository.get_run(run_id) for run_id in run_ids]
+    mismatched = [
+        run["run_id"] for run in runs if run.get("run_batch_id") != run_batch_id
+    ]
+    if mismatched:
+        raise ContractError(
+            f"run batch manifest {run_batch_id} contains Runs bound to another batch: "
+            + ", ".join(mismatched)
+        )
+    return runs
 
 
 def cmd_evaluation_budget(composition: Composition, args: argparse.Namespace) -> int:

@@ -165,6 +165,7 @@ class PluginTests(unittest.TestCase):
             }
         )[0]
         self.assertFalse(r6["assessable"])
+        self.assertFalse(r6["criterion_results"][0]["applicable"])
 
     def test_video_quality_thresholds_have_three_levels(self) -> None:
         good = {

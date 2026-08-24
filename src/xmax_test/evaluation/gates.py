@@ -58,7 +58,15 @@ class HardGateEvaluator:
             if dimension_id and criterion.get("dimension_id") != dimension_id:
                 return False
             if "score_equals" in condition:
-                return criterion.get("score") == condition["score_equals"]
+                expected = condition["score_equals"]
+                # A hard-gate failure from one trusted Judge must not be
+                # averaged away by another Judge that only verified file or
+                # transport validity. The fused mean remains available for
+                # ordinary scoring and audit.
+                judge_scores = criterion.get("judge_scores") or []
+                if any(item.get("score") == expected for item in judge_scores):
+                    return True
+                return criterion.get("score") == expected
             return True
         if dimension_id and dimension_id in dimension_scores:
             judgment = dimension_scores[dimension_id]

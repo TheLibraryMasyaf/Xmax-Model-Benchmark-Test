@@ -119,4 +119,6 @@ raw/<judge_id>/
 
 `evaluation.json`的`criterion_results`是单条视频评分事实；`dimension_results`必须从其派生。`evaluate_runs`同时返回并在Evaluation Batch Manifest中保存`criterion_summary`、`dimension_summary`和`case_score_summary`，包含覆盖率、均值、中位数、最小/最大、标准差、P25/P75和分布。
 
+细则按评估范围分为 `run`、`repeat_group`、`cross_input_group` 和 `batch`。单条Run完成后先保存并同步已有评语；组级细则尚未收口时，EvaluationResult写`score_readiness=pending_group_metrics`且总分保持空值。冻结组完成后，组级Judge只读取Run Batch Manifest成员，幂等更新同一EvaluationResult，再由批末同步回填Case分数。`not_applicable`表示本Case没有配置对应实验并从分母排除；`unassessable`表示实验已要求或已执行但证据不足；`uncovered`表示没有Judge提交，三者不得互换。
+
 正式结果遵循 `schemas/evaluation-result.schema.json`，保存Benchmark、Scenario Pack、Weight Profile、命中规则、Score Schema、Judge、预处理器和模型版本，以支持历史回放。

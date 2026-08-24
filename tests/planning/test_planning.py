@@ -73,6 +73,7 @@ class PlanningTestBase(unittest.TestCase):
                 "text": "换装：把人物替换为参考图的服装",
                 "group_id": "g1",
                 "record_number": 1,
+                "scenario_id": "core-selfie-appearance",
             },
         )
         asset("prompt-ref-1", "prompt_image", {"group_id": "g1"})
@@ -83,6 +84,7 @@ class PlanningTestBase(unittest.TestCase):
                 "text": "手势舞：按照参考视频完成动作",
                 "group_id": "g2",
                 "record_number": 2,
+                "scenario_id": "core-dance-fixed-camera-appearance",
             },
         )
         asset("prompt-ref-2", "prompt_video", {"group_id": "g2"})
@@ -168,6 +170,7 @@ class DeterminismTests(PlanningTestBase):
                 "metadata": {
                     "text": "换装：按参考图替换服装",
                     "group_id": "g3",
+                    "scenario_id": "core-selfie-appearance",
                 },
             }
         )
@@ -282,6 +285,40 @@ class AllocationStrategyTests(PlanningTestBase):
 
 
 class RecipeModeTests(PlanningTestBase):
+    def test_missing_scenario_is_skipped_instead_of_using_first_scene(self) -> None:
+        self.repository.upsert_asset(
+            {
+                "asset_id": "prompt-no-scene",
+                "kind": "prompt_text",
+                "uri": "artifact://assets/prompt-no-scene/source.bin",
+                "sha256": "sha-prompt-no-scene",
+                "bytes": 10,
+                "status": "ready",
+                "metadata": {"text": "换装：不要猜场景", "group_id": "no-scene"},
+            }
+        )
+        self.repository.upsert_asset(
+            {
+                "asset_id": "prompt-no-scene-ref",
+                "kind": "prompt_image",
+                "uri": "artifact://assets/prompt-no-scene-ref/source.bin",
+                "sha256": "sha-prompt-no-scene-ref",
+                "bytes": 10,
+                "status": "ready",
+                "metadata": {"group_id": "no-scene"},
+            }
+        )
+        plan = self.builder.build(self.request(seed=99, repeat_count=1))
+        self.assertFalse(
+            any(case["prompt_text"] == "换装：不要猜场景" for case in plan["cases"])
+        )
+        self.assertTrue(
+            any(
+                "must provide an explicit scenario_id" in item.get("reason", "")
+                for item in plan["metadata"]["skipped"]
+            )
+        )
+
     def test_offline_image_reference_uses_feed_as_edited(self) -> None:
         plan = self.builder.build(self.request(seed=3))
         image_case = next(
@@ -323,7 +360,10 @@ class RecipeModeTests(PlanningTestBase):
                 "sha256": "sha-prompt-3",
                 "bytes": 10,
                 "status": "ready",
-                "metadata": {"text": "触控：让画面主体跟随手指拖动"},
+                "metadata": {
+                    "text": "触控：让画面主体跟随手指拖动",
+                    "scenario_id": "supp-realtime-gesture-effect",
+                },
             }
         )
         plan = self.builder.build(self.request(seed=5))

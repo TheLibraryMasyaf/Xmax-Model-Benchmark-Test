@@ -451,6 +451,25 @@ class FusionTests(EvaluationTestBase):
         )
         self.assertFalse(outcome_ok["block_score"])
 
+    def test_hard_gate_uses_any_judge_zero_before_fused_mean(self) -> None:
+        outcome = HardGateEvaluator().evaluate(
+            self.benchmark,
+            {"C1": {"score": 1.0}},
+            {},
+            {
+                "C1.1": {
+                    "dimension_id": "C1",
+                    "score": 1.0,
+                    "judge_scores": [
+                        {"judge_id": "run-metrics", "score": 2.0},
+                        {"judge_id": "qwen3-vl-mlmm", "score": 0.0},
+                    ],
+                }
+            },
+        )
+        self.assertTrue(outcome["block_score"])
+        self.assertEqual(outcome["final_verdict"], "invalid_result")
+
     def test_weight_resolution_saves_hit_rules(self) -> None:
         judgments = [
             {
@@ -731,7 +750,7 @@ class OrchestratorTests(EvaluationTestBase):
         run = self.seed_run()
         result = self.orchestrator().evaluate_run(run, "batch-eval")
         self.assertEqual(result["run_id"], run["run_id"])
-        self.assertEqual(result["benchmark_version"], "0.2.0-draft")
+        self.assertEqual(result["benchmark_version"], self.benchmark["benchmark_version"])
         self.assertIn("canonical_score", result)
         self.assertIn("scenario_score", result)
         self.assertIsNone(result["case_score_percent"])

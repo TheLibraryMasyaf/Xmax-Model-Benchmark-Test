@@ -417,8 +417,10 @@ class RenderTests(ReportingTestBase):
         )
         Draft202012Validator(schema).validate(payload)
         markdown = Path(result["markdown_path"]).read_text(encoding="utf-8")
-        self.assertIn("## Criteria", markdown)
-        self.assertIn("## P0 recommendations", markdown)
+        self.assertIn("## 细则结果", markdown)
+        self.assertIn("## P0 证据包（待Agent分析）", markdown)
+        self.assertTrue(payload["analysis_required"])
+        self.assertNotIn("Recommendation:", markdown)
 
     def test_full_report_writes_json_and_markdown_without_placeholders(self) -> None:
         result = self.service().generate(

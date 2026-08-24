@@ -3,6 +3,7 @@ import re
 import unittest
 from pathlib import Path
 
+from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,14 @@ PIPELINE_STAGES = [
 
 
 class ProjectIntegrityTests(unittest.TestCase):
+    def test_c1_validity_has_visual_mlmm_route(self) -> None:
+        benchmark = load_benchmark_contract(ROOT / "BENCHMARK.md")
+        c1 = next(item for item in benchmark["dimensions"] if item["dimension_id"] == "C1")
+        self.assertIn("mlmm", c1["judge_routing"]["secondary_kinds"])
+        registry = json.loads((ROOT / "config" / "judges.example.json").read_text())
+        mlmm = next(item for item in registry["judges"] if item["kind"] == "mlmm")
+        self.assertIn("C1.1", mlmm["supported_criteria"])
+
     def test_all_json_files_parse(self) -> None:
         paths = sorted((ROOT / "config").glob("*.json")) + sorted((ROOT / "schemas").glob("*.json"))
         self.assertTrue(paths)

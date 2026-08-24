@@ -18,6 +18,8 @@
     "strengths",
     "weaknesses",
     "priorities",
+    "credibility",
+    "analysis_required",
     "audit"
   ],
   "properties": {
@@ -45,6 +47,16 @@
       },
       "additionalProperties": false
     },
+    "credibility": {
+      "type": "object",
+      "required": ["status", "issues"],
+      "properties": {
+        "status": {"enum": ["credible_with_warnings", "diagnostic"]},
+        "issues": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": false
+    },
+    "analysis_required": {"const": true},
     "audit": {"type": "object"}
   },
   "additionalProperties": true

@@ -32,6 +32,14 @@
     "canonical_score": {"type": ["number", "null"]},
     "scenario_score": {"type": ["number", "null"]},
     "case_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "score_readiness": {
+      "enum": ["ready", "pending_group_metrics", "incomplete_evidence"]
+    },
+    "pending_group_criteria": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    },
     "score_display_format": {"const": "percentage"},
     "weight_resolution": {
       "type": "object",
@@ -86,6 +94,11 @@
         "assessable": {"type": "boolean"},
         "applicable": {"type": "boolean"},
         "coverage_status": {"enum": ["assessed", "unassessable", "uncovered", "not_applicable"]},
+        "aggregation_scope": {
+          "enum": ["run", "repeat_group", "cross_input_group", "batch"]
+        },
+        "judge_scores": {"type": "array", "items": {"type": "object"}},
+        "raw_metrics": {"type": "array", "items": {"type": "object"}},
         "judges": {"type": "array", "items": {"type": "string"}},
         "judge_versions": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},

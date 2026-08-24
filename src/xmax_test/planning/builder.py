@@ -480,6 +480,13 @@ class TestPlanBuilder:
         if not edited_video_asset_id or not expected_audio_source_asset_id:
             return {"skip_reason": "cannot freeze edited video / audio source"}
         scenario_id = self._resolve_scenario(bundle, recipe, mode)
+        if scenario_id is None:
+            return {
+                "skip_reason": (
+                    "prompt metadata must provide an explicit scenario_id; "
+                    "planning will not guess a scene from prompt text or recipe order"
+                )
+            }
         cost = self._estimate_generation_cost(
             feed=feed,
             prompt_video_ids=prompt_video_ids,
@@ -607,21 +614,14 @@ class TestPlanBuilder:
     def _resolve_scenario(
         self, bundle: PromptBundle, recipe: dict[str, Any], mode: str
     ) -> str | None:
-        if bundle.scenario_id:
+        if not bundle.scenario_id:
+            return None
+        for scenario in self._scenario_pack.get("scenarios", []):
+            if scenario.get("scenario_id") != bundle.scenario_id:
+                continue
+            if mode not in scenario.get("supported_modes", []):
+                return None
             return bundle.scenario_id
-        play_name = bundle.play_name
-        for scenario in self._scenario_pack.get("scenarios", []):
-            if play_name and play_name in scenario.get("name", ""):
-                if mode in scenario.get("supported_modes", []):
-                    return scenario["scenario_id"]
-        # Deterministic fallback: first scenario supporting the mode whose
-        # description mentions the recipe's edited role.
-        for scenario in self._scenario_pack.get("scenarios", []):
-            if mode in scenario.get("supported_modes", []) and ("换" in scenario.get("name", "")):
-                return scenario["scenario_id"]
-        for scenario in self._scenario_pack.get("scenarios", []):
-            if mode in scenario.get("supported_modes", []):
-                return scenario["scenario_id"]
         return None
 
     def _scene_tags(self, scenario_id: str | None) -> dict[str, str]:

@@ -10,6 +10,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from xmax_test.contracts import PipelineStage
+from xmax_test.cli import _runs_from_batch_manifest
 from xmax_test.errors import (
     ApprovalRequiredError,
     ContractError,
@@ -142,6 +143,37 @@ class PipelineTestBase(unittest.TestCase):
 
 
 class SelectorTests(PipelineTestBase):
+    def test_run_batch_loading_ignores_dirty_history_with_same_batch_id(self) -> None:
+        for run_id in ("run-current", "run-old-history"):
+            self.repository.create_run(
+                {
+                    "run_id": run_id,
+                    "run_batch_id": "batch-dirty",
+                    "case_id": f"case-{run_id}",
+                    "case_number": f"case-{run_id}",
+                    "model_id": "x2.0",
+                    "mode": "offline",
+                    "origin": "xmax_offline",
+                    "status": "completed",
+                    "provenance": {
+                        "source_type": "test",
+                        "source_locator": run_id,
+                        "source_hash": run_id,
+                    },
+                }
+            )
+        self.repository.save_batch_manifest(
+            build_batch_manifest(
+                entity_type="run_batch",
+                item_entity_type="generation_run",
+                item_ids=["run-current"],
+                producer_stage_run_id="stage-test",
+                batch_id="batch-dirty",
+            )
+        )
+        runs = _runs_from_batch_manifest(self.repository, "batch-dirty")
+        self.assertEqual([run["run_id"] for run in runs], ["run-current"])
+
     def test_filters_resolve_to_frozen_snapshot(self) -> None:
         self.repository.create_run(
             {

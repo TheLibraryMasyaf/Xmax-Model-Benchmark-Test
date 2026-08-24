@@ -12,6 +12,7 @@ from typing import Any
 from ..errors import ContractError
 from ..hashing import content_hash
 from .gates import HardGateEvaluator
+from .group_metrics import GROUP_CRITERION_SCOPES
 from .weights import resolve_scene_weights
 
 
@@ -75,6 +76,20 @@ class JudgmentFusion:
             if value is not None:
                 case_score = round(value, 2)  # value is already on the 0-100 scale
 
+        pending_group_criteria = sorted(
+            criterion_id
+            for criterion_id, item in criterion_scores.items()
+            if criterion_id in GROUP_CRITERION_SCOPES
+            and item.get("coverage_status") == "uncovered"
+        )
+        score_readiness = (
+            "pending_group_metrics"
+            if case_score is None and pending_group_criteria
+            else "ready"
+            if case_score is not None
+            else "incomplete_evidence"
+        )
+
         return {
             "benchmark_version": benchmark_version,
             "scenario_pack_version": scenario_pack.get("version", ""),
@@ -82,6 +97,8 @@ class JudgmentFusion:
             "canonical_score": canonical["score"],
             "scenario_score": scenario["score"],
             "case_score_percent": case_score,
+            "score_readiness": score_readiness,
+            "pending_group_criteria": pending_group_criteria,
             "score_display_format": "percentage",
             "criterion_results": self._criterion_results(criterion_scores),
             "dimension_results": self._dimension_results(dimension_scores),
@@ -113,6 +130,11 @@ class JudgmentFusion:
                     criterion_id
                     for criterion_id, item in criterion_scores.items()
                     if item.get("coverage_status") == "uncovered"
+                ),
+                "not_applicable_criteria": sorted(
+                    criterion_id
+                    for criterion_id, item in criterion_scores.items()
+                    if item.get("coverage_status") == "not_applicable"
                 ),
                 "criterion_count": len(criterion_scores),
                 "canonical_missing_dimensions": canonical.get("missing_dimensions", []),
@@ -313,6 +335,30 @@ class JudgmentFusion:
                 ),
                 "evidence": evidence,
                 "judge_score_count": len(scores),
+                "judge_scores": [
+                    {
+                        "judge_id": item.get("judge_id"),
+                        "judge_version": item.get("judge_version"),
+                        "score": float(item["score"]),
+                    }
+                    for item in scored
+                ],
+                "raw_metrics": [
+                    {
+                        "judge_id": item.get("judge_id"),
+                        "values": dict(item.get("raw_metrics") or {}),
+                    }
+                    for item in items
+                    if item.get("raw_metrics")
+                ],
+                "aggregation_scope": next(
+                    (
+                        str(item.get("aggregation_scope"))
+                        for item in items
+                        if item.get("aggregation_scope")
+                    ),
+                    GROUP_CRITERION_SCOPES.get(criterion_id, "run"),
+                ),
             }
         return merged
 

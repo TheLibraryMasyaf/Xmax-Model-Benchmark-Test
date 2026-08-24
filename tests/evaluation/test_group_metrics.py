@@ -49,6 +49,28 @@ class BatchGroupEvaluatorTests(unittest.TestCase):
         c1 = self.criterion(by_dimension["C1"], "C1.2")
         self.assertFalse(c1["applicable"])
 
+    def test_results_outside_frozen_run_set_are_rejected(self) -> None:
+        cases = {"case-a1": self.case("feed-a", 1)}
+        runs = [self.run_record("run-a1", "case-a1")]
+        with self.assertRaisesRegex(ValueError, "outside the frozen Run set"):
+            BatchGroupEvaluator(CaseRepository(cases)).judgments(
+                runs, [self.result("run-a1"), self.result("run-old-history")]
+            )
+
+    def test_group_criteria_publish_aggregation_scope(self) -> None:
+        cases = {"case-a1": self.case("feed-a", 1)}
+        judgments = BatchGroupEvaluator(CaseRepository(cases)).judgments(
+            [self.run_record("run-a1", "case-a1")], [self.result("run-a1")]
+        )
+        by_dimension = {item["dimension_id"]: item for item in judgments["run-a1"]}
+        self.assertEqual(
+            self.criterion(by_dimension["C1"], "C1.2")["aggregation_scope"], "batch"
+        )
+        self.assertEqual(
+            self.criterion(by_dimension["O4"], "O4.1")["aggregation_scope"],
+            "repeat_group",
+        )
+
     @staticmethod
     def case(feed: str, repeat: int) -> dict:
         return {

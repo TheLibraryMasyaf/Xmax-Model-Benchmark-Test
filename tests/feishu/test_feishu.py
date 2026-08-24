@@ -256,6 +256,41 @@ class FullSyncTests(FeishuTestBase):
         self.assertIsNone(fields["case评分"])
         self.assertIsNone(fields["case说明"])
 
+    def test_comment_syncs_before_group_score_and_score_backfills_idempotently(self) -> None:
+        run = self.run_record(case_score=None)
+        evaluation = {
+            "evaluation_id": "eval-provisional",
+            "evaluation_batch_id": "batch-eval-provisional",
+            "run_id": run["run_id"],
+            "benchmark_version": "0.2.0-draft",
+            "scenario_pack_version": "0.1.0-draft",
+            "score_schema_version": "0.2.0-draft",
+            "criterion_results": [],
+            "dimension_results": [
+                {
+                    "dimension_id": "C7",
+                    "score": 0.0,
+                    "assessable": True,
+                    "evidence": [{"description": "人物手部在中段出现明显结构错误。"}],
+                }
+            ],
+            "weight_resolution": {},
+            "case_score_percent": None,
+            "score_readiness": "pending_group_metrics",
+        }
+        self.service.sync_case_runs([run], evaluations={run["run_id"]: evaluation}, policy="full")
+        fields = self.client._tables["tbl-case"][0]["fields"]
+        self.assertIsNone(fields["case评分"])
+        self.assertIn("手部", fields["case说明"])
+
+        finalized = {**evaluation, "case_score_percent": 72.5, "score_readiness": "ready"}
+        self.service.sync_case_runs(
+            [run], evaluations={run["run_id"]: finalized}, policy="score_only"
+        )
+        fields = self.client._tables["tbl-case"][0]["fields"]
+        self.assertEqual(fields["case评分"], 0.725)
+        self.assertIn("手部", fields["case说明"])
+
     def test_unselected_latest_evaluation_is_not_published(self) -> None:
         run = self.run_record(case_score=99.39)
         summary = self.service.sync_case_runs([run], policy="full")

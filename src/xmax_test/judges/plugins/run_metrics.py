@@ -14,7 +14,7 @@ from typing import Any
 
 
 class RunMetricsJudge:
-    VERSION = "0.2.0-criterion-shadow"
+    VERSION = "0.3.0-applicability-shadow"
 
     def manifest(self) -> dict[str, Any]:
         return {
@@ -237,9 +237,13 @@ class RunMetricsJudge:
         metrics = context.get("run", {}).get("metrics", {})
         recovery_ms = metrics.get("recovery_ms")
         perturbations = int(metrics.get("perturbation_count") or 0)
-        if perturbations == 0 or not isinstance(recovery_ms, (int, float)):
+        if perturbations == 0:
+            return self._not_applicable(
+                "R5", "R5.1", "本Case未配置版本化异常恢复实验。"
+            )
+        if not isinstance(recovery_ms, (int, float)):
             return self._unassessable(
-                "R5", "R5.1", "no versioned recovery perturbation was executed"
+                "R5", "R5.1", "已执行异常注入，但缺少恢复时间证据。"
             )
         if recovery_ms <= 500:
             score, verdict = 2.0, "fast_recovery"
@@ -260,7 +264,9 @@ class RunMetricsJudge:
         metrics = context.get("run", {}).get("metrics", {})
         duration = metrics.get("session_duration_s")
         if not isinstance(duration, (int, float)) or duration < 60:
-            return self._unassessable("R6", "R6.3", "session shorter than the 60s shadow minimum")
+            return self._not_applicable(
+                "R6", "R6.3", "本Case不是达到60秒Shadow门槛的长会话实验。"
+            )
         fps_cv = metrics.get("fps_window_cv")
         if not isinstance(fps_cv, (int, float)):
             return self._unassessable("R6", "R6.3", "long-session window metrics unavailable")
