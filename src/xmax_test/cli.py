@@ -1806,8 +1806,7 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
         item_entity_type="generation_run",
         item_ids=run_ids,
         producer_stage_run_id="cli-generate-rt",
-        errors=errors,
-        metadata={"realtime_case_errors": len(errors)},
+        metadata={"realtime_case_errors": errors},
     )
     composition.database.save_batch_manifest(manifest)
     _emit(args, "generate.realtime", {"run_batch_id": batch_id, "run_ids": run_ids, "errors": errors})
