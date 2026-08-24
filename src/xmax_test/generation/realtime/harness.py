@@ -82,6 +82,9 @@ class BrowserRealtimeHarness:
 
         HEVC/H.265 sources are transcoded to H.264 once and cached by content
         hash so a 250-case realtime batch does not re-transcode the same feed.
+        MJPEG/other still-image blobs (some feeds are static poster images that
+        are intentionally bound as the video input for image-to-video) are
+        looped into a short H.264 clip so the browser SDK can open a track.
         Returns ``(path, transcoded)``.
         """
 
@@ -100,28 +103,39 @@ class BrowserRealtimeHarness:
             raise MissingDependencyError(
                 "ffmpeg is required to transcode HEVC inputs for realtime generation"
             )
+        # Still-image codecs (mjpeg, png, etc.) have no duration/fps and odd
+        # dimensions are common (e.g. 1080x2337); libx264 requires even
+        # height. Loop the frame into a short clip with even dimensions.
+        still = codec in {"mjpeg", "png", "bmp", "gif", "webp"}
         temporary = cached.with_suffix(f".tmp-{uuid.uuid4().hex[:8]}.mp4")
+        command = [
+            ffmpeg,
+            "-y",
+        ]
+        if still:
+            command += ["-loop", "1", "-framerate", "25", "-t", "5", "-i", str(input_path)]
+        else:
+            command += ["-i", str(input_path)]
+        command += [
+            "-vf",
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(temporary),
+        ]
         try:
             completed = subprocess.run(
-                [
-                    ffmpeg,
-                    "-y",
-                    "-i",
-                    str(input_path),
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "veryfast",
-                    "-crf",
-                    "23",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-c:a",
-                    "aac",
-                    "-movflags",
-                    "+faststart",
-                    str(temporary),
-                ],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=600,
