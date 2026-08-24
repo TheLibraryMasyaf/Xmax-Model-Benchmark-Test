@@ -32,7 +32,7 @@
 - 免费额度错误以已验证规则表判断，包括`AllocationQuota.FreeTierOnly`和已收录的`insufficient_quota + Free quota exhausted + free tier only`组合，不依赖固定HTTP状态。仅命中规则时才切换；未知quota类响应必须暂停整个评测批次等待规则审核。
 - 换模型时重发整条Case的Prompt、Feed、Prompt素材、操作合同和结果视频，不从上一模型的半成品继续。
 - MLLM批Judge失败时不保存EvaluationResult，不用CV/Metric子集重新归一化，不写飞书分数。
-- 前25个候选保持百炼“免费额度用完即停”；`qwen3-vl-flash`是唯一末位付费候选。首次付费和每次充值周期都必须执行`evaluation-budget authorize --recharge-confirmed`，本地99元上限不能靠重启绕过。
+- 前15个候选保持百炼“免费额度用完即停”；`qwen3-vl-flash`是唯一末位付费候选。首次付费和每次充值周期都必须执行`evaluation-budget authorize --recharge-confirmed`，本地99元上限不能靠重启绕过。
 - 付费调用前先做进程安全的保守预留；超时按全额预留记账且不自动重试。预算暂停后，任何CV/Metric/MLLM Judge都不得启动，统一Run也不得把残缺Evaluation Batch交给`sync/report`。
 - 429、408、5xx和连接错误只在原免费模型做有上限退避，不切换模型；重试耗尽后使评测批次进入基础设施暂停，不得对剩余Case重复制造相同错误。付费请求的网络失败不自动重试。
 - 新Benchmark、Scenario或Judge Registry内容会改变阶段缓存哈希，不得复用旧Evaluation Batch。

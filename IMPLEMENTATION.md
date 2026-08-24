@@ -21,7 +21,7 @@
 | P4 Offline Generation | DONE | 真实REST/COS、Session API边界、状态机、续跑、Fake | Session+RTC的真实RTC传输不内置，常规离线路径使用官方REST |
 | P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、互动Profile、Fake | 需Key的付费真实会话待运行时smoke |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
-| P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、25模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
+| P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、15模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
 | P8 Evaluation | DONE | Orchestrator、细则级Judge路由与覆盖检查、批次级重复/跨输入评分、硬门槛、双总分、精确批次续跑和结果Schema | R5/R6等仍由实际样本是否具备异常脚本/长会话决定可评性 |
 | P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
@@ -36,7 +36,7 @@
 | XMAX离线REST/COS | 已实现 | Fake、合同、失败/续跑测试；2026-08-20按官方上传协议完成2次真实付费任务并成功下载结果 | 后续批量运行仍需`XMAX_API_KEY`、`cos-python-sdk-v5`和与冻结计划绑定的预算批准 |
 | XMAX实时SDK | 已实现新旧API双路 | `tsc --noEmit`、JS语法、无Key安全失败 | Key、预算批准、可用WebRTC环境；未做付费smoke |
 | 预处理/音频 | 已实现ffmpeg适配器 | Fake与PCM包络测试 | 当前机器PATH中需安装`ffmpeg`/`ffprobe` |
-| Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/25候选免费额度回退、唯一末位`qwen3-vl-flash`付费兜底、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入；SQLite按请求预留并执行99元本地硬上限 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-21登录百炼回读，删除无额度`qwen3.8-max`，当前总列表26个；已验证quota规则跨HTTP状态回退、未知quota停批、同模型网络退避、25免费模型到付费闸门和流式排空由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；前25个保持免费用尽即停，付费前只关闭末位泛化`qwen3-vl-flash`的该开关，并人工充值、执行本地授权；本地估算不覆盖账户外部调用 |
+| Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/15候选免费额度回退、唯一末位`qwen3-vl-flash`付费兜底、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入；SQLite按请求预留并执行99元本地硬上限 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-24移除10个日期快照别名，当前总列表16个；已验证quota规则跨HTTP状态回退、未知quota停批、同模型网络退避、15免费模型到付费闸门和流式排空由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；前15个保持免费用尽即停，付费前只关闭末位泛化`qwen3-vl-flash`的该开关，并人工充值、执行本地授权；本地估算不覆盖账户外部调用 |
 | Codex CLI MLLM | 保留可替换Provider | Fake与错误路径 | 仅在Judge Pack改配后启用 |
 | CV/Metric Judge | 动态Python插件协议、基础画质、音轨及运行事实Judge已完成 | Manifest/Schema/三档阈值/不伪造分测试 | 专项身份、姿态、跟踪模型可按维度替换Shadow MLLM路由 |
 | 飞书 | `lark-cli`真实命令适配已实现 | Fake、分页/幂等/策略测试；2026-08-20已真实完成Case upsert、百分比评分、三类附件上传和回读对账 | 换Base/Table时仍需真实字段映射和明确写入授权 |
