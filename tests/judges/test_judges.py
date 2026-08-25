@@ -214,6 +214,19 @@ class PluginTests(unittest.TestCase):
         manifest = AudioIntegrityJudge().manifest()
         self.assertEqual(manifest["supported_dimensions"], ["O6", "R7"])
 
+    def test_static_touch_capture_has_no_audio_preservation_requirement(self) -> None:
+        result = AudioIntegrityJudge().evaluate(
+            {
+                "dimension_id": "R7",
+                "test_case": {
+                    "api_asset_bindings": {"input_media_role": "feed_capture"}
+                },
+            }
+        )[0]
+        self.assertFalse(result["assessable"])
+        self.assertIsNone(result["score"])
+        self.assertIn("static Feed capture", result["evidence"][0]["description"])
+
     def test_video_quality_routes_as_cv_for_c9_and_o6(self) -> None:
         manifest = VideoQualityJudge().manifest()
         self.assertEqual(manifest["kind"], "cv")

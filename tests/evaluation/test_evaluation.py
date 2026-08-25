@@ -697,6 +697,63 @@ class OrchestratorTests(EvaluationTestBase):
         self.assertEqual(capture["kind"], "image")
         self.assertTrue(capture["path"].endswith("feed-a-sha-feed/middle.jpg"))
 
+    def test_realtime_touch_sends_actual_random_feed_capture_as_separate_input(self) -> None:
+        run = self.seed_run()
+        stored = self.artifacts.put_bytes(
+            "captures",
+            "realtime/feed-a/case-capture.jpg",
+            b"\xff\xd8\xff-realtime-feed-capture",
+        )
+        case = self.repository.get_test_case(run["case_id"])
+        case.update(
+            {
+                "operation_recipe_id": "realtime-track-interaction",
+                "operation_recipe_version": "0.3.0",
+                "api_asset_bindings": {
+                    "input_method": "connectMedia",
+                    "input_media_role": "feed_capture",
+                    "capture_frame_policy": "seeded_random_safe_window_v1",
+                    "interaction_profile_id": "pointer-track-30fps-v2",
+                    "ref_image_role": "none",
+                },
+            }
+        )
+        run = {
+            **run,
+            "metrics": {
+                **run.get("metrics", {}),
+                "input_capture": {
+                    **stored,
+                    "source_asset_id": "feed-a",
+                    "source_sha256": "sha-feed",
+                    "timestamp_s": 3.25,
+                    "capture_policy": "seeded_random_safe_window_v1",
+                    "producer_version": "realtime-feed-capture-v1",
+                },
+            },
+        }
+        orchestrator = self.orchestrator()
+        media = orchestrator._media_inputs(
+            case, run, orchestrator._operation_contract(case, "realtime")
+        )
+        capture = next(item for item in media if item["role"] == "feed_capture")
+        self.assertEqual(capture["kind"], "image")
+        self.assertEqual(capture["timestamp_s"], 3.25)
+        self.assertTrue(capture["path"].endswith("case-capture.jpg"))
+
+    def test_realtime_touch_rejects_evaluation_when_capture_evidence_is_missing(self) -> None:
+        run = self.seed_run()
+        case = self.repository.get_test_case(run["case_id"])
+        case["api_asset_bindings"] = {
+            "input_method": "connectMedia",
+            "input_media_role": "feed_capture",
+            "capture_frame_policy": "seeded_random_safe_window_v1",
+            "interaction_profile_id": "pointer-track-30fps-v2",
+            "ref_image_role": "none",
+        }
+        with self.assertRaises(ContractError):
+            self.orchestrator()._media_inputs(case, run)
+
     def test_direct_media_reuses_xmax_urls_by_result_and_asset_hash(self) -> None:
         run = self.seed_run()
         result_url = "https://media.example.test/generated.mp4"

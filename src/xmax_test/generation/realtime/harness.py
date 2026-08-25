@@ -12,7 +12,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ...errors import ExternalServiceError, MissingDependencyError
+from ...errors import ContractError, ExternalServiceError, MissingDependencyError
+from .captures import SeededFrameCaptureExtractor
 
 # Chrome/WebCodecs can only decode H.264/AAC MP4; HEVC inputs (the default
 # export codec for edited XMAX feeds) must be transcoded before the browser
@@ -38,6 +39,7 @@ class BrowserRealtimeHarness:
         api_key: str | None = None,
         timeout_s: int = 900,
         headed: bool = False,
+        capture_extractor: Any = None,
     ) -> None:
         self._root = Path(project_root)
         self._artifacts = artifacts
@@ -45,6 +47,7 @@ class BrowserRealtimeHarness:
         self._timeout = timeout_s
         self._headed = headed
         self._api_key = api_key
+        self._capture_extractor = capture_extractor or SeededFrameCaptureExtractor(artifacts)
 
     @staticmethod
     def _video_codec(path: Path) -> str | None:
@@ -156,7 +159,12 @@ class BrowserRealtimeHarness:
             raise MissingDependencyError("node is required for realtime generation")
         input_asset = self._repository.get_asset(case["edited_video_asset_id"])
         input_path = Path(self._artifacts.resolve(input_asset["uri"])).resolve()
-        input_sha256 = input_asset.get("sha256") or _file_sha256(input_path)
+        input_path, input_capture = self._prepare_input(case, input_asset, input_path)
+        input_sha256 = (
+            input_capture.get("sha256")
+            if input_capture
+            else input_asset.get("sha256") or _file_sha256(input_path)
+        )
         input_path, _transcoded = self._ensure_browser_compatible(input_path, input_sha256)
         reference_path = None
         for asset_id in case.get("prompt_asset_ids", []):
@@ -208,6 +216,11 @@ class BrowserRealtimeHarness:
                     f"realtime harness exited {completed.returncode}: {completed.stderr[-2000:]}"
                 )
             result = json.loads(output_json.read_text(encoding="utf-8"))
+            result["input_media_role"] = case.get("api_asset_bindings", {}).get(
+                "input_media_role", "feed_video"
+            )
+            if input_capture:
+                result["input_capture"] = input_capture
             if output_video.is_file() and output_video.stat().st_size:
                 stored = self._artifacts.put_file(
                     "runs",
@@ -216,3 +229,31 @@ class BrowserRealtimeHarness:
                 )
                 result["recording_uri"] = stored["uri"]
             return result
+
+    def _prepare_input(
+        self,
+        case: dict[str, Any],
+        input_asset: dict[str, Any],
+        input_path: Path,
+    ) -> tuple[Path, dict[str, Any] | None]:
+        bindings = case.get("api_asset_bindings", {})
+        input_media_role = bindings.get("input_media_role", "feed_video")
+        if input_media_role == "feed_video":
+            return input_path, None
+        if input_media_role != "feed_capture":
+            raise ContractError(
+                f"unsupported realtime input_media_role: {input_media_role!r}"
+            )
+        policy = bindings.get("capture_frame_policy")
+        capture = self._capture_extractor.extract(
+            case=case,
+            source_asset=input_asset,
+            source_path=input_path,
+            policy=policy,
+        )
+        capture_path = self._artifacts.resolve(capture["uri"])
+        if not capture_path.is_file():
+            raise ExternalServiceError(
+                f"realtime Feed capture extractor returned a missing Artifact: {capture['uri']}"
+            )
+        return capture_path, capture

@@ -8,13 +8,15 @@ XMAX实时能力通过浏览器JavaScript SDK和WebRTC运行。`realtime-harness
 
 三种输入方式：
 
-- `connectMedia`：固定Feed文件，标准回归主模式。
+- `connectMedia`：固定Feed文件；标准轨迹触控配方传入从Feed视频随机抽取的静帧，其他实时配方可传完整视频。
 - `connectCamera`：真实摄像头，设备和真实链路测试。
 - `connect`：自定义MediaStream，受控帧率、合成流和故障注入。
 
 不能默认把 SDK直接载入纯Node CLI；浏览器能力是设计前提。Harness优先使用当前官方`connectMedia(Blob|URL, {context, render, audio})`和`stopGeneration()`，同时兼容仓库锁定的0.1.x `connect(MediaStream, {initialState})`/`stop()`形态。SDK升级后先运行`npm run check`和单Case smoke。
 
 模式由Operation Recipe决定：互动Prompt默认实时，非互动玩法默认离线；用户或Agent可在Run Request中显式覆盖，但不支持的组合必须在计划阶段报错。
+
+对`realtime-track-interaction@0.3.0`，Python Harness在启动浏览器前按`seeded_random_safe_window_v1`抽取Feed静帧：时间戳位于时长10%–90%之间，种子由Case ID和Feed内容哈希决定。JPEG产物按内容哈希缓存，再转为无音轨的静态H.264流输入SDK。Run原始事件和metrics必须保存实际截图的Artifact URI、SHA-256、抽帧时间戳、原Feed ID和策略版本，供评测与飞书回读。
 
 ## 2. 会话流程
 

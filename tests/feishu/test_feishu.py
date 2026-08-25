@@ -354,6 +354,37 @@ class FullSyncTests(FeishuTestBase):
         names = [item["name"] for item in self.client._tables["tbl-case"][0]["fields"]["feed文件"]]
         self.assertEqual(names, ["feed001.mp4", "feed001_feed截图.jpg"])
 
+    def test_realtime_touch_uploads_original_feed_and_actual_random_capture(self) -> None:
+        run = self.run_record(case_score=None)
+        case = self.repository.get_test_case(run["case_id"])
+        case["api_asset_bindings"] = {
+            "input_method": "connectMedia",
+            "input_media_role": "feed_capture",
+            "capture_frame_policy": "seeded_random_safe_window_v1",
+            "interaction_profile_id": "pointer-track-30fps-v2",
+            "ref_image_role": "none",
+        }
+        self.repository.upsert_test_case(case, "plan-test")
+        stored = self.artifacts.put_bytes(
+            "captures", "realtime/feed-a/case-capture.jpg", b"\xff\xd8\xffcapture"
+        )
+        run["metrics"] = {
+            **run.get("metrics", {}),
+            "input_capture": {
+                **stored,
+                "source_asset_id": "feed-a",
+                "source_sha256": "sha-feed-a",
+                "timestamp_s": 2.5,
+                "capture_policy": "seeded_random_safe_window_v1",
+                "producer_version": "realtime-feed-capture-v1",
+            },
+        }
+
+        summary = self.service.sync_case_runs([run], policy="full")
+        self.assertEqual(summary["errors"], [])
+        names = [item["name"] for item in self.client._tables["tbl-case"][0]["fields"]["feed文件"]]
+        self.assertEqual(names, ["feed001.mp4", "feed001_feed截图.jpg"])
+
     def test_selected_evaluation_writes_specific_case_description(self) -> None:
         run = self.run_record(case_score=66.0)
         evaluation = self.selected_evaluations(run)[run["run_id"]]

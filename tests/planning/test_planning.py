@@ -361,15 +361,30 @@ class RecipeModeTests(PlanningTestBase):
                 "bytes": 10,
                 "status": "ready",
                 "metadata": {
-                    "text": "触控：让画面主体跟随手指拖动",
+                    "text": "视频中动物跟随轨迹运动",
                     "scenario_id": "supp-realtime-gesture-effect",
                 },
             }
         )
         plan = self.builder.build(self.request(seed=5))
-        interactive = [case for case in plan["cases"] if case["prompt_text"].find("触控") != -1]
+        interactive = [
+            case for case in plan["cases"] if case["prompt_text"] == "视频中动物跟随轨迹运动"
+        ]
         self.assertTrue(interactive)
         self.assertTrue(all(case["generation_mode"] == "realtime" for case in interactive))
+        self.assertTrue(
+            all(
+                case["api_asset_bindings"]["input_media_role"] == "feed_capture"
+                for case in interactive
+            )
+        )
+        self.assertTrue(
+            all(
+                case["api_asset_bindings"]["capture_frame_policy"]
+                == "seeded_random_safe_window_v1"
+                for case in interactive
+            )
+        )
 
     def test_explicit_override_wins_over_recipe_default(self) -> None:
         request = self.request(

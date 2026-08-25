@@ -97,6 +97,8 @@ CLI不会在无人值守运行中弹出交互问答；只有在看过`plan previ
 
 小批次可在`filters`中使用`feed_limit`、`prompt_limit`、`feed_asset_ids`或`prompt_record_numbers`。Feed和Prompt先按飞书业务编号、再按稳定ID排序后截取；过滤条件属于计划哈希，不能复用到全量计划。仓库提供`config/run-smoke-5x5.example.json`作为前5个Feed × 前5个Prompt、每组合1次的安全模板。它默认`dry_run=true`；复制为本轮请求、完成`context-check`和预算确认后才能改为false。
 
+标准触控/滑动/拖动配方会先在Feed视频时长10%–90%之间按Case稳定随机抽取一张JPEG，再以该静帧运行SDK触控。执行后应在Run metrics中核对`input_media_role=feed_capture`及`input_capture.uri/sha256/timestamp_s/capture_policy`；飞书`feed文件`应同时包含原Feed和实际截图。
+
 统一Run的`--dry-run`会为每个阶段产生仅供本次验证传递的占位引用，不创建业务Run、不调用Judge、不写飞书；因此可以完整验证阶段合同而不会在`preprocess/evaluate`处因缺少真实批次中断。
 
 ## 5. 分阶段命令

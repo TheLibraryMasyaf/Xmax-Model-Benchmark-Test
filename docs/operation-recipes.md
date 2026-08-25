@@ -49,9 +49,11 @@ Feed截图是正式输入Asset，必须记录抽帧时间、哈希和来源Feed�
 
 ```text
 默认模式 = realtime
-输入 = connectMedia或显式指定的connect/connectCamera
+输入 = Feed视频按Case稳定随机截图→connectMedia
 操作 = SDK内置drag或sendTracks
 ```
+
+标准触控配方`realtime-track-interaction@0.3.0`不直接播放原Feed视频。执行器以`case_id + Feed SHA-256`为种子，在视频时长的10%–90%安全窗内随机抽取一帧JPEG；重复Case因ID不同抽到不同帧，同一Case续跑使用同一张。Harness将JPEG封装为无音轨静态H.264输入后交给SDK，并在Run中保存截图URI、哈希、时间戳、原Feed和策略版本。静帧触控没有源音轨，音频保留细则标记为不适用。
 
 自定义轨迹以约30 FPS发送，单指格式为`[[x,y]]`，多指格式为`[[x1,y1],[x2,y2],...]`。坐标基于`session.media.streamSetting`内容分辨率；执行器负责从测试脚本坐标映射到`[0,width-1] × [0,height-1]`。
 

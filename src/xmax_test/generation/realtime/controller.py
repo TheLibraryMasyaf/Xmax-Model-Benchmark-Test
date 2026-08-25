@@ -23,15 +23,17 @@ class FakeRealtimeHarness:
     optional disconnect/reconnect.
     """
 
-    def __init__(self, clock: Any = None, fps: int = 30) -> None:
+    def __init__(self, clock: Any = None, fps: int = 30, artifacts: Any = None) -> None:
         self._clock = clock
         self._fps = fps
+        self._artifacts = artifacts
 
     def run_case(self, case: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         bindings = case.get("api_asset_bindings", {})
         input_method = bindings.get("input_method", "connectMedia")
         ref_image_role = bindings.get("ref_image_role", "none")
         interaction_profile = bindings.get("interaction_profile_id")
+        input_media_role = bindings.get("input_media_role", "feed_video")
         content_width = config.get("content_width", 1280)
         content_height = config.get("content_height", 720)
         dom_width = config.get("dom_width", 640)
@@ -145,12 +147,13 @@ class FakeRealtimeHarness:
                     }
                 )
 
-        audio = {"publish": True, "subscribe": True}
-        return {
+        audio = {"publish": input_media_role != "feed_capture", "subscribe": True}
+        result = {
             "session_uid": session_uid,
             "input_method": input_method,
             "ref_image_role": ref_image_role,
             "interaction_profile_id": interaction_profile,
+            "input_media_role": input_media_role,
             "callbacks": callbacks,
             "frames": frames,
             "events": events,
@@ -161,6 +164,21 @@ class FakeRealtimeHarness:
             "stream_setting": {"width": content_width, "height": content_height},
             "metrics": self._metrics(callbacks, frames, events, duration_s),
         }
+        if input_media_role == "feed_capture" and self._artifacts is not None:
+            stored = self._artifacts.put_bytes(
+                "captures",
+                f"realtime/{case['case_id']}/fake-feed-capture.jpg",
+                b"\xff\xd8\xff-fake-realtime-feed-capture",
+            )
+            result["input_capture"] = {
+                **stored,
+                "source_asset_id": case.get("feed_asset_id"),
+                "source_sha256": "fake-source-sha256",
+                "timestamp_s": 1.5,
+                "capture_policy": bindings.get("capture_frame_policy"),
+                "producer_version": "fake-realtime-feed-capture-v1",
+            }
+        return result
 
     def _wall(self, monotonic_ms: float) -> float:
         if self._clock is not None:
@@ -206,7 +224,7 @@ class RealtimeController:
     ) -> None:
         self._repository = repository
         self._artifacts = artifacts
-        self._harness = harness or FakeRealtimeHarness(clock=clock)
+        self._harness = harness or FakeRealtimeHarness(clock=clock, artifacts=artifacts)
         self.model_id = model_id
         self._run_batch_id = run_batch_id
         self._clock = clock
@@ -223,15 +241,39 @@ class RealtimeController:
                 f"case {case['case_id']} has invalid realtime input_method: {input_method!r}"
             )
         result = self._harness.run_case(case, config)
+        input_capture = result.get("input_capture")
+        if bindings.get("input_media_role") == "feed_capture":
+            required_capture_fields = {
+                "uri",
+                "sha256",
+                "source_asset_id",
+                "source_sha256",
+                "timestamp_s",
+                "capture_policy",
+                "producer_version",
+            }
+            missing = sorted(required_capture_fields - set(input_capture or {}))
+            if missing:
+                raise ContractError(
+                    f"realtime Feed capture evidence missing fields: {', '.join(missing)}"
+                )
+            if input_capture["source_asset_id"] != case.get("feed_asset_id"):
+                raise ContractError("realtime Feed capture source does not match the Case Feed")
+            if input_capture["capture_policy"] != bindings.get("capture_frame_policy"):
+                raise ContractError("realtime Feed capture policy does not match the Case binding")
+            self._artifacts.verify(input_capture["uri"], input_capture["sha256"])
         run_id = f"run-{uuid.uuid4().hex[:16]}"
         metrics = {
             **result.get("metrics", {}),
             "input_method": input_method,
+            "input_media_role": bindings.get("input_media_role", "feed_video"),
             "interaction_profile_id": bindings.get("interaction_profile_id"),
             "audio": result.get("audio"),
             "single_round": result.get("single_round", True),
             "session_uid": result.get("session_uid"),
         }
+        if input_capture:
+            metrics["input_capture"] = input_capture
         events_uri = self._save_artifacts(case, run_id, result)
         result_asset_id = self._register_recording(case, result)
         run = {
@@ -251,6 +293,8 @@ class RealtimeController:
                         "case": case["case_id"],
                         "harness": type(self._harness).__name__,
                         "input_method": input_method,
+                        "input_media_role": bindings.get("input_media_role", "feed_video"),
+                        "input_capture": result.get("input_capture"),
                     }
                 ),
             },
@@ -313,6 +357,8 @@ class RealtimeController:
             "audio": result.get("audio"),
             "single_round": result.get("single_round", True),
             "stream_setting": result.get("stream_setting"),
+            "input_media_role": result.get("input_media_role"),
+            "input_capture": result.get("input_capture"),
         }
         stored = self._artifacts.put_bytes(
             "runs",

@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/operation-recipes.schema.json",
   "recipe_pack_id": "xmax-default-operation-recipes",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "recipes": [
     {
       "recipe_id": "offline-image-reference",
@@ -46,7 +46,7 @@
     },
     {
       "recipe_id": "realtime-track-interaction",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "play_names": ["触控", "滑动", "拖动", "MoX", "触控特效", "魔法动图", "跟随轨迹"],
       "default_generation_mode": "realtime",
       "allowed_generation_modes": ["realtime"],
@@ -61,7 +61,7 @@
         "must_change": ["轨迹触发区域"]
       },
       "bindings": {
-        "realtime": {"input_method": "connectMedia", "ref_image_role": "none", "interaction_profile_id": "pointer-track-30fps-v2"}
+        "realtime": {"input_method": "connectMedia", "input_media_role": "feed_capture", "capture_frame_policy": "seeded_random_safe_window_v1", "ref_image_role": "none", "interaction_profile_id": "pointer-track-30fps-v2"}
       }
     },
     {

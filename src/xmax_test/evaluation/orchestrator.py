@@ -472,7 +472,7 @@ class EvaluationOrchestrator:
             item = self._media_input("feed", asset_id, media_urls.get(asset_id))
             if item:
                 result.append(item)
-        feed_capture = self._feed_capture_input(case)
+        feed_capture = self._feed_capture_input(case, run)
         if feed_capture:
             result.append(feed_capture)
         result.append(
@@ -553,9 +553,41 @@ class EvaluationOrchestrator:
             },
         }
 
-    def _feed_capture_input(self, case: dict[str, Any]) -> dict[str, Any] | None:
-        if case.get("api_asset_bindings", {}).get("refImagePath") != "feed_capture":
+    def _feed_capture_input(
+        self, case: dict[str, Any], run: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        bindings = case.get("api_asset_bindings", {})
+        if (
+            bindings.get("refImagePath") != "feed_capture"
+            and bindings.get("input_media_role") != "feed_capture"
+        ):
             return None
+        if bindings.get("input_media_role") == "feed_capture":
+            feed = self._repository.get_asset(case["feed_asset_id"])
+            capture = run.get("metrics", {}).get("input_capture") or {}
+            uri = capture.get("uri")
+            if not uri:
+                raise ContractError(
+                    f"run {run.get('run_id')} is missing realtime Feed capture evidence"
+                )
+            if capture.get("source_asset_id") != feed["asset_id"]:
+                raise ContractError(
+                    f"run {run.get('run_id')} realtime Feed capture source does not match Case"
+                )
+            if capture.get("capture_policy") != bindings.get("capture_frame_policy"):
+                raise ContractError(
+                    f"run {run.get('run_id')} realtime Feed capture policy does not match Case"
+                )
+            self._artifacts.verify(uri, capture.get("sha256"))
+            path = self._artifacts.resolve(uri)
+            return {
+                "role": "feed_capture",
+                "kind": "image",
+                "path": str(path.resolve()),
+                "source_asset_id": feed["asset_id"],
+                "timestamp_s": capture.get("timestamp_s"),
+                "capture_policy": capture.get("capture_policy"),
+            }
         try:
             feed = self._repository.get_asset(case["feed_asset_id"])
             capture_id = f"{feed['asset_id']}-{str(feed.get('sha256') or '')[:12]}"

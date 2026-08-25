@@ -88,9 +88,32 @@
                 "required": ["input_method"],
                 "properties": {
                   "input_method": {"enum": ["connectMedia", "connectCamera", "connect"]},
+                  "input_media_role": {"enum": ["feed_video", "feed_capture"]},
+                  "capture_frame_policy": {
+                    "enum": ["seeded_random_safe_window_v1"]
+                  },
                   "ref_image_role": {"enum": ["prompt_image", "none"]},
                   "interaction_profile_id": {"type": ["string", "null"]}
                 },
+                "allOf": [
+                  {
+                    "if": {
+                      "required": ["input_media_role"],
+                      "properties": {"input_media_role": {"const": "feed_capture"}}
+                    },
+                    "then": {
+                      "required": ["capture_frame_policy"],
+                      "properties": {"input_method": {"const": "connectMedia"}}
+                    }
+                  },
+                  {
+                    "if": {"required": ["capture_frame_policy"]},
+                    "then": {
+                      "required": ["input_media_role"],
+                      "properties": {"input_media_role": {"const": "feed_capture"}}
+                    }
+                  }
+                ],
                 "additionalProperties": false
               }
             },

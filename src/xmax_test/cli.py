@@ -424,6 +424,7 @@ class Composition:
                 self.database,
                 api_key=self.xmax_api_key(),
                 headed=headed,
+                capture_extractor=self.inject.get("realtime_capture_extractor"),
             )
 
         return RealtimeController(

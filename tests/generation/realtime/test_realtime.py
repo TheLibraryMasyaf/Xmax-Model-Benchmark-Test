@@ -168,6 +168,50 @@ class RealtimeControllerTests(RealtimeTestBase):
         events = self.repository.get_event_log(run["run_id"])
         self.assertEqual(events[0]["event"], "run_created")
 
+    def test_static_touch_fake_persists_the_actual_capture_evidence(self) -> None:
+        case = self.case(
+            operation_recipe_version="0.3.0",
+            api_asset_bindings={
+                "input_method": "connectMedia",
+                "input_media_role": "feed_capture",
+                "capture_frame_policy": "seeded_random_safe_window_v1",
+                "ref_image_role": "none",
+                "interaction_profile_id": "pointer-track-30fps-v2",
+            },
+        )
+        run = self.controller.run_case(case)
+        capture = run["metrics"]["input_capture"]
+        self.assertEqual(run["metrics"]["input_media_role"], "feed_capture")
+        self.assertFalse(run["metrics"]["audio"]["publish"])
+        self.assertEqual(capture["source_asset_id"], "feed-a")
+        self.assertTrue(self.artifacts.resolve(capture["uri"]).is_file())
+
+    def test_static_touch_rejects_harness_output_without_capture_evidence(self) -> None:
+        clock = self.clock
+
+        class MissingCaptureHarness:
+            def run_case(self, case, config):
+                return FakeRealtimeHarness(clock=clock).run_case(case, config)
+
+        controller = RealtimeController(
+            self.repository,
+            self.artifacts,
+            harness=MissingCaptureHarness(),
+            clock=self.clock,
+        )
+        with self.assertRaises(ContractError):
+            controller.run_case(
+                self.case(
+                    api_asset_bindings={
+                        "input_method": "connectMedia",
+                        "input_media_role": "feed_capture",
+                        "capture_frame_policy": "seeded_random_safe_window_v1",
+                        "ref_image_role": "none",
+                        "interaction_profile_id": "pointer-track-30fps-v2",
+                    }
+                )
+            )
+
     def test_single_round_not_polluted_by_auto_loop(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock, fps=30)
         controller = RealtimeController(

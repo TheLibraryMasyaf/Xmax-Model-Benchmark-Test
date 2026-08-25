@@ -438,6 +438,7 @@ class TestPlanBuilder:
     ) -> dict[str, Any]:
         ref_video_path = binding.get("refVideoPath")
         ref_image_path = binding.get("refImagePath")
+        input_media_role = binding.get("input_media_role", "feed_video")
         edited_role = recipe.get("edited_video_role")
         audio_role = recipe.get("expected_audio_source_role")
 
@@ -460,6 +461,17 @@ class TestPlanBuilder:
             return {
                 "skip_reason": (
                     f"recipe {recipe['recipe_id']} requires a video Feed; got {feed.get('kind')}"
+                )
+            }
+        if (
+            mode == "realtime"
+            and input_media_role == "feed_capture"
+            and feed.get("kind") != "feed_video"
+        ):
+            return {
+                "skip_reason": (
+                    f"recipe {recipe['recipe_id']} requires a video Feed for random capture; "
+                    f"got {feed.get('kind')}"
                 )
             }
 

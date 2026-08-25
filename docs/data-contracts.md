@@ -147,6 +147,7 @@ generation_config_hash
 不可变原始数据：
 
 - 下载到的原素材及哈希。
+- 实时触控实际使用的Feed截图、抽帧时间戳、原Feed哈希和抽帧策略版本。
 - XMAX请求、响应和RTC事件。
 - Codex原始stdout/stderr。
 - CV原始指标。

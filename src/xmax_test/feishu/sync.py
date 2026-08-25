@@ -394,7 +394,7 @@ class FeishuSyncService:
             specs[projection["feed_attachments"]].append(
                 self._asset_spec(asset, case.get("feed_number") or "feed")
             )
-            capture = self._feed_capture_spec(case, asset)
+            capture = self._feed_capture_spec(case, asset, run)
             if capture:
                 specs[projection["feed_attachments"]].append(capture)
 
@@ -414,12 +414,33 @@ class FeishuSyncService:
         }
 
     def _feed_capture_spec(
-        self, case: dict[str, Any], feed: dict[str, Any]
+        self, case: dict[str, Any], feed: dict[str, Any], run: dict[str, Any]
     ) -> dict[str, str] | None:
-        if case.get("api_asset_bindings", {}).get("refImagePath") != "feed_capture":
+        bindings = case.get("api_asset_bindings", {})
+        if (
+            bindings.get("refImagePath") != "feed_capture"
+            and bindings.get("input_media_role") != "feed_capture"
+        ):
             return None
-        capture_id = f"{feed['asset_id']}-{str(feed.get('sha256') or '')[:12]}"
-        uri = f"artifact://captures/{capture_id}/middle.jpg"
+        if bindings.get("input_media_role") == "feed_capture":
+            capture = run.get("metrics", {}).get("input_capture", {})
+            uri = capture.get("uri")
+            if not uri:
+                raise ContractError(
+                    f"actual realtime Feed capture missing for Case {case.get('case_number')}"
+                )
+            if capture.get("source_asset_id") != feed["asset_id"]:
+                raise ContractError(
+                    f"realtime Feed capture source mismatch for Case {case.get('case_number')}"
+                )
+            if capture.get("capture_policy") != bindings.get("capture_frame_policy"):
+                raise ContractError(
+                    f"realtime Feed capture policy mismatch for Case {case.get('case_number')}"
+                )
+            self._artifacts.verify(uri, capture.get("sha256"))
+        else:
+            capture_id = f"{feed['asset_id']}-{str(feed.get('sha256') or '')[:12]}"
+            uri = f"artifact://captures/{capture_id}/middle.jpg"
         path = self._artifacts.resolve(uri)
         if not path.is_file():
             raise ContractError(

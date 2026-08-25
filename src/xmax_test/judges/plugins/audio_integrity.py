@@ -33,10 +33,21 @@ class AudioIntegrityJudge:
 
     def evaluate(self, context: dict[str, Any]) -> list[dict[str, Any]]:
         dimension = context.get("dimension_id")
+        input_media_role = (
+            context.get("test_case", {}).get("api_asset_bindings", {}).get("input_media_role")
+        )
+        criterion_id = "O6.2" if dimension == "O6" else "R7.3"
+        if input_media_role == "feed_capture":
+            return [
+                self._unassessable(
+                    dimension,
+                    criterion_id,
+                    "static Feed capture input has no source audio to preserve",
+                )
+            ]
         paths = context.get("asset_paths", {})
         result_path = paths.get("result_video")
         source_path = paths.get("expected_audio_source")
-        criterion_id = "O6.2" if dimension == "O6" else "R7.3"
         if which("ffmpeg") is None or not result_path or not source_path:
             return [
                 self._unassessable(dimension, criterion_id, "ffmpeg or audio source path missing")
