@@ -110,7 +110,7 @@ Builder通过可注册分配策略把TestPlan展开为冻结Task Batch。Worker�
 
 ### 4.6 Evaluation Orchestrator
 
-加载当前 Benchmark 与 Scenario Pack，按维度路由 Judge，但Judge的唯一评分事实是逐细则`criterion_results`。Fusion先合并同一细则的多Judge结果，确定性汇总维度，执行硬失败规则，再计算不依赖场景权重的 `canonical_score` 与按预设权重档/场景规则计算的 `scenario_score`。单视频Evaluation和批次Manifest同时保存细则覆盖与统计。没有兼容 Judge 的细则标记为`uncovered`，证据不足则是`unassessable`；都不能伪造分数。
+加载当前 Benchmark 与 Scenario Pack，按维度路由 Judge，但Judge的唯一评分事实是逐细则`criterion_results`。Fusion先合并同一细则的多Judge结果，确定性汇总维度，执行P.1硬失败规则，再按显式核心场景规则计算`scenario_score`；当前Benchmark不计算`canonical_score`。单视频Evaluation保存细则覆盖，冻结批次另外保存P.2/P.3/RP.1/RP.2无档位报告指标。没有兼容 Judge 的细则标记为`uncovered`，证据不足则是`unassessable`；都不能伪造分数。
 
 ### 4.7 Human Signal Hub
 
@@ -122,7 +122,7 @@ Builder通过可注册分配策略把TestPlan展开为冻结Task Batch。Worker�
 
 ### 4.9 Model Version Comparison Reporter
 
-在两版结果满足可比性门槛后，按请求场景计算Canonical/Scenario变化并生成P0改进、P1持平、P2劣化三级报告。报告器只读取已版本化结果和人工修订，不重新评测视频；Markdown遵循固定模板，JSON遵循报告Schema。
+在两版结果满足可比性门槛后，按相同请求场景计算Scenario变化并生成P0改进、P1持平、P2劣化三级报告。Canonical仅作为旧Benchmark兼容字段。报告器只读取已版本化结果和人工修订，不重新评测视频；Markdown遵循固定模板，JSON遵循报告Schema。
 
 ### 4.10 Pipeline Orchestrator
 

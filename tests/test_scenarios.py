@@ -45,7 +45,7 @@ class ScenarioPackTests(unittest.TestCase):
                 self.assertEqual(result.effective_weights, expected)
                 self.assertEqual(
                     result.rule_excluded_dimensions,
-                    tuple(sorted(rule["exclude_dimensions"])),
+                    tuple(sorted(rule.get("exclude_dimensions", []))),
                 )
 
     def test_unknown_scenario_reference_is_rejected(self) -> None:
@@ -59,7 +59,7 @@ class ScenarioPackTests(unittest.TestCase):
         rule = next(
             item
             for item in benchmark["scene_weight_rules"]
-            if item["rule_id"] == "core-dance-fixed-camera-appearance-offline"
+            if item["rule_id"] == "core-travel-vlog-scene-style-offline"
         )
         rule["when"]["all"][1]["mode"] = "realtime"
         with self.assertRaises(ScenarioPackError):

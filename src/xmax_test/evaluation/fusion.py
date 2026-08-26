@@ -1,8 +1,9 @@
 """Judgment fusion and scoring.
 
-Computes the canonical score (fixed profile, cross-scene comparable) and the
-scenario score (preset scene rules) side by side, records matched rules and
-effective weights, and applies hard gates before any weighted total.
+Computes the configured score outputs, records matched scene rules and
+effective weights, and applies hard gates before any weighted total.  The
+current Benchmark disables canonical scoring and publishes scenario scores
+only; the compatibility field remains available for older contracts.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ from typing import Any
 from ..errors import ContractError
 from ..hashing import content_hash
 from .gates import HardGateEvaluator
-from .group_metrics import GROUP_CRITERION_SCOPES
 from .weights import resolve_scene_weights
 
 
@@ -36,6 +36,7 @@ class JudgmentFusion:
         profile = self._profile_for_mode(benchmark, mode)
 
         criterion_scores = self._merge_criteria(benchmark, judgments, mode)
+        self._apply_deterministic_applicability(test_case, criterion_scores)
         dimension_scores = self._derive_dimensions(benchmark, criterion_scores, mode)
         gate_result = self._gates.evaluate(
             benchmark, dimension_scores, runtime_facts, criterion_scores
@@ -46,15 +47,19 @@ class JudgmentFusion:
             if item.get("assessable", item.get("score") is not None)
         }
 
-        canonical = self._weighted_score(
-            profile,
-            [],
-            dimension_scores,
-            assessable,
-            mode=mode,
-            scenario_id=None,
-            scene_tags={},
-            include_shadow=False,
+        canonical = (
+            self._weighted_score(
+                profile,
+                [],
+                dimension_scores,
+                assessable,
+                mode=mode,
+                scenario_id=None,
+                scene_tags={},
+                include_shadow=False,
+            )
+            if score_schema.get("canonical_score_enabled", True)
+            else {"score": None, "resolution": None, "missing_dimensions": []}
         )
         scenario = self._weighted_score(
             profile,
@@ -66,6 +71,13 @@ class JudgmentFusion:
             scene_tags=test_case.get("scene_tags", {}),
             include_shadow=True,
         )
+        missing_scene_rule = bool(
+            score_schema.get("require_scene_weight_rule")
+            and scenario["resolution"] is not None
+            and not scenario["resolution"].matched_rule_ids
+        )
+        if missing_scene_rule:
+            scenario["score"] = None
 
         case_score = None
         if gate_result["block_score"]:
@@ -76,15 +88,9 @@ class JudgmentFusion:
             if value is not None:
                 case_score = round(value, 2)  # value is already on the 0-100 scale
 
-        pending_group_criteria = sorted(
-            criterion_id
-            for criterion_id, item in criterion_scores.items()
-            if criterion_id in GROUP_CRITERION_SCOPES
-            and item.get("coverage_status") == "uncovered"
-        )
         score_readiness = (
-            "pending_group_metrics"
-            if case_score is None and pending_group_criteria
+            "missing_scene_weight_rule"
+            if case_score is None and missing_scene_rule
             else "ready"
             if case_score is not None
             else "incomplete_evidence"
@@ -98,7 +104,6 @@ class JudgmentFusion:
             "scenario_score": scenario["score"],
             "case_score_percent": case_score,
             "score_readiness": score_readiness,
-            "pending_group_criteria": pending_group_criteria,
             "score_display_format": "percentage",
             "criterion_results": self._criterion_results(criterion_scores),
             "dimension_results": self._dimension_results(dimension_scores),
@@ -141,6 +146,33 @@ class JudgmentFusion:
                 "scenario_missing_dimensions": scenario.get("missing_dimensions", []),
             },
         }
+
+    @staticmethod
+    def _apply_deterministic_applicability(
+        test_case: dict[str, Any], criterion_scores: dict[str, dict[str, Any]]
+    ) -> None:
+        """Apply input-contract N/A rules locally instead of asking a Judge to infer them."""
+
+        if test_case.get("prompt_asset_ids"):
+            prompt_text = str(test_case.get("prompt_text") or "")
+            criterion_ids = ("E3.1",) if "风格" in prompt_text else ()
+        else:
+            criterion_ids = ("E3.1", "E3.2")
+        for criterion_id in criterion_ids:
+            item = criterion_scores.get(criterion_id)
+            if item is None:
+                continue
+            item.update(
+                {
+                    "score": None,
+                    "score_percent": None,
+                    "assessable": False,
+                    "applicable": False,
+                    "coverage_status": "not_applicable",
+                    "judge_score_count": 0,
+                    "judge_scores": [],
+                }
+            )
 
     @staticmethod
     def _weight_resolution_payload(
@@ -357,7 +389,7 @@ class JudgmentFusion:
                         for item in items
                         if item.get("aggregation_scope")
                     ),
-                    GROUP_CRITERION_SCOPES.get(criterion_id, "run"),
+                    "run",
                 ),
             }
         return merged

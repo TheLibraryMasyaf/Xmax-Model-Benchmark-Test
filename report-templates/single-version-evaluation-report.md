@@ -35,21 +35,20 @@
 
 ## 2. 总分与总体分布
 
-> 面向读者的得分统一使用0–100%。Canonical Score用于表示固定通用口径；Scenario Score按本次场景规则动态加权。两者不得混成第三个未定义总分。
+> 面向读者的得分统一使用0–100%。当前Benchmark不设置脱离场景的通用权重，因此`canonical_score`停用；只有命中10个核心场景规则的Run才输出Scenario Score，未映射场景必须标记`missing_scene_weight_rule`。
 
 | 总分口径 | 平均 | 中位数 | 最小 | 最大 | 标准差 | P25 | P75 | 有效Run |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Canonical Score | `{{ canonical_mean }}` | `{{ canonical_median }}` | `{{ canonical_min }}` | `{{ canonical_max }}` | `{{ canonical_stdev }}` | `{{ canonical_p25 }}` | `{{ canonical_p75 }}` | `{{ canonical_n }}` |
 | Scenario Score | `{{ scenario_mean }}` | `{{ scenario_median }}` | `{{ scenario_min }}` | `{{ scenario_max }}` | `{{ scenario_stdev }}` | `{{ scenario_p25 }}` | `{{ scenario_p75 }}` | `{{ scenario_n }}` |
 
 | 运行与稳定性指标 | 结果 | 数据来源 |
 | --- | ---: | --- |
-| 生成成功率 | `{{ generation_success_rate }}` | GenerationRun |
-| 重复生成组内标准差 | `{{ repeat_group_stdev }}` | Repeat aggregate |
+| P.2有效视频率/无效输出率/失败分布 | `{{ generation_success_and_failure }}` | Frozen Run Batch + P.1 |
+| P.3同输入重复稳定性 | `{{ repeat_group_stability }}` | Frozen Run Request；`repeat_count`可配置 |
 | Hard Gate通过率 | `{{ hard_gate_pass_rate }}` | EvaluationResult |
 | 可评维度覆盖率 | `{{ assessable_dimension_rate }}` | Judgment |
-| 实时首帧/响应延迟 | `{{ realtime_latency }}` | RTC/Harness timestamps |
-| 实时有效FPS/冻结 | `{{ realtime_fps_and_freeze }}` | Per-frame facts |
+| RP.1启动与画面交付 | `{{ realtime_delivery }}` | RTC/Harness timestamps + Per-frame facts |
+| RP.2稳定与恢复 | `{{ realtime_stability_and_recovery }}` | 异常脚本/长会话事实 |
 
 总体结论：`{{ overall_conclusion }}`
 
@@ -132,7 +131,7 @@
 
 > 本报告中的P0/P1/P2表示“改进优先级”，不是版本对比报告中的“提升/持平/劣化”分类，也不代表维度分数高低本身。必须结合Hard Gate、用户影响、受影响样本数和证据置信度分级。
 >
-> 确定性报告器只提供证据包，不填写“建议改进、验收指标、复测集”。以下判断字段必须由执行Agent查看代表性视频、原始评语、组级成员和Benchmark锚点后针对本批次撰写；在此之前报告保持`analysis_required=true`。
+> 确定性报告器只提供证据包，不填写“建议改进、验收指标、复测集”。以下判断字段必须由执行Agent查看代表性视频、原始评语、P.3批次成员和Benchmark锚点后针对本批次撰写；在此之前报告保持`analysis_required=true`。
 
 ### P0 — 发布/可用性阻断，必须优先修复
 

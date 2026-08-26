@@ -69,6 +69,7 @@ class FeishuSyncService:
             str(run.get("case_number", "")),
             projection["model_version"],
             str(run.get("model_id", "")),
+            list(projection.values()),
         )
         if policy == "score_only" and record is None:
             raise ContractError(f"score_only cannot create Case for {run.get('case_number', '')}")
@@ -242,6 +243,7 @@ class FeishuSyncService:
                     case_number,
                     projection["model_version"],
                     model_version,
+                    list(projection.values()),
                 )
                 record_id = located.get("record_id") if located else None
             if not record_id:

@@ -1,9 +1,9 @@
 """Deterministic video-quality CV signals.
 
 The default backend decodes a low-resolution grayscale stream with ffmpeg and
-measures sharpness, exposure clipping, flicker and duplicate frames.  These
-signals are deliberately limited to C9/O6; semantic or structural judgments
-remain with the MLLM/specialized CV routes.
+measures sharpness, exposure clipping, blank frames, flicker and duplicate
+frames.  These signals are deliberately limited to P.1/G1/G2; subjective
+naturalness and semantic correctness remain with E-class MLLM routes.
 """
 
 from __future__ import annotations
@@ -19,10 +19,10 @@ class VideoQualityJudge:
     def manifest(self) -> dict[str, Any]:
         return {
             "judge_id": "video-quality-cv",
-            "version": "0.3.0-criterion-shadow",
+            "version": "0.4.0-pge-shadow",
             "kind": "cv",
-            "supported_dimensions": ["C9", "O6"],
-            "supported_criteria": ["C9.1", "C9.2", "O6.1"],
+            "supported_dimensions": ["P", "G1", "G2"],
+            "supported_criteria": ["P.1", "G1.1", "G1.2", "G2.1", "G2.2"],
             "supported_modes": ["offline", "realtime"],
             "required_inputs": ["result_video"],
             "entrypoint": "xmax_test.judges.plugins.video_quality:VideoQualityJudge",
@@ -31,7 +31,7 @@ class VideoQualityJudge:
         }
 
     def evaluate(self, context: dict[str, Any]) -> list[dict[str, Any]]:
-        dimension_id = context.get("dimension_id", "C9")
+        dimension_id = context.get("dimension_id", "G1")
         if self._backend is not None:
             return self._backend.evaluate(context)
         result_path = context.get("asset_paths", {}).get("result_video")
@@ -40,15 +40,32 @@ class VideoQualityJudge:
         try:
             metrics = _measure_video(result_path)
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            if dimension_id == "P":
+                return [self._single_result("P", "P.1", 0.0, "result_not_decodable", {}, str(exc))]
             return [self._unassessable(dimension_id, f"video CV decode failed: {exc}")]
         score, verdict = _quality_score(metrics)
-        if dimension_id == "C9":
+        if dimension_id == "P":
+            invalid = metrics["black_ratio"] >= 0.98 or metrics["white_ratio"] >= 0.98
+            return [
+                self._single_result(
+                    "P",
+                    "P.1",
+                    0.0 if invalid else 2.0,
+                    "blank_or_solid_result" if invalid else "decodable_nonblank_result",
+                    metrics,
+                    "逐帧解码并检查全程黑屏、白屏或纯色空画面。",
+                )
+            ]
+        if dimension_id == "G1":
             criterion_scores = [
-                ("C9.1", *_spatial_quality_score(metrics)),
-                ("C9.2", *_temporal_quality_score(metrics)),
+                ("G1.1", *_spatial_quality_score(metrics)),
+                ("G1.2", *_encoding_integrity_score(metrics)),
             ]
         else:
-            criterion_scores = [("O6.1", score, verdict)]
+            criterion_scores = [
+                ("G2.1", *_frame_update_score(metrics)),
+                ("G2.2", *_temporal_quality_score(metrics)),
+            ]
         evidence = {
             "description": (
                 "ffmpeg逐帧CV信号："
@@ -85,7 +102,11 @@ class VideoQualityJudge:
 
     @staticmethod
     def _unassessable(dimension_id: str, reason: str) -> dict[str, Any]:
-        criterion_ids = ["C9.1", "C9.2"] if dimension_id == "C9" else ["O6.1"]
+        criterion_ids = {
+            "P": ["P.1"],
+            "G1": ["G1.1", "G1.2"],
+            "G2": ["G2.1", "G2.2"],
+        }.get(dimension_id, [])
         evidence = [{"description": reason}]
         return {
             "dimension_id": dimension_id,
@@ -107,6 +128,36 @@ class VideoQualityJudge:
                 }
                 for criterion_id in criterion_ids
             ],
+        }
+
+    @staticmethod
+    def _single_result(
+        dimension_id: str,
+        criterion_id: str,
+        score: float,
+        verdict: str,
+        metrics: dict[str, Any],
+        description: str,
+    ) -> dict[str, Any]:
+        evidence = [{"description": description}]
+        criterion = {
+            "criterion_id": criterion_id,
+            "verdict": verdict,
+            "score": score,
+            "confidence": 0.95,
+            "assessable": True,
+            "evidence": evidence,
+            "raw_metrics": metrics,
+        }
+        return {
+            "dimension_id": dimension_id,
+            "verdict": verdict,
+            "score": score,
+            "confidence": 0.95,
+            "assessable": True,
+            "evidence": evidence,
+            "raw_metrics": metrics,
+            "criterion_results": [criterion],
         }
 
 
@@ -140,6 +191,8 @@ def _measure_video(path: str, *, width: int = 160, height: int = 90) -> dict[str
     means: list[float] = []
     sharpness_values: list[float] = []
     clipped = 0
+    black = 0
+    white = 0
     total = 0
     duplicate_count = 0
     previous: bytes | None = None
@@ -147,6 +200,8 @@ def _measure_video(path: str, *, width: int = 160, height: int = 90) -> dict[str
         values = list(frame)
         total += len(values)
         clipped += sum(1 for value in values if value <= 5 or value >= 250)
+        black += sum(1 for value in values if value <= 5)
+        white += sum(1 for value in values if value >= 250)
         means.append(sum(values) / len(values))
         horizontal = sum(
             abs(values[index] - values[index - 1])
@@ -170,6 +225,9 @@ def _measure_video(path: str, *, width: int = 160, height: int = 90) -> dict[str
         "sampled_frames": len(frames),
         "sharpness": round(sum(sharpness_values) / len(sharpness_values), 4),
         "clipped_ratio": round(clipped / max(total, 1), 6),
+        "black_ratio": round(black / max(total, 1), 6),
+        "white_ratio": round(white / max(total, 1), 6),
+        "mean_luma": round(sum(means) / len(means), 4),
         "flicker": round(flicker, 4),
         "duplicate_ratio": round(duplicate_count / max(1, len(frames) - 1), 6),
     }
@@ -209,3 +267,20 @@ def _temporal_quality_score(metrics: dict[str, Any]) -> tuple[float, str]:
     if metrics["duplicate_ratio"] > 0.20 or metrics["flicker"] > 20:
         return 1.0, "minor_temporal_quality_issue"
     return 2.0, "stable_temporal_quality"
+
+
+def _frame_update_score(metrics: dict[str, Any]) -> tuple[float, str]:
+    if metrics["duplicate_ratio"] > 0.50:
+        return 0.0, "frequent_duplicate_or_frozen_frames"
+    if metrics["duplicate_ratio"] > 0.20:
+        return 1.0, "some_duplicate_or_frozen_frames"
+    return 2.0, "continuous_frame_updates"
+
+
+def _encoding_integrity_score(metrics: dict[str, Any]) -> tuple[float, str]:
+    # Successful full-stream decode is the current deterministic proxy for
+    # encoding/frame integrity. Aspect/crop drift needs stream-level evidence
+    # from a future specialized backend and must not be guessed here.
+    if metrics["sampled_frames"] < 2:
+        return 1.0, "decodable_but_too_short_for_full_integrity_check"
+    return 2.0, "decodable_frame_geometry_stable"

@@ -7,6 +7,8 @@ collects per-frame/event/RTC data, and persists a unified GenerationRun.
 from __future__ import annotations
 
 import uuid
+import math
+import statistics
 from typing import Any
 
 from ...errors import ContractError
@@ -107,7 +109,8 @@ class FakeRealtimeHarness:
                     "screenCoords": screen,
                     "contentCoords": [[content_x, content_y]],
                     "sendResult": "sent",
-                    "firstOutputChangeMs": None,
+                    "responseProbe": index == 0,
+                    "firstOutputChangeMs": 80.0 if index == 0 else None,
                 }
             )
         events.append(
@@ -147,7 +150,16 @@ class FakeRealtimeHarness:
                     }
                 )
 
-        audio = {"publish": input_media_role != "feed_capture", "subscribe": True}
+        remote_audio_present = bool(config.get("simulate_remote_audio", True))
+        input_audio_present = input_media_role != "feed_capture"
+        audio = {
+            "publish_requested": True,
+            "subscribe_requested": True,
+            "publish": input_audio_present,
+            "subscribe": remote_audio_present,
+            "input_track_count": 1 if input_audio_present else 0,
+            "remote_track_count": 1 if remote_audio_present else 0,
+        }
         result = {
             "session_uid": session_uid,
             "input_method": input_method,
@@ -194,7 +206,7 @@ class FakeRealtimeHarness:
     ) -> dict[str, Any]:
         connect_done = next((c for c in callbacks if c["callback"] == "connect_completed"), None)
         first_frame = next((f for f in frames if f["stream"] == "output"), None)
-        return {
+        metrics = {
             "connect_ms": connect_done.get("tsMonotonicMs", 0) if connect_done else None,
             "first_frame_ms": first_frame.get("arrivalTimeMs") if first_frame else None,
             "fps": round(len(frames) / max(1.0, duration_s), 2),
@@ -206,6 +218,7 @@ class FakeRealtimeHarness:
             "fps_window_cv": 0.0,
             "track_send_success_ratio": 1.0,
         }
+        return _derive_realtime_metrics(callbacks, frames, events, metrics)
 
 
 class RealtimeController:
@@ -272,10 +285,34 @@ class RealtimeController:
             "single_round": result.get("single_round", True),
             "session_uid": result.get("session_uid"),
         }
+        metrics = _derive_realtime_metrics(
+            result.get("callbacks", []),
+            result.get("frames", []),
+            result.get("events", []),
+            metrics,
+        )
         if input_capture:
             metrics["input_capture"] = input_capture
         events_uri = self._save_artifacts(case, run_id, result)
         result_asset_id = self._register_recording(case, result)
+        audio = dict(metrics.get("audio") or {})
+        audio["publish_requested"] = audio.get("publish_requested", True)
+        audio["subscribe_requested"] = audio.get("subscribe_requested", True)
+        audio["remote_track_count"] = int(
+            audio.get("remote_track_count") or (1 if audio.get("subscribe") else 0)
+        )
+        recording_has_audio = False
+        if result_asset_id:
+            recording_has_audio = bool(
+                self._repository.get_asset(result_asset_id).get("media", {}).get("has_audio")
+            )
+        audio["recording_has_audio"] = recording_has_audio
+        audio["contract_status"] = (
+            "available"
+            if audio.get("subscribe")
+            else "not_provided_by_realtime_sdk"
+        )
+        metrics["audio"] = audio
         run = {
             "run_id": run_id,
             "run_batch_id": self._run_batch_id,
@@ -366,3 +403,116 @@ class RealtimeController:
             _json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
         )
         return stored["uri"]
+
+
+def _derive_realtime_metrics(
+    callbacks: list[dict[str, Any]],
+    frames: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    existing: dict[str, Any],
+) -> dict[str, Any]:
+    """Derive auditable realtime facts from monotonic frame/event records.
+
+    A response probe is one discrete interaction start.  Its
+    ``firstOutputChangeMs`` is measured by the browser Harness from the sent
+    input to the first materially changed output-frame hash.  This measures
+    response speed only; R2 remains responsible for semantic correctness.
+    """
+
+    metrics = dict(existing)
+    output = sorted(
+        (
+            item
+            for item in frames
+            if item.get("stream") == "output"
+            and isinstance(item.get("arrivalTimeMs"), (int, float))
+        ),
+        key=lambda item: float(item["arrivalTimeMs"]),
+    )
+    hashed = [item for item in output if item.get("featureHash")]
+    if len(hashed) >= 2:
+        duplicate_count = sum(
+            current.get("featureHash") == previous.get("featureHash")
+            for previous, current in zip(hashed, hashed[1:], strict=False)
+        )
+        metrics.setdefault("duplicate_frame_ratio", duplicate_count / (len(hashed) - 1))
+        longest_start = float(hashed[0]["arrivalTimeMs"])
+        longest_ms = 0.0
+        for previous, current in zip(hashed, hashed[1:], strict=False):
+            if current.get("featureHash") != previous.get("featureHash"):
+                longest_start = float(current["arrivalTimeMs"])
+            longest_ms = max(longest_ms, float(current["arrivalTimeMs"]) - longest_start)
+        metrics.setdefault("freeze_duration_ms", longest_ms)
+
+    connect_call = next(
+        (item for item in callbacks if item.get("callback") == "connect_call"), None
+    )
+    first_valid = next(
+        (
+            item
+            for item in output
+            if int(item.get("width") or 0) > 0 and int(item.get("height") or 0) > 0
+        ),
+        None,
+    )
+    if connect_call and first_valid:
+        start = connect_call.get("tsMonotonicMs")
+        if isinstance(start, (int, float)):
+            metrics.setdefault(
+                "first_valid_result_ms", float(first_valid["arrivalTimeMs"]) - float(start)
+            )
+
+    probes = [item for item in events if item.get("responseProbe") is True]
+    latencies = [
+        float(item["firstOutputChangeMs"])
+        for item in probes
+        if isinstance(item.get("firstOutputChangeMs"), (int, float))
+    ]
+    metrics["interaction_event_count"] = len(probes)
+    metrics["interaction_latency_observed_count"] = len(latencies)
+    if latencies:
+        ordered = sorted(latencies)
+        metrics.setdefault("first_output_change_ms", latencies[0])
+        metrics["interaction_latency_p95_ms"] = _percentile(ordered, 0.95)
+        metrics["interaction_latency_slope_ms_per_event"] = _linear_slope(latencies)
+        mean = statistics.mean(latencies)
+        metrics["latency_window_cv"] = (
+            statistics.pstdev(latencies) / mean if len(latencies) > 1 and mean else 0.0
+        )
+        metrics["pending_event_peak"] = _pending_peak(probes)
+    return metrics
+
+
+def _pending_peak(probes: list[dict[str, Any]]) -> int:
+    boundaries: list[tuple[float, int]] = []
+    for item in probes:
+        start = item.get("executedMs")
+        latency = item.get("firstOutputChangeMs")
+        if not isinstance(start, (int, float)) or not isinstance(latency, (int, float)):
+            continue
+        boundaries.extend([(float(start), 1), (float(start) + float(latency), -1)])
+    active = peak = 0
+    for _, delta in sorted(boundaries, key=lambda item: (item[0], item[1])):
+        active += delta
+        peak = max(peak, active)
+    return peak
+
+
+def _linear_slope(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    center_x = (len(values) - 1) / 2
+    center_y = statistics.mean(values)
+    numerator = sum((index - center_x) * (value - center_y) for index, value in enumerate(values))
+    denominator = sum((index - center_x) ** 2 for index in range(len(values)))
+    return numerator / denominator if denominator else 0.0
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    if len(values) == 1:
+        return values[0]
+    position = (len(values) - 1) * fraction
+    lower, upper = math.floor(position), math.ceil(position)
+    if lower == upper:
+        return values[lower]
+    return values[lower] + (values[upper] - values[lower]) * (position - lower)

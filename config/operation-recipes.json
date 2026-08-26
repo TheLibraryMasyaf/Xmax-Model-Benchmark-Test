@@ -4,6 +4,30 @@
   "version": "0.3.0",
   "recipes": [
     {
+      "recipe_id": "offline-text-edit",
+      "version": "0.1.0",
+      "play_names": ["文本编辑"],
+      "default_generation_mode": "offline",
+      "allowed_generation_modes": ["offline"],
+      "prompt_template": "根据Prompt文字对Feed视频中的指定内容进行修改",
+      "edited_video_role": "feed_video",
+      "expected_audio_source_role": "feed_video",
+      "evaluation_contract": {
+        "operation_summary": "以Feed视频作为被编辑的时间线和场景，仅按Prompt文字指定的对象、属性、动作、风格或特效进行修改。",
+        "result_expectation": "结果应完成Prompt指定的变化，并保留Feed中未要求修改的主体、场景、镜头、时序和音轨。",
+        "role_semantics": {
+          "feed": "待编辑的原视频。",
+          "prompt_text": "唯一的编辑指令和目标来源。",
+          "result_video": "Feed视频按Prompt指定内容完成修改后的结果。"
+        },
+        "must_preserve": ["Feed动作与时序", "Feed镜头与未编辑区域", "Feed原音轨"],
+        "must_change": ["Prompt文字明确指定的目标内容"]
+      },
+      "bindings": {
+        "offline": {"refVideoPath": "feed_video"}
+      }
+    },
+    {
       "recipe_id": "offline-image-reference",
       "version": "0.1.0",
       "play_names": ["换装", "更换服装", "换身材", "换人", "换舞资", "换舞姿", "换角色", "更换角色", "角色替换", "宠物替换", "换风格"],

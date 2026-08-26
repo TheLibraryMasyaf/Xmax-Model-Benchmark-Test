@@ -3,7 +3,8 @@
 // Callback registration is mandatory: onRemoteStream, onStateChange, onError,
 // onDisconnect and onRoomEvent. Every callback records both a monotonic clock
 // timestamp and a wall-clock timestamp. Audio is explicitly published and
-// subscribed so audio-preservation checks can be claimed.
+// subscribed. Audio preservation is only assessable when the returned remote
+// MediaStream actually contains an audio track.
 //
 // A fixed Feed used with auto-looping input must be limited to a single round
 // window; call stopGeneration() at the end of each round.

@@ -71,7 +71,7 @@ Case表不保存重复组平均值、中位数或其他组统计。每一次测�
 
 ## 7. 单次评分与报告聚合边界
 
-Case评分只取当前Score Schema声明的`case_score_output`，当前Shadow配置为Scenario Score，并以百分比展示。项目内部`case_score_percent`范围为0–100；飞书百分比数值单元是0–1，因此写入前必须除100，读回后必须乘100。例如内部85分写入`0.85`，飞书显示`85.00%`；不得直接写入`85`。内部0/1/2细则、Canonical Score、权重和证据仍保存在EvaluationResult，不投影成Case表固定列。
+Case评分只取当前Score Schema声明的`case_score_output`，当前Shadow配置为Scenario Score，并以百分比展示。项目内部`case_score_percent`范围为0–100；飞书百分比数值单元是0–1，因此写入前必须除100，读回后必须乘100。例如内部85分写入`0.85`，飞书显示`85.00%`；不得直接写入`85`。内部0/1/2细则、场景权重和证据仍保存在EvaluationResult，不投影成Case表固定列；Canonical字段在当前Benchmark中为空。
 
 存量Case在没有按新Benchmark重评前，`case评分`保持空值。空值表示“未重评”，0%表示“已执行但生成失败、结果无效或最终得分为0”，两者不得混用。
 

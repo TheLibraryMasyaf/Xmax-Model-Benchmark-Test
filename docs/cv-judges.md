@@ -10,7 +10,7 @@ Python插件实现 `xmax_test.judges.base.JudgePlugin`，manifest符合 `schemas
 
 一个Judge可以支持多个维度，一个维度也可以绑定多个Judge。插件不得直接读取飞书、修改Benchmark或写最终总分。
 
-仓库内置三个可执行基线：`video-quality`用ffmpeg解码后的灰度帧计算清晰度、曝光裁切、闪烁和重复帧，只覆盖C9/O6的基础感知事实；`audio-integrity`用ffmpeg PCM能量包络比对被编辑视频的音轨与结果音轨，只判保留与音画同步；`run-metrics`只读取生成与RTC日志中的成功、费用、首帧、FPS、掉帧和实验条件。无法解码或缺少必要实验时返回`assessable=false`，不返回占位中性分。
+仓库内置三个可执行基线：`video-quality`用ffmpeg灰度帧覆盖P.1空画面、G1基础画质和G2时序信号；`audio-integrity`用PCM能量包络覆盖G3.1来源/完整性和G3.2可测时间轴对齐；`run-metrics`只覆盖P.1结果登记、实时G2.1帧更新和R1响应速度。实时SDK已请求订阅但远端输出流没有音频轨时，`audio-integrity`将G3标为不适用；离线结果缺少应有音轨，或远端已有音轨但录制文件丢失音轨，仍按0分处理。P.2/P.3/RP.1/RP.2由冻结批次报告器直接统计，不生成Judgment。无法解码或缺少实验时返回`assessable=false`，不返回中性占位分。
 
 当前`var/models/`中的DINOv2和MUSIQ权重属于候选资产，尚未注册成启用Judge，当前得分不会假装使用这些模型。开放语义、结构和跨帧现象由Qwen3-VL Shadow Judge补充；后续专项CV Challenger通过同一插件协议替换相应路由。
 
@@ -44,7 +44,7 @@ CV Judge不能只返回一个维度裸分，必须在`criterion_results`中只�
 - `raw_metrics`。
 - 失败原因或不适用原因。
 
-例如音频Judge只能提交O6.2/R7.3，不能用它的分数代表整个O6/R7；基础画质Judge当前只提交C9.1、C9.2或O6.1。Fusion把同一细则的多Judge结果合并后，再汇总维度。
+例如音频Judge只能提交G3.1/G3.2；基础画质Judge只能提交P.1、G1.1/G1.2或G2.1/G2.2。任何Judge都不能用整体分替代未测细则；Fusion先合并同一细则的多Judge结果，再派生标准分。
 
 ## 4. 运行隔离
 

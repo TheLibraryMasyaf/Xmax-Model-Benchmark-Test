@@ -160,13 +160,21 @@ class TestPlanBuilder:
 
     # ------------------------------------------------------------------
     def _load_assets(self, request: dict[str, Any]) -> list[dict[str, Any]]:
-        return _expand_asset_bindings(self._repository.list_assets())
+        return _expand_asset_bindings(_list_all_assets(self._repository))
 
     def _prepare(
         self, assets: list[dict[str, Any]], request: dict[str, Any]
     ) -> tuple[list[dict[str, Any]], list[PromptBundle], list[dict[str, Any]]]:
         filters = request.get("filters", {})
         ready = [asset for asset in assets if asset.get("status") == "ready"]
+        if filters.get("source_ids"):
+            allowed_sources = {str(value) for value in filters["source_ids"]}
+            ready = [
+                asset
+                for asset in ready
+                if str(asset.get("metadata", {}).get("source_id") or "")
+                in allowed_sources
+            ]
         feeds = [asset for asset in ready if asset.get("kind") in {"feed_video", "feed_image"}]
         if filters.get("feed_asset_ids"):
             feeds = [asset for asset in feeds if asset["asset_id"] in filters["feed_asset_ids"]]
@@ -212,7 +220,11 @@ class TestPlanBuilder:
         if prompt_limit is not None:
             bundles = bundles[: int(prompt_limit)]
         numbered: list[PromptBundle] = []
+        scenario_overrides = request.get("scenario_overrides", {})
         for index, bundle in enumerate(bundles, start=1):
+            scenario_key = str(
+                bundle.metadata.get("group_id") or bundle.metadata.get("record_id") or ""
+            )
             numbered.append(
                 PromptBundle(
                     prompt_number=(
@@ -223,7 +235,7 @@ class TestPlanBuilder:
                     prompt_text=bundle.prompt_text,
                     prompt_asset_ids=bundle.prompt_asset_ids,
                     play_name=bundle.play_name,
-                    scenario_id=bundle.scenario_id,
+                    scenario_id=scenario_overrides.get(scenario_key, bundle.scenario_id),
                     metadata={**bundle.metadata, "prompt_index": index},
                 )
             )
@@ -629,11 +641,16 @@ class TestPlanBuilder:
         if not bundle.scenario_id:
             return None
         for scenario in self._scenario_pack.get("scenarios", []):
-            if scenario.get("scenario_id") != bundle.scenario_id:
+            accepted = {
+                scenario.get("scenario_id"),
+                scenario.get("name"),
+                *scenario.get("aliases", []),
+            }
+            if bundle.scenario_id not in accepted:
                 continue
             if mode not in scenario.get("supported_modes", []):
                 return None
-            return bundle.scenario_id
+            return scenario.get("scenario_id")
         return None
 
     def _scene_tags(self, scenario_id: str | None) -> dict[str, str]:
@@ -647,14 +664,14 @@ class TestPlanBuilder:
     def _prompt_video_ids(self) -> set[str]:
         return {
             asset["asset_id"]
-            for asset in _expand_asset_bindings(self._repository.list_assets())
+            for asset in _expand_asset_bindings(_list_all_assets(self._repository))
             if asset.get("kind") == "prompt_video"
         }
 
     def _prompt_image_ids(self) -> set[str]:
         return {
             asset["asset_id"]
-            for asset in _expand_asset_bindings(self._repository.list_assets())
+            for asset in _expand_asset_bindings(_list_all_assets(self._repository))
             if asset.get("kind") == "prompt_image"
         }
 
@@ -680,6 +697,19 @@ def _group_key(asset: dict[str, Any]) -> str:
         if metadata.get(key):
             return f"{key}:{metadata[key]}"
     return f"own:{asset['asset_id']}"
+
+
+def _list_all_assets(repository: Any, page_size: int = 500) -> list[dict[str, Any]]:
+    """Read every asset page; the default repository limit is intentionally bounded."""
+
+    assets: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        page = repository.list_assets(cursor=cursor, limit=page_size)
+        assets.extend(page)
+        if len(page) < page_size:
+            return assets
+        cursor = page[-1]["asset_id"]
 
 
 def _expand_asset_bindings(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:

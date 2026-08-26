@@ -55,8 +55,25 @@ class AssetRegistry:
             metadata = dict(existing.get("metadata", {}))
             bindings = list(metadata.get("bindings", []))
             binding_key = _binding_key(binding)
-            if not any(_binding_key(item) == binding_key for item in bindings):
+            matching_index = next(
+                (
+                    index
+                    for index, item in enumerate(bindings)
+                    if _binding_key(item) == binding_key
+                ),
+                None,
+            )
+            if matching_index is None:
                 bindings.append(binding)
+                metadata["bindings"] = bindings
+                existing = {**existing, "metadata": metadata}
+                self._repository.upsert_asset(existing)
+            elif bindings[matching_index] != binding:
+                # The physical file is unchanged, but business metadata in
+                # Feishu can be corrected (for example a missing Prompt
+                # number). Refresh the existing binding in place so future
+                # plans do not keep consuming stale source identifiers.
+                bindings[matching_index] = binding
                 metadata["bindings"] = bindings
                 existing = {**existing, "metadata": metadata}
                 self._repository.upsert_asset(existing)

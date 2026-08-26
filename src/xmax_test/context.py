@@ -29,15 +29,6 @@ PIPELINE_STAGES = [
 
 BILLED_STAGES = {"generate"}
 
-# Batch-level criteria are produced by the deterministic evaluator after all
-# per-video Judges finish. They are real coverage even though they are not a
-# separately configured external Judge.
-INTERNAL_CRITERIA_BY_MODE = {
-    "offline": {"C1.2", "O4.1", "O4.2", "O5.2", "O5.3"},
-    "realtime": {"C1.2"},
-}
-
-
 class ContextChecker:
     """Aggregates findings without raising on the first problem."""
 
@@ -611,21 +602,20 @@ def _judge_coverage(
                 continue
             missing_criteria: list[str] = []
             for criterion_id in dimension_criteria:
-                compatible = criterion_id in INTERNAL_CRITERIA_BY_MODE.get(mode, set())
-                if not compatible:
-                    for judge in enabled_judges:
-                        kind = judge.get("kind")
-                        normalized_kind = "mlmm" if kind == "mlmm_cli" else kind
-                        if allowed_kinds and normalized_kind not in allowed_kinds:
-                            continue
-                        if dimension_id not in judge.get("supported_dimensions", []):
-                            continue
-                        if mode not in judge.get("supported_modes", []):
-                            continue
-                        supported = set(judge.get("supported_criteria") or [])
-                        if criterion_id in supported:
-                            compatible = True
-                            break
+                compatible = False
+                for judge in enabled_judges:
+                    kind = judge.get("kind")
+                    normalized_kind = "mlmm" if kind == "mlmm_cli" else kind
+                    if allowed_kinds and normalized_kind not in allowed_kinds:
+                        continue
+                    if dimension_id not in judge.get("supported_dimensions", []):
+                        continue
+                    if mode not in judge.get("supported_modes", []):
+                        continue
+                    supported = set(judge.get("supported_criteria") or [])
+                    if criterion_id in supported:
+                        compatible = True
+                        break
                 target = covered_criteria_by_mode if compatible else missing_criteria_by_mode
                 target[mode].append(criterion_id)
                 if not compatible:

@@ -106,7 +106,7 @@ class NormalizerTests(FeedbackTestBase):
                     "mapping_status": "existing",
                     "normalized_labels": [
                         {
-                            "dimension_id": "C2",
+                            "dimension_id": "E2",
                             "confidence": 0.9,
                             "rationale": "matched",
                             "polarity": "positive",
@@ -182,7 +182,7 @@ class RouterTests(FeedbackTestBase):
             "raw_text": "编辑边界准确",
             "review_context": "blind",
             "mapping_status": "existing",
-            "normalized_labels": [{"dimension_id": "C1", "confidence": 0.9}],
+            "normalized_labels": [{"dimension_id": "E2", "confidence": 0.9}],
             "learning_permission": True,
             "data_partition": "train",
         }

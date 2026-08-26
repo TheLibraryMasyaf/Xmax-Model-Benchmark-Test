@@ -256,19 +256,19 @@ class FullSyncTests(FeishuTestBase):
         self.assertIsNone(fields["case评分"])
         self.assertIsNone(fields["case说明"])
 
-    def test_comment_syncs_before_group_score_and_score_backfills_idempotently(self) -> None:
+    def test_comment_syncs_before_score_and_score_backfills_idempotently(self) -> None:
         run = self.run_record(case_score=None)
         evaluation = {
             "evaluation_id": "eval-provisional",
             "evaluation_batch_id": "batch-eval-provisional",
             "run_id": run["run_id"],
-            "benchmark_version": "0.2.0-draft",
-            "scenario_pack_version": "0.1.0-draft",
-            "score_schema_version": "0.2.0-draft",
+            "benchmark_version": "0.3.0-draft",
+            "scenario_pack_version": "0.2.0-draft",
+            "score_schema_version": "0.3.0-draft",
             "criterion_results": [],
             "dimension_results": [
                 {
-                    "dimension_id": "C7",
+                    "dimension_id": "E4",
                     "score": 0.0,
                     "assessable": True,
                     "evidence": [{"description": "人物手部在中段出现明显结构错误。"}],
@@ -276,7 +276,7 @@ class FullSyncTests(FeishuTestBase):
             ],
             "weight_resolution": {},
             "case_score_percent": None,
-            "score_readiness": "pending_group_metrics",
+            "score_readiness": "incomplete_evidence",
         }
         self.service.sync_case_runs([run], evaluations={run["run_id"]: evaluation}, policy="full")
         fields = self.client._tables["tbl-case"][0]["fields"]
@@ -427,6 +427,18 @@ class FullSyncTests(FeishuTestBase):
         self.assertEqual(second["created"], 0)
         self.assertEqual(second["skipped"], 1)
         self.assertEqual(len(self.client._tables["tbl-case"]), 1)
+
+    def test_single_run_full_sync_does_not_append_existing_attachments(self) -> None:
+        run = self.run_record(case_score=85.0)
+        self.service.sync_case_run(run, self.selected_evaluations(run)[run["run_id"]])
+        uploads_after_first = len(self.client.uploads)
+
+        second = self.service.sync_case_run(
+            run, self.selected_evaluations(run)[run["run_id"]], policy="full"
+        )
+
+        self.assertEqual(second["action"], "skipped")
+        self.assertEqual(len(self.client.uploads), uploads_after_first)
 
     def test_structure_is_read_before_write(self) -> None:
         run = self.run_record()

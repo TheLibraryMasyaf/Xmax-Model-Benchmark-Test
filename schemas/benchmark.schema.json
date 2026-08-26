@@ -24,6 +24,10 @@
       "type": "array",
       "items": {"$ref": "#/$defs/dimension"}
     },
+    "reporting_metrics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/reportingMetric"}
+    },
     "weight_profiles": {
       "type": "array",
       "items": {"$ref": "#/$defs/weightProfile"}
@@ -111,6 +115,8 @@
           "minProperties": 1
         },
         "case_score_output": {"enum": ["canonical_score", "scenario_score"]},
+        "require_scene_weight_rule": {"type": "boolean"},
+        "canonical_score_enabled": {"type": "boolean"},
         "comparison_policy": {
           "type": "object",
           "required": [
@@ -128,6 +134,23 @@
           },
           "additionalProperties": false
         }
+      },
+      "additionalProperties": true
+    },
+    "reportingMetric": {
+      "type": "object",
+      "required": ["metric_id", "version", "name", "scope", "applicable_modes", "definition"],
+      "properties": {
+        "metric_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["frozen_run_batch", "repeat_group", "frozen_realtime_batch"]},
+        "applicable_modes": {
+          "type": "array",
+          "items": {"enum": ["offline", "realtime", "both"]},
+          "minItems": 1
+        },
+        "definition": {"type": "string", "minLength": 1}
       },
       "additionalProperties": true
     },

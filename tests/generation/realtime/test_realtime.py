@@ -163,7 +163,15 @@ class RealtimeControllerTests(RealtimeTestBase):
         self.assertEqual(run["origin"], "xmax_realtime")
         self.assertEqual(run["metrics"]["input_method"], "connectMedia")
         self.assertEqual(run["metrics"]["single_round"], True)
-        self.assertEqual(run["metrics"]["audio"], {"publish": True, "subscribe": True})
+        self.assertEqual(run["metrics"]["audio"]["publish"], True)
+        self.assertEqual(run["metrics"]["audio"]["subscribe"], True)
+        self.assertEqual(run["metrics"]["audio"]["contract_status"], "available")
+        self.assertEqual(run["metrics"]["interaction_event_count"], 1)
+        self.assertEqual(run["metrics"]["first_output_change_ms"], 80.0)
+        self.assertEqual(run["metrics"]["interaction_latency_p95_ms"], 80.0)
+        self.assertEqual(run["metrics"]["duplicate_frame_ratio"], 0.0)
+        self.assertEqual(run["metrics"]["freeze_duration_ms"], 0.0)
+        self.assertEqual(run["metrics"]["first_valid_result_ms"], 200.0)
         self.assertIsNotNone(run["raw_events_uri"])
         events = self.repository.get_event_log(run["run_id"])
         self.assertEqual(events[0]["event"], "run_created")
@@ -267,6 +275,19 @@ class RealtimeControllerTests(RealtimeTestBase):
         run = controller.run_case(self.case())
         self.assertEqual(run["metrics"]["audio"]["publish"], True)
         self.assertEqual(run["metrics"]["audio"]["subscribe"], True)
+        self.assertEqual(run["metrics"]["audio"]["subscribe_requested"], True)
+        self.assertEqual(run["metrics"]["audio"]["remote_track_count"], 1)
+
+    def test_missing_remote_audio_track_is_persisted_as_sdk_unavailable(self) -> None:
+        run = self.controller.run_case(
+            self.case(), config={"simulate_remote_audio": False}
+        )
+        self.assertFalse(run["metrics"]["audio"]["subscribe"])
+        self.assertEqual(run["metrics"]["audio"]["remote_track_count"], 0)
+        self.assertEqual(
+            run["metrics"]["audio"]["contract_status"],
+            "not_provided_by_realtime_sdk",
+        )
 
     def test_all_callbacks_have_timestamps(self) -> None:
         harness = FakeRealtimeHarness(clock=self.clock)

@@ -78,7 +78,7 @@ resolve selectors → freeze stage inputs → dry-run/smoke → approved if bill
 - `plan`：TestPlan冻结且有内容哈希。
 - `generate`：所有Case有终态Run或明确跳过原因，Completed Run媒体通过验证。
 - `preprocess`：所有选中completed Run有匹配版本/哈希的预处理产物或明确失败。
-- `evaluate`：所有适用Active维度有Judgment或明确不可评估状态，Canonical/Scenario Score保存版本轨迹或明确无法出分。
+- `evaluate`：所有适用Active维度有Judgment或明确不可评估状态，Scenario Score保存命中规则和版本轨迹；未命中核心场景时明确无法出分。
 - `feedback`：原文、归一化版本、分区和学习许可已保存。
 - `report`：P0/P1/P2 Markdown和JSON已生成并通过Schema。
 - `sync`：实际写入不超出`sync_policy`，写入和回读对账通过；Case百分比转换正确。

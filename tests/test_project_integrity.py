@@ -22,13 +22,13 @@ PIPELINE_STAGES = [
 
 
 class ProjectIntegrityTests(unittest.TestCase):
-    def test_c1_validity_has_visual_mlmm_route(self) -> None:
+    def test_p1_validity_has_visual_mlmm_route(self) -> None:
         benchmark = load_benchmark_contract(ROOT / "BENCHMARK.md")
-        c1 = next(item for item in benchmark["dimensions"] if item["dimension_id"] == "C1")
-        self.assertIn("mlmm", c1["judge_routing"]["secondary_kinds"])
+        performance = next(item for item in benchmark["dimensions"] if item["dimension_id"] == "P")
+        self.assertIn("mlmm", performance["judge_routing"]["secondary_kinds"])
         registry = json.loads((ROOT / "config" / "judges.example.json").read_text())
         mlmm = next(item for item in registry["judges"] if item["kind"] == "mlmm")
-        self.assertIn("C1.1", mlmm["supported_criteria"])
+        self.assertIn("P.1", mlmm["supported_criteria"])
 
     def test_all_json_files_parse(self) -> None:
         paths = sorted((ROOT / "config").glob("*.json")) + sorted((ROOT / "schemas").glob("*.json"))
@@ -95,12 +95,9 @@ class ProjectIntegrityTests(unittest.TestCase):
     def test_draft_scenario_pack_matches_benchmark_rules(self) -> None:
         scenarios = json.loads((ROOT / "config" / "scenarios.json").read_text(encoding="utf-8"))
         self.assertEqual(scenarios["status"], "shadow")
-        self.assertEqual(len(scenarios["scenarios"]), 32)
+        self.assertEqual(len(scenarios["scenarios"]), 10)
         self.assertEqual(sum(item["tier"] == "core" for item in scenarios["scenarios"]), 10)
-        self.assertEqual(
-            sum(item["tier"] == "supplementary" for item in scenarios["scenarios"]),
-            22,
-        )
+        self.assertEqual(sum(item["tier"] == "supplementary" for item in scenarios["scenarios"]), 0)
 
     def test_operation_recipes_are_unambiguous(self) -> None:
         recipes = json.loads(

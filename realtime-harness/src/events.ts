@@ -14,6 +14,9 @@ export interface TracksFrame {
   screenCoords: TrackPoint[];
   contentCoords: TrackPoint[];
   sendResult: "sent" | "dropped" | "ignored";
+  responseProbe: boolean;
+  inputMonotonicMs: number;
+  baselineFeatureHash: string | null;
   firstOutputChangeMs: number | null;
 }
 
@@ -136,6 +139,9 @@ export class EventScriptRunner {
         screenCoords,
         contentCoords,
         sendResult,
+        responseProbe: i === 0,
+        inputMonotonicMs: performance.now(),
+        baselineFeatureHash: null,
         firstOutputChangeMs: null,
       };
       this.events.push(frame as unknown as HarnessEvent);

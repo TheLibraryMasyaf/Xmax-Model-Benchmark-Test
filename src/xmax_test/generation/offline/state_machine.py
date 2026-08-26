@@ -16,7 +16,7 @@ from typing import Any
 from ...errors import ExternalServiceError
 from ...time import utc_now
 
-# Stable failure classification used by O5/O6 statistics.
+# Stable failure classification used by P.2 batch-report statistics.
 FAILURE_CLASSES = (
     "session_failure",
     "rtc_join_failure",

@@ -49,7 +49,7 @@
 
 | 分数口径 | 基线模型 | 新模型 | 变化值 | 变化比例 | 结论 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Canonical Score | `{{ score }}` | `{{ score }}` | `{{ delta_points }}` | `{{ delta_percent }}` | `{{ conclusion }}` |
+| Canonical Score（旧Benchmark兼容；当前应为空） | `{{ score }}` | `{{ score }}` | `{{ delta_points }}` | `{{ delta_percent }}` | `{{ conclusion }}` |
 | 请求场景加权Scenario Score | `{{ score }}` | `{{ score }}` | `{{ delta_points }}` | `{{ delta_percent }}` | `{{ conclusion }}` |
 
 一句话结论：新模型总分 `{{ 提升/下降/持平 }}` `{{ delta_points }}` 分（`{{ delta_percent }}`），主要由 `{{ top_drivers }}` 驱动。

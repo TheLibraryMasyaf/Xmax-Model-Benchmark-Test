@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 修改评分描述、档位、证据要求 | `docs/plugin-recipes/benchmark-and-weights.md` | `BENCHMARK.md` | 否 |
 | 新增、停用或替换评分维度 | `docs/plugin-recipes/benchmark-and-weights.md` | `BENCHMARK.md`、Judge覆盖配置 | 通常否 |
-| 修改通用权重、场景权重或硬门槛 | `docs/plugin-recipes/benchmark-and-weights.md` | `BENCHMARK.md` | 否 |
+| 修改场景实现基底、场景权重或硬门槛 | `docs/plugin-recipes/benchmark-and-weights.md` | `BENCHMARK.md` | 否 |
 | 更换OpenAI兼容的MLLM | `docs/plugin-recipes/mlmm-provider.md` | `config/judges.json`、密钥环境变量 | 否 |
 | 接入非OpenAI兼容的MLLM API或本地服务 | `docs/plugin-recipes/mlmm-provider.md` | 新Provider模块、测试、`config/judges.json` | 通常否 |
 | 新增CV或确定性指标Judge | `docs/plugin-recipes/judge-plugin.md` | 新Judge模块、测试、`config/judges.json` | 通常否 |

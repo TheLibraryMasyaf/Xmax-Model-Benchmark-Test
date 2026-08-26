@@ -22,7 +22,7 @@
 | P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、标准触控按Case稳定随机抽取Feed静帧、版本化互动Profile、4–6条随机用户滑动、Fake | 需Key的付费真实会话待运行时smoke |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
 | P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、15模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
-| P8 Evaluation | DONE | Orchestrator、细则级Judge路由与覆盖检查、批次级重复/跨输入评分、硬门槛、双总分、精确批次续跑和结果Schema | R5/R6等仍由实际样本是否具备异常脚本/长会话决定可评性 |
+| P8 Evaluation | DONE | Orchestrator、P/G/E/R细则级Judge路由、P.1硬门槛、核心场景分、P.2/P.3/RP.1/RP.2批次报告事实、精确批次续跑和结果Schema | G3、R1.2/R2.3等仍由实际样本是否具备对应音轨或连续交互实验决定可评性 |
 | P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
 | P11 Release/Replay | DONE | Challenger、Holdout验证、回放、发布和回滚 | 发布仍需明确operator和验证文件 |
@@ -67,7 +67,7 @@ P0.5 + P2/P3/P4/P5/P8/P9/P11 → P10完整同步
 
 目标文件：`src/xmax_test/evaluation/weights.py`、Fusion实现、`schemas/evaluation-result.schema.json`。
 
-验收基线：Fusion同时输出Canonical和Scenario Score；硬门槛不受权重影响；结果保存命中规则和有效权重。
+验收基线：Fusion只在命中显式核心场景规则时输出Scenario Score，Canonical兼容字段为空；硬门槛不受权重影响；结果保存命中规则和有效权重。
 
 ### P0.5 Persistence
 
@@ -211,7 +211,7 @@ CLI目标：`xmax-test judges list|check|run`。
 
 CLI目标：`xmax-test evaluate --run-batch-id|--run-id ...`。
 
-验收：动态加载Benchmark；Judge按细则分工且可续跑；只有Benchmark明确N/A的细则可从分母移除，缺评不得重归一；重复/跨输入指标在冻结批次完成后回填；输出Canonical/Scenario分；硬门槛生效；输入可为生成或导入的completed Run；评测路径不依赖XMAX Adapter或飞书下载器。
+验收：动态加载Benchmark；Judge按细则分工且可续跑；只有Benchmark明确N/A的细则可从分母移除，缺评不得重归一；P.2/P.3/RP.1/RP.2在冻结批次完成后生成报告事实且不回填单视频；命中核心场景后输出Scenario分；硬门槛生效；输入可为生成或导入的completed Run；评测路径不依赖XMAX Adapter或飞书下载器。
 
 ### P9 Human Signals
 
@@ -251,7 +251,7 @@ CLI目标：`xmax-test replay run`、`xmax-test release validate|promote|rollbac
 
 CLI目标：`xmax-test report model-update --request config/run-request.json`、`xmax-test report single-version --request config/single-version-report.json`。
 
-验收：版本对比必须显式选择两侧Run/Evaluation Batch，相同配对样本计算双分数变化；不可比配置拒绝升降结论；每个请求场景有独立小节；P0/P1/P2按已发布策略归类；新增Hard Gate失败必入P2。单版本报告必须输出总分、全量维度、全量细则、逐Case、多统计量、优劣项及建议；失败Run计0%；人工有效修订进入报告且保留AI原值；JSON与Markdown同时落盘并通过Schema。
+验收：版本对比必须显式选择两侧Run/Evaluation Batch，相同配对样本按核心场景计算Scenario变化；不可比配置拒绝升降结论；每个请求场景有独立小节；P0/P1/P2按已发布策略归类；新增Hard Gate失败必入P2。单版本报告必须输出场景总分、P.2/P.3/RP.1/RP.2批次事实、全量维度、全量细则、逐Case、多统计量、优劣项及建议；失败Run计0%；人工有效修订进入报告且保留AI原值；JSON与Markdown同时落盘并通过Schema。
 
 ### P13 Unified CLI
 

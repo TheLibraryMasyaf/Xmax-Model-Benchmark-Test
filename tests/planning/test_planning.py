@@ -73,7 +73,7 @@ class PlanningTestBase(unittest.TestCase):
                 "text": "换装：把人物替换为参考图的服装",
                 "group_id": "g1",
                 "record_number": 1,
-                "scenario_id": "core-selfie-appearance",
+                "scenario_id": "core-indoor-selfie-person-replacement",
             },
         )
         asset("prompt-ref-1", "prompt_image", {"group_id": "g1"})
@@ -84,7 +84,7 @@ class PlanningTestBase(unittest.TestCase):
                 "text": "手势舞：按照参考视频完成动作",
                 "group_id": "g2",
                 "record_number": 2,
-                "scenario_id": "core-dance-fixed-camera-appearance",
+                "scenario_id": "core-high-speed-subject-edit",
             },
         )
         asset("prompt-ref-2", "prompt_video", {"group_id": "g2"})
@@ -170,7 +170,7 @@ class DeterminismTests(PlanningTestBase):
                 "metadata": {
                     "text": "换装：按参考图替换服装",
                     "group_id": "g3",
-                    "scenario_id": "core-selfie-appearance",
+                    "scenario_id": "core-indoor-selfie-person-replacement",
                 },
             }
         )
@@ -362,7 +362,7 @@ class RecipeModeTests(PlanningTestBase):
                 "status": "ready",
                 "metadata": {
                     "text": "视频中动物跟随轨迹运动",
-                    "scenario_id": "supp-realtime-gesture-effect",
+                    "scenario_id": "core-moving-camera-effects",
                 },
             }
         )

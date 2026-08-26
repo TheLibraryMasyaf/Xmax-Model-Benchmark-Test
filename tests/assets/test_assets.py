@@ -133,6 +133,48 @@ class LocalSourceTests(AssetTestBase):
             {"feed_image", "prompt_image"},
         )
 
+    def test_same_business_binding_refreshes_corrected_source_metadata(self) -> None:
+        from xmax_test.assets.models import DownloadResult
+        from xmax_test.hashing import file_sha256
+
+        shared = Path(self.directory.name) / "prompt.png"
+        shared.write_bytes(b"unchanged-file")
+        common = {
+            "source_id": "base",
+            "kind": "feishu_bitable",
+            "asset_kind": "prompt_image",
+        }
+        first = DownloadResult(
+            remote_key="rec-1_prompt_reference_0",
+            path=shared,
+            sha256=file_sha256(shared),
+            bytes=shared.stat().st_size,
+            metadata={
+                "kind": "prompt_image",
+                "record_id": "rec-1",
+                "record_number": "feed1308_prompt",
+            },
+        )
+        corrected = DownloadResult(
+            remote_key=first.remote_key,
+            path=shared,
+            sha256=first.sha256,
+            bytes=first.bytes,
+            metadata={
+                "kind": "prompt_image",
+                "record_id": "rec-1",
+                "record_number": "171",
+            },
+        )
+
+        self.registry.register_download(common, first)
+        self.registry.register_download(common, corrected)
+
+        stored = self.repository.find_asset_by_sha256(first.sha256)
+        bindings = stored["metadata"]["bindings"]
+        self.assertEqual(len(bindings), 1)
+        self.assertEqual(bindings[0]["record_number"], "171")
+
     def test_local_source_discovers_and_registers(self) -> None:
         media = Path(self.directory.name) / "feed"
         media.mkdir(parents=True)
@@ -333,6 +375,37 @@ class BitableSourceTests(AssetTestBase):
         remotes = source.list_assets()
         self.assertEqual(len(remotes), 3)  # tok-a, tok-b, text
         self.assertEqual(client.calls.count("bitable_records"), 2)
+
+    def test_bitable_rejects_compound_number_with_missing_prompt_suffix(self) -> None:
+        client = FakeFeishuClient(
+            bitable_pages=[
+                {
+                    "records": [
+                        {
+                            "record_id": "rec-blank-prompt",
+                            "fields": {
+                                "编号": "feed1308_prompt",
+                                "文字": "替换角色",
+                            },
+                        }
+                    ],
+                    "has_more": False,
+                    "page_token": None,
+                }
+            ]
+        )
+        item = {
+            "source_id": "base",
+            "kind": "feishu_bitable",
+            "enabled": True,
+            "asset_kind": "prompt_text",
+            "app_token": "app",
+            "table_id": "tbl",
+            "field_mapping": {"record_number": "编号", "prompt_text": "文字"},
+        }
+        source = FeishuBitableSource(self.descriptor(item), client)
+        with self.assertRaisesRegex(ContractError, "Prompt number is missing"):
+            source.list_assets()
 
 
 class WikiSourceTests(AssetTestBase):

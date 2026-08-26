@@ -97,6 +97,35 @@ try {
     const rtcLog = [];
     const stateChanges = [];
     const stamp = (callback, payload = {}) => callbacks.push({ callback, tsMonotonicMs: performance.now(), tsWallMs: Date.now(), ...payload });
+    const frameFeatureHash = (video) => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 8; canvas.height = 8;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context || !video.videoWidth || !video.videoHeight) return null;
+        context.drawImage(video, 0, 0, 8, 8);
+        const pixels = context.getImageData(0, 0, 8, 8).data;
+        const luma = [];
+        for (let index = 0; index < pixels.length; index += 4) {
+          luma.push(Math.round(0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2]));
+        }
+        const mean = luma.reduce((sum, value) => sum + value, 0) / luma.length;
+        let bits = "";
+        for (const value of luma) bits += value >= mean ? "1" : "0";
+        return BigInt(`0b${bits}`).toString(16).padStart(16, "0");
+      } catch {
+        return null;
+      }
+    };
+    const hashDistance = (left, right) => {
+      if (!left || !right || left.length !== right.length) return null;
+      let distance = 0;
+      for (let index = 0; index < left.length; index += 1) {
+        let value = parseInt(left[index], 16) ^ parseInt(right[index], 16);
+        while (value) { distance += value & 1; value >>>= 1; }
+      }
+      return distance;
+    };
 
     // Keep references to browser peer connections so short RTC changes are not
     // reduced to the SDK's coarse console diagnostics.
@@ -267,8 +296,24 @@ try {
     events.push({ event: "task_start", plannedMs: 0, executedMs: 0, payload: {} });
     const scripted = config.tracks ?? [];
     let trackIndex = 0;
+    let lastOutputFeatureHash = null;
+    const pendingResponseProbes = [];
     while ((performance.now() - started) < Number(config.duration_s ?? 3) * 1000) {
       const now = performance.now() - started;
+      const outputArrival = performance.now();
+      const outputFeatureHash = frameFeatureHash(remoteVideo);
+      frames.push({ stream: "output", mediaTimeMs: remoteVideo.currentTime * 1000, arrivalTimeMs: outputArrival, featureHash: outputFeatureHash, width: remoteVideo.videoWidth, height: remoteVideo.videoHeight });
+      for (const probe of pendingResponseProbes) {
+        if (probe.firstOutputChangeMs != null) continue;
+        const distance = hashDistance(probe.baselineFeatureHash, outputFeatureHash);
+        if (distance != null && distance >= 8) {
+          probe.firstOutputChangeMs = outputArrival - probe.inputMonotonicMs;
+        }
+      }
+      lastOutputFeatureHash = outputFeatureHash ?? lastOutputFeatureHash;
+      if (input.srcObject) {
+        frames.push({ stream: "input", mediaTimeMs: input.currentTime * 1000, arrivalTimeMs: performance.now(), featureHash: frameFeatureHash(input), width: input.videoWidth, height: input.videoHeight });
+      }
       while (
         trackIndex < scripted.length
         && (performance.now() - started) >= Number(scripted[trackIndex].at_ms ?? 0)
@@ -280,16 +325,16 @@ try {
         }
         const points = scripted[trackIndex].points ?? [];
         let sendResult = "sent";
+        const inputMonotonicMs = performance.now();
         try { await session.sendTracks(points); } catch { sendResult = "ignored"; }
-        events.push({ event: "tracks_frame", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: performance.now() - started, contentCoords: points, swipeId, phase, sendResult });
+        const responseProbe = phase === "start" || swipeId == null;
+        const trackEvent = { event: "tracks_frame", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: inputMonotonicMs - started, inputMonotonicMs, contentCoords: points, swipeId, phase, sendResult, responseProbe, baselineFeatureHash: lastOutputFeatureHash, firstOutputChangeMs: null };
+        events.push(trackEvent);
+        if (responseProbe && sendResult === "sent" && lastOutputFeatureHash) pendingResponseProbes.push(trackEvent);
         if (phase === "end") {
           events.push({ event: "drag_end", plannedMs: scripted[trackIndex].at_ms ?? now, executedMs: performance.now() - started, payload: { swipeId } });
         }
         trackIndex += 1;
-      }
-      frames.push({ stream: "output", mediaTimeMs: remoteVideo.currentTime * 1000, arrivalTimeMs: performance.now(), width: remoteVideo.videoWidth, height: remoteVideo.videoHeight });
-      if (input.srcObject) {
-        frames.push({ stream: "input", mediaTimeMs: input.currentTime * 1000, arrivalTimeMs: performance.now(), width: input.videoWidth, height: input.videoHeight });
       }
       if (Math.floor(now / 1000) !== Math.floor((now - 1000 / 30) / 1000)) await snapshotRtc();
       await new Promise((resolve) => setTimeout(resolve, 1000 / 30));
@@ -336,7 +381,14 @@ try {
       sdk_version: sdkVersion,
       session_uid: sessionUid,
       callbacks, events, frames, rtc_log: rtcLog, state_changes: stateChanges,
-      audio: { publish: Boolean(inputStream?.getAudioTracks().length), subscribe: remoteStream.getAudioTracks().length > 0 },
+      audio: {
+        publish_requested: true,
+        subscribe_requested: true,
+        publish: Boolean(inputStream?.getAudioTracks().length),
+        subscribe: remoteStream.getAudioTracks().length > 0,
+        input_track_count: inputStream?.getAudioTracks().length ?? 0,
+        remote_track_count: remoteStream.getAudioTracks().length,
+      },
       single_round: true,
       stream_setting: session.media?.streamSetting ?? { width: remoteVideo.videoWidth, height: remoteVideo.videoHeight },
       recording_base64: recordingBase64,

@@ -22,7 +22,7 @@ from ..hashing import content_hash
 from ..time import utc_now
 from .aggregation import aggregate_evaluation_results
 from .fusion import JudgmentFusion
-from .group_metrics import BatchGroupEvaluator
+from .group_metrics import BatchReportingMetrics
 from .preprocess import PreprocessService
 
 
@@ -104,6 +104,9 @@ class EvaluationOrchestrator:
                 )
         results = self.finalize_batch_context(runs, results)
         aggregate = aggregate_evaluation_results(results)
+        aggregate["reporting_metrics"] = BatchReportingMetrics(self._repository).summarize(
+            runs, results
+        )
         if results:
             manifest = {
                 "manifest_version": "1.0",
@@ -136,6 +139,7 @@ class EvaluationOrchestrator:
             "criterion_summary": aggregate["criterion_summary"],
             "dimension_summary": aggregate["dimension_summary"],
             "case_score_summary": aggregate["case_score_summary"],
+            "reporting_metrics": aggregate["reporting_metrics"],
         }
 
     def _evaluation_batch_id(self, fingerprint: str, resume: bool) -> str:
@@ -154,35 +158,19 @@ class EvaluationOrchestrator:
         runs: list[dict[str, Any]],
         results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Add batch-only criteria and deterministically re-fuse each result."""
+        """Preserve single-video results; batch metrics are report-only facts.
 
-        by_run = {item["run_id"]: item for item in results}
-        generated = BatchGroupEvaluator(self._repository).judgments(runs, results)
-        for run_id, extra_judgments in generated.items():
-            previous = by_run.get(run_id)
-            run = next((item for item in runs if item.get("run_id") == run_id), None)
-            if previous is None or run is None:
-                continue
-            for judgment in extra_judgments:
-                self._repository.append_judgment(judgment)
-            case = self._repository.get_test_case(run["case_id"])
-            fused = self._fusion.fuse(
-                self._benchmark,
-                self._scenario_pack,
-                case,
-                self._repository.list_judgments(previous["evaluation_id"]),
-                run.get("metrics", {}),
+        The method remains as a compatibility seam for callers, but no longer
+        manufactures group Judgments or re-fuses P/O scores into each Run.
+        """
+
+        frozen_ids = {str(item.get("run_id") or "") for item in runs}
+        outside = sorted(str(item.get("run_id") or "") for item in results if item.get("run_id") not in frozen_ids)
+        if outside:
+            raise ContractError(
+                "evaluation results are outside the frozen Run set: " + ", ".join(outside)
             )
-            updated = {
-                **previous,
-                **fused,
-                "evaluation_id": previous["evaluation_id"],
-                "evaluation_batch_id": previous["evaluation_batch_id"],
-                "run_id": run_id,
-            }
-            self._repository.save_evaluation_result(updated)
-            by_run[run_id] = updated
-        return [by_run[item["run_id"]] for item in results]
+        return results
 
     def evaluate_run(
         self,
@@ -742,6 +730,9 @@ class EvaluationOrchestrator:
             "你是盲评视频质量评测器。不得猜测模型名称、版本或未在证据中出现的事实。"
             "只评价下面一个维度；抽帧无法证明的连续性、延迟、音频或因果关系必须标记不可评。"
             "按0差、1合格、2好的尺度，对合同中每一条criterion独立评分。"
+            "不可评只用于证据缺失、输入不可解码或视觉能力无法观察该细则；"
+            "结果可见但未执行编辑、执行失败、目标错误或与Prompt不符时必须按锚点给0分，不能标记不可评。"
+            "即使目标编辑失败，也必须独立评价画面中仍可见的结构、自然度、时序和应保留内容。"
             "所有verdict与evidence.description必须使用中文；原始专有名词可以保留。"
             "输出一个JSON对象，不要Markdown。字段必须包含："
             "verdict,confidence,assessable,evidence,criterion_results。"
@@ -799,6 +790,9 @@ class EvaluationOrchestrator:
             "可以依据其可见画面判断连续性和时序；若只有抽帧则不得推断连续性。"
             "任何视觉输入都不能证明音频、API延迟或未显示的运行因果，这些必须标记不可评。"
             "按0差、1合格、2好的尺度返回JSON对象，顶层字段为judgments；每个维度项必须包含"
+            "不可评只用于证据缺失、输入不可解码或视觉能力无法观察该细则；"
+            "结果可见但未执行编辑、执行失败、目标错误或与Prompt不符时必须按锚点给0分，不能标记不可评。"
+            "即使目标编辑失败，也必须独立评价画面中仍可见的结构、自然度、时序和应保留内容。"
             "dimension_id,verdict,confidence,assessable,evidence,criterion_results。"
             "所有verdict与evidence.description必须使用中文；原始专有名词可以保留。"
             "criterion_results必须恰好包含该维度合同中的全部criterion_id，且每条细则必须包含"

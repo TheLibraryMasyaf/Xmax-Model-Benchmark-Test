@@ -130,7 +130,7 @@ class EvaluationTestBase(unittest.TestCase):
                 "operation_recipe_version": "0.1.0",
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
-                "scenario_id": "core-selfie-appearance",
+                "scenario_id": "core-indoor-selfie-person-replacement",
                 "scenario_pack_version": self.pack.get("version"),
                 "scene_tags": {
                     "input_dimension": "自拍",
@@ -183,7 +183,7 @@ class FusionTests(EvaluationTestBase):
     def test_dimension_score_is_derived_from_criteria_not_judge_top_level(self) -> None:
         judgments = [
             {
-                "dimension_id": "C1",
+                "dimension_id": "E2",
                 "judge_id": "metric",
                 "judge_version": "1",
                 "verdict": "misleading-top-level",
@@ -193,7 +193,7 @@ class FusionTests(EvaluationTestBase):
                 "evidence": [],
                 "criterion_results": [
                     {
-                        "criterion_id": "C1.1",
+                        "criterion_id": "E2.1",
                         "verdict": "good",
                         "score": 2.0,
                         "confidence": 0.9,
@@ -201,7 +201,7 @@ class FusionTests(EvaluationTestBase):
                         "evidence": [],
                     },
                     {
-                        "criterion_id": "C1.2",
+                        "criterion_id": "E2.2",
                         "verdict": "bad",
                         "score": 0.0,
                         "confidence": 0.9,
@@ -218,14 +218,14 @@ class FusionTests(EvaluationTestBase):
             judgments,
             {},
         )
-        c1 = next(item for item in result["dimension_results"] if item["dimension_id"] == "C1")
-        self.assertEqual(c1["score"], 1.0)
-        self.assertEqual(c1["score_percent"], 50.0)
-        self.assertEqual(c1["assessable_criterion_count"], 2)
+        e2 = next(item for item in result["dimension_results"] if item["dimension_id"] == "E2")
+        self.assertEqual(e2["score"], 1.0)
+        self.assertEqual(e2["score_percent"], 50.0)
+        self.assertEqual(e2["assessable_criterion_count"], 2)
 
     def test_multi_judge_fusion_happens_within_each_criterion(self) -> None:
         base = {
-            "dimension_id": "C9",
+            "dimension_id": "G1",
             "judge_version": "1",
             "confidence": 0.8,
             "assessable": True,
@@ -238,7 +238,7 @@ class FusionTests(EvaluationTestBase):
                 "verdict": "cv",
                 "criterion_results": [
                     {
-                        "criterion_id": "C9.1",
+                        "criterion_id": "G1.1",
                         "verdict": "good",
                         "score": 2.0,
                         "confidence": 0.8,
@@ -253,7 +253,7 @@ class FusionTests(EvaluationTestBase):
                 "verdict": "mlmm",
                 "criterion_results": [
                     {
-                        "criterion_id": "C9.1",
+                        "criterion_id": "G1.1",
                         "verdict": "weak",
                         "score": 0.0,
                         "confidence": 0.8,
@@ -261,7 +261,7 @@ class FusionTests(EvaluationTestBase):
                         "evidence": [],
                     },
                     {
-                        "criterion_id": "C9.3",
+                        "criterion_id": "G1.2",
                         "verdict": "good",
                         "score": 2.0,
                         "confidence": 0.8,
@@ -279,12 +279,12 @@ class FusionTests(EvaluationTestBase):
             {},
         )
         criteria = {item["criterion_id"]: item for item in result["criterion_results"]}
-        self.assertEqual(criteria["C9.1"]["score"], 1.0)
-        self.assertEqual(criteria["C9.1"]["judge_score_count"], 2)
-        c9 = next(item for item in result["dimension_results"] if item["dimension_id"] == "C9")
-        self.assertIsNone(c9["score"])
-        self.assertFalse(c9["coverage_complete"])
-        self.assertEqual(c9["assessable_criterion_count"], 2)
+        self.assertEqual(criteria["G1.1"]["score"], 1.0)
+        self.assertEqual(criteria["G1.1"]["judge_score_count"], 2)
+        g1 = next(item for item in result["dimension_results"] if item["dimension_id"] == "G1")
+        self.assertEqual(g1["score"], 1.5)
+        self.assertTrue(g1["coverage_complete"])
+        self.assertEqual(g1["assessable_criterion_count"], 2)
 
     def test_batch_criterion_summary_preserves_fractional_scores(self) -> None:
         summary = aggregate_evaluation_results(
@@ -377,7 +377,7 @@ class FusionTests(EvaluationTestBase):
             {
                 "case_id": "case-1",
                 "generation_mode": "offline",
-                "scenario_id": "core-selfie-appearance",
+                "scenario_id": "core-indoor-selfie-person-replacement",
                 "scene_tags": {"input_dimension": "自拍"},
             },
             judgments,
@@ -386,8 +386,9 @@ class FusionTests(EvaluationTestBase):
         self.assertIsNone(result["canonical_score"])
         self.assertIsNone(result["scenario_score"])
         self.assertIsNone(result["case_score_percent"])
-        self.assertTrue(result["coverage"]["canonical_missing_dimensions"])
-        self.assertEqual(result["weight_resolution"]["base_profile_id"], "generic-offline-0.2")
+        self.assertFalse(result["coverage"]["canonical_missing_dimensions"])
+        self.assertTrue(result["coverage"]["scenario_missing_dimensions"])
+        self.assertEqual(result["weight_resolution"]["base_profile_id"], "scene-base-offline-0.3")
         self.assertTrue(result["weight_resolution"]["matched_rule_ids"])
 
     def test_hard_gate_blocks_score_regardless_of_weights(self) -> None:
@@ -396,7 +397,7 @@ class FusionTests(EvaluationTestBase):
                 "evaluation_id": "e",
                 "run_id": "r",
                 "benchmark_version": "0.1.0-draft",
-                "dimension_id": "C1",
+                "dimension_id": "P",
                 "dimension_version": "0.1.0-draft",
                 "judge_id": "metric",
                 "judge_version": "1",
@@ -407,7 +408,7 @@ class FusionTests(EvaluationTestBase):
                 "evidence": [{"description": "black screen"}],
                 "criterion_results": [
                     {
-                        "criterion_id": "C1.1",
+                        "criterion_id": "P.1",
                         "verdict": "invalid",
                         "score": 0.0,
                         "confidence": 1.0,
@@ -437,28 +438,28 @@ class FusionTests(EvaluationTestBase):
         evaluator = HardGateEvaluator()
         outcome = evaluator.evaluate(
             self.benchmark,
-            {"C1": {"score": 0.0}},
+            {"P": {"score": 0.0}},
             {},
-            {"C1.1": {"dimension_id": "C1", "score": 0.0}},
+            {"P.1": {"dimension_id": "P", "score": 0.0}},
         )
         self.assertTrue(outcome["block_score"])
         self.assertEqual(outcome["final_verdict"], "invalid_result")
         outcome_ok = evaluator.evaluate(
             self.benchmark,
-            {"C1": {"score": 2.0}},
+            {"P": {"score": 2.0}},
             {},
-            {"C1.1": {"dimension_id": "C1", "score": 2.0}},
+            {"P.1": {"dimension_id": "P", "score": 2.0}},
         )
         self.assertFalse(outcome_ok["block_score"])
 
     def test_hard_gate_uses_any_judge_zero_before_fused_mean(self) -> None:
         outcome = HardGateEvaluator().evaluate(
             self.benchmark,
-            {"C1": {"score": 1.0}},
+            {"P": {"score": 1.0}},
             {},
             {
-                "C1.1": {
-                    "dimension_id": "C1",
+                "P.1": {
+                    "dimension_id": "P",
                     "score": 1.0,
                     "judge_scores": [
                         {"judge_id": "run-metrics", "score": 2.0},
@@ -476,7 +477,7 @@ class FusionTests(EvaluationTestBase):
                 "evaluation_id": "e",
                 "run_id": "r",
                 "benchmark_version": "0.1.0-draft",
-                "dimension_id": "C1",
+                "dimension_id": "P",
                 "dimension_version": "0.1.0-draft",
                 "judge_id": "metric",
                 "judge_version": "1",
@@ -487,7 +488,7 @@ class FusionTests(EvaluationTestBase):
                 "evidence": [],
                 "criterion_results": [
                     {
-                        "criterion_id": "C1.1",
+                        "criterion_id": "P.1",
                         "verdict": "ok",
                         "score": 1.0,
                         "confidence": 0.8,
@@ -503,14 +504,17 @@ class FusionTests(EvaluationTestBase):
             {
                 "case_id": "c",
                 "generation_mode": "offline",
-                "scenario_id": "core-selfie-appearance",
+                "scenario_id": "core-indoor-selfie-person-replacement",
                 "scene_tags": {"input_dimension": "自拍"},
             },
             judgments,
             {},
         )
         resolution = result["weight_resolution"]
-        self.assertIn("core-selfie-appearance-offline", resolution["matched_rule_ids"])
+        self.assertIn(
+            "core-indoor-selfie-person-replacement-offline",
+            resolution["matched_rule_ids"],
+        )
         self.assertGreater(sum(resolution["effective_weights"].values()), 0.99)
         self.assertLessEqual(sum(resolution["effective_weights"].values()), 1.01)
 
@@ -801,9 +805,24 @@ class OrchestratorTests(EvaluationTestBase):
         roles = [item["role"] for item in preprocess["evidence_groups"]]
         self.assertEqual(roles, ["feed", "result_video"])
 
+    def test_mlmm_prompt_treats_visible_edit_failure_as_score_zero_not_unassessable(
+        self,
+    ) -> None:
+        run = self.seed_run()
+        case = self.repository.get_test_case(run["case_id"])
+        prompt = self.orchestrator()._mlmm_prompt(
+            [self.benchmark["dimensions"][0]],
+            case,
+            "offline",
+            [],
+            {},
+        )
+        self.assertIn("未执行编辑", prompt)
+        self.assertIn("必须按锚点给0分", prompt)
+        self.assertIn("不能标记不可评", prompt)
+
     def test_evaluate_run_produces_versioned_result(self) -> None:
-        self.registry.register(MetricJudge("C1", 2.0))
-        self.registry.register(MetricJudge("C2", 2.0))
+        self.registry.register(MetricJudge("P", 2.0))
         run = self.seed_run()
         result = self.orchestrator().evaluate_run(run, "batch-eval")
         self.assertEqual(result["run_id"], run["run_id"])
@@ -811,10 +830,10 @@ class OrchestratorTests(EvaluationTestBase):
         self.assertIn("canonical_score", result)
         self.assertIn("scenario_score", result)
         self.assertIsNone(result["case_score_percent"])
-        self.assertTrue(result["coverage"]["canonical_missing_dimensions"])
+        self.assertFalse(result["coverage"]["canonical_missing_dimensions"])
 
     def test_evaluate_batch_persists_batch_manifest(self) -> None:
-        self.registry.register(MetricJudge("C1", 2.0))
+        self.registry.register(MetricJudge("P", 2.0))
         run = self.seed_run()
         summary = self.orchestrator().evaluate_runs([run])
         self.assertEqual(summary["evaluated"], 1)
@@ -839,7 +858,7 @@ class OrchestratorTests(EvaluationTestBase):
         self.assertEqual(calls, ["run-case-a"])
 
     def test_evaluation_result_passes_schema(self) -> None:
-        self.registry.register(MetricJudge("C1", 1.0))
+        self.registry.register(MetricJudge("P", 1.0))
         run = self.seed_run()
         result = self.orchestrator().evaluate_run(run, "batch-eval")
         schema = json.loads(
@@ -848,7 +867,7 @@ class OrchestratorTests(EvaluationTestBase):
         Draft202012Validator(schema).validate(result)
 
     def test_unjudgeable_dimensions_are_marked_not_fabricated(self) -> None:
-        # No judge registered at all -> C1 etc. become no_automated_judge but
+        # No judge registered at all -> P/G/E become no_automated_judge but
         # the run still produces a result without invented scores.
         run = self.seed_run()
         result = self.orchestrator().evaluate_run(run, "batch-eval")
@@ -865,7 +884,7 @@ class OrchestratorTests(EvaluationTestBase):
     def test_evaluation_does_not_call_generation_adapter(self) -> None:
         # Composition: the orchestrator only depends on judge registry + worker
         # + preprocess; there is no generation adapter in scope at all.
-        self.registry.register(MetricJudge("C1", 2.0))
+        self.registry.register(MetricJudge("P", 2.0))
         run = self.seed_run()
         summary = self.orchestrator().evaluate_runs([run])
         self.assertEqual(summary["evaluated"], 1)

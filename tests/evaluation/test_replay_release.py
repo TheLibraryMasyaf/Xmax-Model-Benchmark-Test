@@ -125,7 +125,7 @@ class ReleaseReplayTestBase(unittest.TestCase):
                 "operation_recipe_version": "0.1.0",
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
-                "scenario_id": "core-selfie-appearance",
+                "scenario_id": "core-indoor-selfie-person-replacement",
                 "scenario_pack_version": self.pack.get("version"),
                 "scene_tags": {
                     "input_dimension": "自拍",
@@ -175,7 +175,7 @@ class ReleaseReplayTestBase(unittest.TestCase):
 
 class ReplayTests(ReleaseReplayTestBase):
     def test_old_results_never_overwritten(self) -> None:
-        self.registry.register(MetricJudge("C1", 2.0))
+        self.registry.register(MetricJudge("P", 2.0))
         run = self.seed_run()
         first = self.orchestrator().evaluate_run(run, "batch-first")
         old_id = first["evaluation_id"]
@@ -197,8 +197,8 @@ class ReplayTests(ReleaseReplayTestBase):
 
     def test_replay_reports_new_old_differences(self) -> None:
         run = self.seed_run()
-        # First evaluation with C1=2.0.
-        judge = MetricJudge("C1", 2.0)
+        # First evaluation with P.1=2.0.
+        judge = MetricJudge("P", 2.0)
         self.registry.register(judge)
         first = self.orchestrator().evaluate_run(run, "batch-first")
         self.assertEqual(first["evaluation_id"] is not None, True)

@@ -26,9 +26,9 @@ Benchmark为空或状态不是可执行版本时，系统允许做合同检查�
 → 验证每条Judgment Schema
 → 置信度校准与同维度Judge融合
 → 应用硬门槛并确定可评维度
-→ 计算Canonical Score
 → 确定性解析场景权重并计算Scenario Score
-→ 输出分项结果、双总分、覆盖率和审计记录
+→ 输出单视频分项、Scenario Score、覆盖率和审计记录
+→ 在冻结批次收口P.2/P.3/RP.1/RP.2报告指标
 ```
 
 预处理是独立阶段：统一Run通过`preprocess_batch`显式交接；单独`evaluate --run-batch-id`只会查找该Run已持久化的完成预处理记录，缺失时报错，绝不隐式抽帧。预处理器将Feed、Prompt参考素材和Result按角色分组，同一结果只解码一次，供CV、审计和不支持视频的MLLM共享。支持原生视频的MLLM从同一TestCase/Run合同解析原始媒体，按`generation_operation → feed → 实际feed_capture（如有）→ prompt_text → prompt_reference_N → result_video`分项传入，不读取扁平化截图列表。
@@ -55,7 +55,7 @@ Benchmark为空或状态不是可执行版本时，系统允许做合同检查�
 - Active且允许MLLM fallback：调用配置的Codex Judge。
 - Active且不允许fallback：维度不可评分并降低覆盖率，不能按满分或零分填充。
 
-`context-check`在执行前按模式核对每个适用维度是否至少存在一个路由允许的已启用Judge。当前Shadow包中，运行事实Judge覆盖成功、成本及实时运行指标，ffmpeg CV覆盖基础画质，Qwen3-VL覆盖开放视觉语义。声明“有路由”不等于每条样本必然可评：O4需要完整重复组，R5需要版本化异常脚本，R6需要达到长会话最低时长；条件不足时必须返回不可评并从当条总分分母剔除。
+`context-check`在执行前按模式核对每个适用维度是否至少存在一个路由允许的已启用Judge。当前Shadow包中，运行事实Judge覆盖P.1、实时帧更新和R1，ffmpeg CV覆盖P.1/G1/G2，音频Judge覆盖G3，Qwen3-VL覆盖P.1/E1–E4/R2。声明“有路由”不等于每条样本必然可评：没有连续交互实验时R1.2不适用；音频基准不存在，或实时SDK请求订阅后远端输出流仍无音频轨时G3不适用；证据不足时必须返回不可评，不能伪造分数。
 
 ## 4. 自动Judge分工原则
 
@@ -94,9 +94,8 @@ MLLM批量Judge对一条Case的全部所属维度是原子操作。遇到已验�
 2. 同一`criterion_id`有多个Judge时合并分数、置信度和带Judge身份的证据；当前合并是算术平均，保留`judge_score_count`以便后续改版。
 3. 按Benchmark的细则尺度确定性计算维度分：`sum(可评细则分) / sum(可评细则满分)`；当前每条细则等权。
 4. 用细则分执行精确到`criterion_id`的Hard Gate；高维度平均不能掩盖阻断细则。
-5. 使用发布的基础Profile计算Canonical Score。
-6. 使用场景标签和发布规则计算Scenario Score。
-7. 保存逐细则、派生维度、有效权重、Gate和覆盖缺口。
+5. 使用显式`scenario_id`命中发布规则并计算Scenario Score；当前Benchmark不计算Canonical Score。
+6. 保存逐细则、派生维度、有效权重、Gate和覆盖缺口。
 
 不可评与未覆盖分开记录：有Judge提交但证据不足是`unassessable`，没有任何Judge提交该细则是`uncovered`。两者都不得填默认1分。
 
@@ -119,6 +118,6 @@ raw/<judge_id>/
 
 `evaluation.json`的`criterion_results`是单条视频评分事实；`dimension_results`必须从其派生。`evaluate_runs`同时返回并在Evaluation Batch Manifest中保存`criterion_summary`、`dimension_summary`和`case_score_summary`，包含覆盖率、均值、中位数、最小/最大、标准差、P25/P75和分布。
 
-细则按评估范围分为 `run`、`repeat_group`、`cross_input_group` 和 `batch`。单条Run完成后先保存并同步已有评语；组级细则尚未收口时，EvaluationResult写`score_readiness=pending_group_metrics`且总分保持空值。冻结组完成后，组级Judge只读取Run Batch Manifest成员，幂等更新同一EvaluationResult，再由批末同步回填Case分数。`not_applicable`表示本Case没有配置对应实验并从分母排除；`unassessable`表示实验已要求或已执行但证据不足；`uncovered`表示没有Judge提交，三者不得互换。
+所有0/1/2细则均属于单条Run；P.2、P.3、RP.1、RP.2是冻结批次的报告指标，不生成Judgment、不回填单视频分数。P.3按相同模型、模式、Feed、Prompt文字、Prompt素材、配方、生成参数与场景分组，重复次数来自冻结Run Request的实际`repeat_count`，默认值可配置且不得写死。`not_applicable`表示本Case没有配置对应实验并从分母排除；`unassessable`表示实验已要求或已执行但证据不足；`uncovered`表示没有Judge提交，三者不得互换。
 
 正式结果遵循 `schemas/evaluation-result.schema.json`，保存Benchmark、Scenario Pack、Weight Profile、命中规则、Score Schema、Judge、预处理器和模型版本，以支持历史回放。

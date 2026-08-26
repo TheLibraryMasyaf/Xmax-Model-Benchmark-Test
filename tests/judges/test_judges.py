@@ -90,7 +90,7 @@ class WorkerTests(unittest.TestCase):
             evaluation_id="eval-1",
             run_id="run-1",
             benchmark_version="0.1.0-draft",
-            dimension_id="C9",
+            dimension_id="G1",
             dimension_version="0.1.0-draft",
             mode="offline",
             context={"media": {"width": 704, "height": 1280}},
@@ -147,9 +147,9 @@ class PluginTests(unittest.TestCase):
         self,
     ) -> None:
         judge = RunMetricsJudge()
-        c1 = judge.evaluate(
+        validity = judge.evaluate(
             {
-                "dimension_id": "C1",
+                "dimension_id": "P",
                 "run": {
                     "status": "completed",
                     "result_asset_id": "asset-result",
@@ -157,15 +157,16 @@ class PluginTests(unittest.TestCase):
                 },
             }
         )[0]
-        self.assertEqual(c1["score"], 2.0)
-        r6 = judge.evaluate(
+        self.assertEqual(validity["score"], 2.0)
+        r1 = judge.evaluate(
             {
-                "dimension_id": "R6",
-                "run": {"metrics": {"session_duration_s": 3, "fps_window_cv": 0}},
+                "dimension_id": "R1",
+                "run": {"metrics": {"interaction_event_count": 1}},
             }
         )[0]
-        self.assertFalse(r6["assessable"])
-        self.assertFalse(r6["criterion_results"][0]["applicable"])
+        continuous = next(item for item in r1["criterion_results"] if item["criterion_id"] == "R1.2")
+        self.assertFalse(continuous["assessable"])
+        self.assertFalse(continuous["applicable"])
 
     def test_video_quality_thresholds_have_three_levels(self) -> None:
         good = {
@@ -212,12 +213,12 @@ class PluginTests(unittest.TestCase):
     def test_audio_envelope_correlation_and_manifest(self) -> None:
         self.assertAlmostEqual(_correlation([1, 2, 3], [2, 4, 6]), 1.0)
         manifest = AudioIntegrityJudge().manifest()
-        self.assertEqual(manifest["supported_dimensions"], ["O6", "R7"])
+        self.assertEqual(manifest["supported_dimensions"], ["G3"])
 
     def test_static_touch_capture_has_no_audio_preservation_requirement(self) -> None:
         result = AudioIntegrityJudge().evaluate(
             {
-                "dimension_id": "R7",
+                "dimension_id": "G3",
                 "test_case": {
                     "api_asset_bindings": {"input_media_role": "feed_capture"}
                 },
@@ -225,14 +226,59 @@ class PluginTests(unittest.TestCase):
         )[0]
         self.assertFalse(result["assessable"])
         self.assertIsNone(result["score"])
-        self.assertIn("static Feed capture", result["evidence"][0]["description"])
+        self.assertIn("没有声明", result["evidence"][0]["description"])
 
-    def test_video_quality_routes_as_cv_for_c9_and_o6(self) -> None:
+    def test_realtime_sdk_without_remote_audio_track_is_not_applicable(self) -> None:
+        result = AudioIntegrityJudge().evaluate(
+            {
+                "dimension_id": "G3",
+                "mode": "realtime",
+                "run": {
+                    "origin": "xmax_realtime",
+                    "metrics": {
+                        "audio": {
+                            "subscribe_requested": True,
+                            "subscribe": False,
+                            "remote_track_count": 0,
+                        }
+                    },
+                },
+                "asset_paths": {
+                    "expected_audio_source": "/source.mp4",
+                    "result_video": "/result.webm",
+                },
+            }
+        )[0]
+        self.assertEqual(result["verdict"], "not_applicable")
+        self.assertFalse(result["applicable"])
+        self.assertFalse(result["assessable"])
+        self.assertTrue(all(not item["applicable"] for item in result["criterion_results"]))
+
+    def test_offline_missing_result_audio_still_scores_zero(self) -> None:
+        judge = AudioIntegrityJudge()
+        judge._envelope = lambda path: [1.0, 2.0, 3.0] if path == "/source.mp4" else []
+        result = judge.evaluate(
+            {
+                "dimension_id": "G3",
+                "mode": "offline",
+                "run": {"origin": "xmax_offline"},
+                "asset_paths": {
+                    "expected_audio_source": "/source.mp4",
+                    "result_video": "/result.mp4",
+                },
+            }
+        )[0]
+        self.assertTrue(result["assessable"])
+        self.assertEqual(
+            [item["score"] for item in result["criterion_results"]], [0.0, 0.0]
+        )
+
+    def test_video_quality_routes_as_cv_for_p_g1_g2(self) -> None:
         manifest = VideoQualityJudge().manifest()
         self.assertEqual(manifest["kind"], "cv")
-        self.assertEqual(manifest["supported_dimensions"], ["C9", "O6"])
-        result = VideoQualityJudge().evaluate({"dimension_id": "O6", "media": {}})[0]
-        self.assertEqual(result["dimension_id"], "O6")
+        self.assertEqual(manifest["supported_dimensions"], ["P", "G1", "G2"])
+        result = VideoQualityJudge().evaluate({"dimension_id": "G2", "media": {}})[0]
+        self.assertEqual(result["dimension_id"], "G2")
 
 
 if __name__ == "__main__":

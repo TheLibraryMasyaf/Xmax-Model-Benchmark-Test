@@ -57,7 +57,16 @@ class PipelineTaskRuntime:
         run_batch_id = f"runs-{task_id[5:17]}"
         refs = dict(task.get("result_refs", {}))
 
-        run = self._existing_run(refs, run_batch_id, case.get("case_id"))
+        run = self._existing_run(refs, run_batch_id, case)
+        if run is not None and run.get("run_batch_id") != run_batch_id:
+            # Adopt an idempotent standalone generation into the task pipeline.
+            # This prevents a paid duplicate when an operator started the
+            # frozen plan with ``generate`` before switching to ``worker``.
+            self._repository.set_run_batch_id(run["run_id"], run_batch_id)
+            run = self._repository.get_run(run["run_id"])
+            refs = self._save_refs(
+                task_id, run_id=run["run_id"], run_batch_id=run_batch_id
+            )
         if run is None:
             self.preflight([task])
             self._status(task_id, "generating")
@@ -144,15 +153,23 @@ class PipelineTaskRuntime:
         return content_hash({"content": path.read_text(encoding="utf-8")})
 
     def _existing_run(
-        self, refs: dict[str, Any], run_batch_id: str, case_id: str | None
+        self, refs: dict[str, Any], run_batch_id: str, case: dict[str, Any] | str
     ) -> dict[str, Any] | None:
+        case_id = case.get("case_id") if isinstance(case, dict) else case
         if refs.get("run_id"):
             run = self._repository.get_run(refs["run_id"])
             if not case_id or run.get("case_id") != case_id:
                 raise ContractError(
                     f"task Run ref {run.get('run_id')} does not belong to Case {case_id}"
                 )
-            if run.get("run_batch_id") != run_batch_id:
+            if (
+                run.get("run_batch_id") != run_batch_id
+                and (
+                    not isinstance(case, dict)
+                    or run.get("metrics", {}).get("generation_signature")
+                    != case.get("generation_signature")
+                )
+            ):
                 raise ContractError(
                     f"task Run ref {run.get('run_id')} does not belong to batch {run_batch_id}"
                 )
@@ -160,9 +177,19 @@ class PipelineTaskRuntime:
         if not case_id:
             return None
         runs = self._repository.list_runs(run_batch_id=run_batch_id, case_id=case_id)
+        if runs:
+            return max(runs, key=lambda item: (item.get("created_at", ""), item["run_id"]))
+        signature = case.get("generation_signature") if isinstance(case, dict) else None
+        if not signature:
+            return None
+        reusable = [
+            item
+            for item in self._repository.list_runs(case_id=case_id, status="completed")
+            if item.get("metrics", {}).get("generation_signature") == signature
+        ]
         return (
-            max(runs, key=lambda item: (item.get("created_at", ""), item["run_id"]))
-            if runs
+            max(reusable, key=lambda item: (item.get("created_at", ""), item["run_id"]))
+            if reusable
             else None
         )
 

@@ -33,12 +33,7 @@
     "scenario_score": {"type": ["number", "null"]},
     "case_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
     "score_readiness": {
-      "enum": ["ready", "pending_group_metrics", "incomplete_evidence"]
-    },
-    "pending_group_criteria": {
-      "type": "array",
-      "items": {"type": "string"},
-      "uniqueItems": true
+      "enum": ["ready", "missing_scene_weight_rule", "incomplete_evidence"]
     },
     "score_display_format": {"const": "percentage"},
     "weight_resolution": {

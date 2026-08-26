@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 
 from ..errors import ContractError
 from ..evaluation.aggregation import aggregate_evaluation_results
-from ..evaluation.group_metrics import GROUP_CRITERION_SCOPES
+from ..evaluation.group_metrics import BatchReportingMetrics
 from ..feedback.overrides import HumanOverrideService
 from ..hashing import content_hash
 from ..pipeline.manifests import frozen_evaluation_batch, frozen_run_batch
@@ -80,6 +80,9 @@ class SingleVersionReportService:
 
         effective_results = list(evaluations.values())
         aggregate = aggregate_evaluation_results(effective_results)
+        reporting_metrics = BatchReportingMetrics(self._repository).summarize(
+            runs, effective_results
+        )
         cases = [self._case_row(run, evaluations.get(run["run_id"])) for run in runs]
         scenes = sorted({row["scenario_id"] for row in cases if row.get("scenario_id")})
         requested = requested_scene_ids or scenes
@@ -144,6 +147,7 @@ class SingleVersionReportService:
             },
             "dimension_results": dimensions,
             "criterion_results": criteria,
+            "reporting_metrics": reporting_metrics,
             "case_results": cases,
             "strengths": _rank(dimensions, reverse=True),
             "weaknesses": _rank(dimensions, reverse=False),
@@ -325,81 +329,6 @@ def _credibility(
                 "description": "多个玩法配方被压缩到同一个场景，场景权重结果仅可诊断使用。",
             }
         )
-    selected_run_ids = {item["run_id"] for item in cases}
-    cases_by_run = {item["run_id"]: item for item in cases}
-    for evaluation in evaluations.values():
-        for criterion in evaluation.get("criterion_results", []):
-            criterion_id = str(criterion.get("criterion_id") or "")
-            scope = GROUP_CRITERION_SCOPES.get(criterion_id)
-            if scope is None:
-                continue
-            raw_records = criterion.get("raw_metrics", [])
-            if not isinstance(raw_records, list):
-                raw_records = []
-            raw_values = [
-                raw["values"]
-                for raw in raw_records
-                if isinstance(raw, dict) and isinstance(raw.get("values"), dict)
-            ]
-            member_ids: set[str] = set()
-            for values in raw_values:
-                members = values.get("member_run_ids", [])
-                if isinstance(members, list):
-                    member_ids.update(str(member_id) for member_id in members)
-            if not member_ids:
-                issues.append(
-                    {
-                        "code": "group_scope_provenance_missing",
-                        "severity": "error",
-                        "description": f"组级细则 {criterion_id} 缺少冻结成员Run ID，无法验证统计范围。",
-                    }
-                )
-                continue
-            outside = sorted(member_ids - selected_run_ids, key=_natural_key)
-            if outside:
-                issues.append(
-                    {
-                        "code": "group_scope_outside_manifest",
-                        "severity": "error",
-                        "description": (
-                            f"组级细则 {criterion_id} 引用了manifest之外的Run："
-                            + ", ".join(outside)
-                        ),
-                    }
-                )
-                continue
-            expected = _expected_group_members(
-                cases, cases_by_run.get(str(evaluation.get("run_id") or "")), scope
-            )
-            if member_ids != expected:
-                issues.append(
-                    {
-                        "code": "group_scope_membership_mismatch",
-                        "severity": "error",
-                        "description": (
-                            f"组级细则 {criterion_id} 实际引用 {len(member_ids)} 条Run，"
-                            f"按冻结组合合同应为 {len(expected)} 条。"
-                        ),
-                    }
-                )
-                continue
-            for values in raw_values:
-                observed = max(
-                    int(values.get("run_count") or 0),
-                    int(values.get("attempt_count") or 0),
-                )
-                if observed > run_count:
-                    issues.append(
-                        {
-                            "code": "group_scope_exceeds_manifest",
-                            "severity": "error",
-                            "description": (
-                                f"组级细则 {criterion.get('criterion_id')} 引用了 {observed} 条Run，"
-                                f"超过manifest的 {run_count} 条。"
-                            ),
-                        }
-                    )
-                    break
     issues.append(
         {
             "code": "automated_judges_only",
@@ -516,9 +445,16 @@ def _render(report: dict[str, Any]) -> str:
         "## 摘要",
         "",
         f"- Case分：{_format_stats(scores['case_score_percent'])}",
-        f"- 通用分：{_format_stats(scores['canonical_score'])}",
+        "- 通用分：当前Benchmark停用（不设置脱离核心场景的通用权重）",
         f"- 场景分：{_format_stats(scores['scenario_score'])}",
         f"- Run总数：{coverage['run_count']}；完成：{coverage['completed_run_count']}；生成失败：{coverage['generation_failure_count']}；已评测：{coverage['evaluated_completed_run_count']}；人工修订：{coverage['human_override_count']}",
+        "",
+        "## 模型与实时运行性能（批次统计）",
+        "",
+        f"- P.2 生成：有效视频率 {_pct(report['reporting_metrics']['P.2'].get('valid_result_rate_percent'))}；完成 {report['reporting_metrics']['P.2'].get('completed_run_count', 0)}/{report['reporting_metrics']['P.2'].get('planned_run_count', 0)}；无效输出 {report['reporting_metrics']['P.2'].get('invalid_output_count', 0)}；重试 {report['reporting_metrics']['P.2'].get('retry_count', 0)}。",
+        f"- P.3 重复：冻结重复组 {report['reporting_metrics']['P.3'].get('repeated_group_count', 0)}/{report['reporting_metrics']['P.3'].get('group_count', 0)}；重复次数来自Run Request，不写死。",
+        f"- RP.1 交付：实时Run {report['reporting_metrics']['RP.1'].get('run_count', 0)}；首帧P50 {_value(report['reporting_metrics']['RP.1'].get('first_frame_ms', {}).get('p50'))} ms；FPS均值 {_value(report['reporting_metrics']['RP.1'].get('fps', {}).get('mean'))}。",
+        f"- RP.2 稳定恢复：异常实验 {report['reporting_metrics']['RP.2'].get('perturbation_run_count', 0)}；自动恢复率 {_pct(report['reporting_metrics']['RP.2'].get('automatic_recovery_rate_percent'))}。",
         "",
         "## 可信度检查",
         "",

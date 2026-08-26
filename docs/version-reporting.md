@@ -21,11 +21,7 @@ JSON遵循`schemas/model-version-report.schema.json`并作为机器事实源，M
 
 ## 3. 聚合口径
 
-先在相同Feed、Prompt、模式和重复序号上比较，再进行维度、场景和总体聚合。Case表一行只保存一次Run，所有组统计均由报告器临时计算，不能回填任一Case。报告同时保留：
-
-- Canonical Score变化：跨场景稳定口径。
-- Scenario Score变化：用户本次请求场景下的动态权重口径。
-- 覆盖率、有效样本数、离散程度和Hard Gate变化。
+先在相同Feed、Prompt、模式和重复序号上比较，再进行维度、场景和总体聚合。Case表一行只保存一次Run，所有批次统计均由报告器临时计算，不能回填任一Case。当前Benchmark按相同核心场景分别比较Scenario Score、覆盖率、有效样本数、离散程度和Hard Gate变化，不计算跨场景Canonical变化。报告Schema中的Canonical字段仅为旧Benchmark兼容；对当前Benchmark必须为空且不得据此得出升降结论。
 
 同一`模型版本 + feed编号 + prompt编号`重复组的主分数为算术平均百分比；生成失败、结果无效和阻断型Hard Gate按0%进入平均。详细数据同时保留逐Run分数、样本数、中位数、最小值、最大值、标准差、P25/P75、成功率和Hard Gate失败数。
 

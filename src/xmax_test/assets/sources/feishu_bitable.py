@@ -7,6 +7,7 @@ are extracted through the source's field mapping.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ class FeishuBitableSource(BaseSource):
         self._client = client
         self._app_token = descriptor.config.get("app_token", "")
         self._table_id = descriptor.config.get("table_id", "")
+        self._view_id = descriptor.config.get("view_id")
         self._mapping = descriptor.config.get("field_mapping", {})
         self._selection_field = descriptor.config.get("selection_field")
         self._selection_value = descriptor.config.get("selection_value")
@@ -35,7 +37,10 @@ class FeishuBitableSource(BaseSource):
         pages = 0
         while True:
             page = self._client.get_bitable_records(
-                self._app_token, self._table_id, page_token=page_token
+                self._app_token,
+                self._table_id,
+                page_token=page_token,
+                view_id=self._view_id,
             )
             pages += 1
             for record in page.get("records", []):
@@ -107,6 +112,9 @@ class FeishuBitableSource(BaseSource):
                                 "field": source_field,
                                 "text": value,
                                 **shared_metadata,
+                                "record_number": _role_record_number(
+                                    shared_metadata.get("record_number"), "prompt"
+                                ),
                             },
                         )
                     )
@@ -145,6 +153,10 @@ class FeishuBitableSource(BaseSource):
                 "record_id": record_id,
                 "group_id": record_id,
                 **shared_metadata,
+                "record_number": _role_record_number(
+                    shared_metadata.get("record_number"),
+                    "prompt" if entity_field == "prompt_reference" else "feed",
+                ),
             },
         )
 
@@ -201,3 +213,25 @@ def _scalar(value: Any) -> str | None:
     if isinstance(value, list):
         return "、".join(str(item) for item in value if item is not None)
     return str(value)
+
+
+def _role_record_number(value: Any, role: str) -> str | None:
+    """Split ``feedNNN_promptMMM`` into a role-local numeric identifier.
+
+    A compound value with an empty Prompt suffix is rejected. Silently using
+    the whole value would later produce malformed identifiers such as
+    ``feed1308_promptfeed1308_prompt_04``; inventing a synthetic number would
+    sever the Case from the source table's business identifier.
+    """
+
+    if value is None:
+        return None
+    raw = str(value).strip()
+    match = re.fullmatch(r"feed(\d+)_prompt(\d*)", raw, flags=re.IGNORECASE)
+    if not match:
+        return raw
+    if role == "feed":
+        return match.group(1)
+    if not match.group(2):
+        raise ContractError(f"Prompt number is missing from source record number: {raw}")
+    return match.group(2)

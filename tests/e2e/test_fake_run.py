@@ -250,7 +250,7 @@ class FakeRunE2ETestBase(unittest.TestCase):
                     "text": "换装：请完成服装替换",
                     "play_name": "换装",
                     "group_id": f"{prefix}-g",
-                    "scenario_id": "core-selfie-appearance",
+                    "scenario_id": "core-indoor-selfie-person-replacement",
                 },
             }
         )

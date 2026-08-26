@@ -14,6 +14,7 @@
     "scores",
     "dimension_results",
     "criterion_results",
+    "reporting_metrics",
     "case_results",
     "strengths",
     "weaknesses",
@@ -34,6 +35,18 @@
     "scores": {"type": "object"},
     "dimension_results": {"type": "array", "items": {"type": "object"}},
     "criterion_results": {"type": "array", "items": {"type": "object"}},
+    "reporting_metrics": {
+      "type": "object",
+      "required": ["summary_version", "P.2", "P.3", "RP.1", "RP.2"],
+      "properties": {
+        "summary_version": {"const": "xmax-batch-reporting-metrics/1.0"},
+        "P.2": {"type": "object"},
+        "P.3": {"type": "object"},
+        "RP.1": {"type": "object"},
+        "RP.2": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
     "case_results": {"type": "array", "items": {"type": "object"}},
     "strengths": {"type": "array", "items": {"type": "object"}},
     "weaknesses": {"type": "array", "items": {"type": "object"}},

@@ -169,10 +169,15 @@ class RuleNormalizer:
 def _keywords(dimension: dict[str, Any]) -> list[str]:
     definition = dimension.get("definition", "")
     name = dimension.get("name", "")
-    words = []
+    words = list(dimension.get("keywords", []))
     for token in definition.split("；"):
         words.append(token[:6])
     words.insert(0, name[:6] if name else "")
+    words.extend(
+        criterion.get("name", "")
+        for criterion in dimension.get("criteria", [])
+        if criterion.get("name")
+    )
     return [word for word in words if word]
 
 

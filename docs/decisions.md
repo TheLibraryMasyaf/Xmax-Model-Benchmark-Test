@@ -10,9 +10,9 @@
 
 原因：自由权重不可复现、容易结果导向。结论：场景标签来自Scenario Pack/TestPlan；Fusion按已发布规则解析，Codex最多补充带置信度的标签。
 
-## D3 Canonical与Scenario Score并存
+## D3 当前Benchmark只发布Scenario Score
 
-原因：动态权重适合判断具体场景，但跨场景总分不可直接比较。结论：固定权重Canonical用于整体对比，动态Scenario用于场景适配。
+原因：当前十个核心业务场景的关注点不同，脱离场景的通用权重会制造不可解释的跨场景总分。结论：每条Run必须命中显式核心场景规则后才输出Scenario Score；Canonical停用并保留空兼容字段，跨场景只比较分项与批次事实。
 
 ## D4 硬失败独立于权重
 

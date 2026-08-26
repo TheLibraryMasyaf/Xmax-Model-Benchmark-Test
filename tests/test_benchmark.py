@@ -12,12 +12,13 @@ class BenchmarkContractTests(unittest.TestCase):
         contract = load_benchmark_contract(root / "BENCHMARK.md")
         self.assertEqual(contract["status"], "shadow")
         self.assertTrue(contract["provisional"])
-        self.assertEqual(len(contract["dimensions"]), 23)
-        self.assertEqual(sum(len(item["criteria"]) for item in contract["dimensions"]), 65)
+        self.assertEqual(len(contract["dimensions"]), 10)
+        self.assertEqual(sum(len(item["criteria"]) for item in contract["dimensions"]), 22)
+        self.assertEqual(len(contract["reporting_metrics"]), 4)
         self.assertEqual(len(contract["weight_profiles"]), 2)
-        self.assertEqual(len(contract["scene_weight_rules"]), 14)
+        self.assertEqual(len(contract["scene_weight_rules"]), 16)
         self.assertTrue(
-            all(sum(item["weights"].values()) == 100 for item in contract["weight_profiles"])
+            all(item.get("implementation_base_only") for item in contract["weight_profiles"])
         )
         self.assertTrue(
             all(

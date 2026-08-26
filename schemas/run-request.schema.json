@@ -84,7 +84,7 @@
       "required": ["strategy"],
       "properties": {
         "strategy": {
-          "enum": ["cartesian", "random_pairs", "random_runs", "explicit_pairs"]
+          "enum": ["cartesian", "random_pairs", "random_runs", "explicit_pairs", "matched_record_groups"]
         },
         "target_pair_count": {"type": "integer", "minimum": 1},
         "target_run_count": {"type": "integer", "minimum": 1},
@@ -121,6 +121,10 @@
       "additionalProperties": false
     },
     "generation_config": {"type": "object"},
+    "scenario_overrides": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
     "generation_mode_overrides": {
       "type": "array",
       "items": {
@@ -138,6 +142,11 @@
     "filters": {
       "type": "object",
       "properties": {
+        "source_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
         "feed_asset_ids": {
           "type": "array",
           "uniqueItems": true,

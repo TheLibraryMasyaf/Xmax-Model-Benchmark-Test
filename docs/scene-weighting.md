@@ -4,10 +4,7 @@
 
 ## 1. 分离原则
 
-Judge只输出分项Judgment，不感知最终权重。Fusion读取Benchmark和Scenario Pack，输出：
-
-- Canonical Score：固定Profile，跨场景对比。
-- Scenario Score：按场景规则调整，评估具体使用场景。
+Judge只输出分项Judgment，不感知最终权重。Fusion读取Benchmark和Scenario Pack，按核心场景规则输出Scenario Score。当前Benchmark不设置脱离业务场景的通用权重，`canonical_score`保持`null`仅用于旧合同兼容；未命中核心场景规则的Run不输出总分。
 
 细则层当前等权：每个维度先计算`sum(可评细则分) / (2 × 可评细则数)`，再应用维度场景权重。场景权重不会改变维度内部细则分。未来如需细则权重，必须发布新Benchmark/Score Schema并Replay，不得在报告器或Judge里临时加权。
 
@@ -15,10 +12,10 @@ Judge只输出分项Judgment，不感知最终权重。Fusion读取Benchmark和S
 
 Benchmark合同包含：
 
-- `weight_profiles`：离线/实时基础权重。
+- `weight_profiles`：仅供规则解析器使用的离线/实时实现基底，不代表通用权重。
 - `scene_weight_rules`：适用Profile、标签匹配、优先级、乘数和覆盖值。
 - `hard_gates`：不可被权重抵消的失败条件。
-- `score_schemas`：指定Canonical/Scenario计算和发布状态。
+- `score_schemas`：指定场景规则必选、Canonical停用和Scenario发布状态。
 
 具体结构由 `schemas/benchmark.schema.json` 校验。
 
@@ -33,7 +30,7 @@ Benchmark合同包含：
 实现：`src/xmax_test/evaluation/weights.py`。
 
 ```text
-选择支持当前mode的基础Profile
+选择支持当前mode的实现基底
 → 复制基础raw weights
 → 过滤Active规则
 → 过滤不适用于当前Profile的规则
@@ -44,6 +41,7 @@ Benchmark合同包含：
 → 按profile最大倍率封顶
 → 移除不可评维度
 → 对剩余权重归一化
+→ 若未命中唯一核心场景规则则标记missing_scene_weight_rule
 → 保存命中规则和排除维度
 ```
 
@@ -73,7 +71,7 @@ Benchmark合同包含：
 }
 ```
 
-正式ID和值只在未来Benchmark和Scenario Pack中填写。
+正式ID和值以当前`BENCHMARK.md`和`config/scenarios.json`为准；示例不得进入正式得分。
 
 ## 6. 不可评维度
 

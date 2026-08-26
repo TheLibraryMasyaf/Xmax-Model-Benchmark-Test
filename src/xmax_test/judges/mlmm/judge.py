@@ -11,6 +11,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from ...errors import (
+    ConfigError,
     EvaluationBudgetPausedError,
     EvaluationInfrastructurePausedError,
     ExternalServiceError,
@@ -98,12 +99,32 @@ class MlmmJudge:
                 attempt=attempt,
             )
             try:
-                response = self._provider.complete_json(
-                    prompt=prompt,
-                    image_paths=list(context.get("evidence_images", [])),
-                    output_schema=schema,
-                    media_inputs=list(context.get("media_inputs", [])),
-                )
+                evidence_images = list(context.get("evidence_images", []))
+                media_inputs = list(context.get("media_inputs", []))
+                try:
+                    response = self._provider.complete_json(
+                        prompt=prompt,
+                        image_paths=evidence_images,
+                        output_schema=schema,
+                        media_inputs=media_inputs,
+                    )
+                except (MlmmInvalidRequestError, ConfigError) as exc:
+                    if isinstance(exc, ConfigError) and "exceeds Base64 limit" not in str(exc):
+                        raise
+                    if not media_inputs or not evidence_images:
+                        raise
+                    self._log_event(
+                        "direct_media_fallback_to_frames",
+                        prompt_hash=prompt_hash,
+                        run_id=context.get("run_id", ""),
+                        attempt=attempt,
+                    )
+                    response = self._provider.complete_json(
+                        prompt=prompt,
+                        image_paths=evidence_images,
+                        output_schema=schema,
+                        media_inputs=[],
+                    )
                 errors = sorted(
                     Draft202012Validator(schema).iter_errors(response.payload),
                     key=lambda error: list(error.path),
@@ -262,10 +283,8 @@ class MlmmJudge:
 
 
 def _batch_output_schema(criteria_by_dimension: dict[str, list[str]]) -> dict[str, Any]:
-    # Lexicographic ordering puts C10 before C2.  Some MLLMs then follow the
-    # schema branch order for C10, resume the human/numeric sequence at C2,
-    # and emit C10 a second time.  Keep the strict exact-cardinality schema,
-    # but present dimension IDs in their natural benchmark order.
+    # Keep versioned or third-party IDs in natural order (for example R2 before
+    # R10) while retaining the strict exact-cardinality schema.
     dimension_ids = sorted(criteria_by_dimension, key=_natural_dimension_key)
 
     def judgment_schema(dimension_id: str) -> dict[str, Any]:
@@ -354,8 +373,8 @@ def _evidence_schema() -> dict[str, Any]:
         "required": ["description"],
         "properties": {
             "description": {"type": "string"},
-            "start_s": {"type": "number"},
-            "end_s": {"type": "number"},
+            "start_s": {"type": ["number", "null"]},
+            "end_s": {"type": ["number", "null"]},
             "region": {"type": ["string", "object", "null"]},
         },
         "additionalProperties": False,

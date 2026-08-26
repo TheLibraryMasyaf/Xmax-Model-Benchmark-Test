@@ -90,6 +90,14 @@ class RecipeResolver:
                         "default_generation_mode": override,
                     }
                 return video_recipe, None
+        if "prompt_image" in reference_kinds and play_name is None:
+            image_recipe = self._recipes.get("offline-image-reference")
+            if image_recipe is not None:
+                return image_recipe, None
+        if not reference_kinds and play_name is None:
+            text_recipe = self._recipes.get("offline-text-edit")
+            if text_recipe is not None:
+                return text_recipe, None
         if play_name is None:
             return {}, f"prompt {prompt.prompt_number} matches no play name"
         recipe_id = self._by_play[play_name]

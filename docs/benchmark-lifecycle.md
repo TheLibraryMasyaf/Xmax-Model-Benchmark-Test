@@ -6,7 +6,7 @@
 
 根目录 `BENCHMARK.md` 是唯一标准入口。机器读取标记之间的JSON合同，人阅读其余Markdown说明。代码、Prompt和飞书列不得形成另一个独立标准副本。
 
-当前合同为`0.2.1-draft / shadow`，已录入23个维度、65条细则及暂定权重。它可以执行Shadow评测，但不作为稳定正式榜单；首轮后用新版本调整并Replay，不能原地覆盖。运行`xmax-test db check`会按Benchmark版本列出历史Evaluation；非当前版本不得与当前批次混用，需要新口径时对明确Run Batch执行`replay run`。
+当前合同为`0.3.0-draft / shadow`，包含P.1 Gate、9个G/E/R计分标准、22条单视频细则、4个批次报告指标和10个核心场景的16组模式权重。它可以执行Shadow评测，但不作为稳定正式榜单；首轮后用新版本调整并Replay，不能原地覆盖。运行`xmax-test db check`会按Benchmark版本列出历史Evaluation；非当前版本不得与当前批次混用，需要新口径时对明确Run Batch执行`replay run`。
 
 ## 2. 维度生命周期
 
@@ -59,7 +59,7 @@ Shadow显示
 3. 验证所有Active维度有兼容Judge或明确fallback。
 4. 验证Profile只引用现有维度、Rule只引用合法标签/维度、Gate动作合法。
 5. 生成Benchmark与Scenario Pack快照和内容哈希。
-6. 对冻结回归集做Shadow回放并比较Canonical/Scenario排序变化。
+6. 对冻结回归集做Shadow回放，比较各核心场景的Scenario排序、Gate和P/G/E/R分项变化。
 7. 在Holdout上验证。
 8. 发布Benchmark、Weight Profile、Rule与Score Schema版本。
 9. 同步飞书Judge/标准版本表。

@@ -38,6 +38,7 @@ class FeishuSyncClient(Protocol):
         key_value: str,
         secondary_field: str,
         secondary_value: str,
+        field_names: list[str] | None = None,
     ) -> dict[str, Any] | None: ...
 
     def upload_attachment(
@@ -104,11 +105,14 @@ class LarkCliSyncClient:
         return data.get("items") or data.get("fields") or []
 
     def list_records(
-        self, app_token: str, table_id: str, page_token: str | None = None
+        self,
+        app_token: str,
+        table_id: str,
+        page_token: str | None = None,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         offset = int(page_token or 0)
-        data = self._run(
-            [
+        args = [
                 "base",
                 "+record-list",
                 "--base-token",
@@ -120,14 +124,22 @@ class LarkCliSyncClient:
                 "--limit",
                 "200",
             ]
-        )
+        if view_id:
+            args.extend(["--view-id", view_id])
+        data = self._run(args)
         return normalize_record_page(data, offset=offset)
 
     def get_bitable_records(
-        self, app_token: str, table_id: str, page_token: str | None = None
+        self,
+        app_token: str,
+        table_id: str,
+        page_token: str | None = None,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         """Alias used by the read-only case importer."""
-        return self.list_records(app_token, table_id, page_token=page_token)
+        return self.list_records(
+            app_token, table_id, page_token=page_token, view_id=view_id
+        )
 
     def upsert_record(
         self,
@@ -167,11 +179,19 @@ class LarkCliSyncClient:
         key_value: str,
         secondary_field: str,
         secondary_value: str,
+        field_names: list[str] | None = None,
     ) -> dict[str, Any] | None:
-        """Resolve a just-created upsert whose CLI response omitted record_id."""
+        """Find one Case row and return every field needed for idempotent sync.
 
-        data = self._run(
-            [
+        Attachment sync must see the existing attachment cells. Returning only
+        the two key fields makes a resumed ``full`` sync misread an existing
+        row as attachment-free and append the same files again.
+        """
+
+        selected_fields = list(
+            dict.fromkeys([key_field, secondary_field, *(field_names or [])])
+        )
+        args = [
                 "base",
                 "+record-search",
                 "--base-token",
@@ -182,14 +202,12 @@ class LarkCliSyncClient:
                 key_value,
                 "--search-field",
                 key_field,
-                "--field-id",
-                key_field,
-                "--field-id",
-                secondary_field,
                 "--limit",
                 "20",
             ]
-        )
+        for field in selected_fields:
+            args.extend(["--field-id", field])
+        data = self._run(args)
         rows = data.get("data") or []
         names = data.get("fields") or []
         record_ids = data.get("record_id_list") or []
@@ -363,7 +381,11 @@ class FakeFeishuSyncClient:
         return {"records": [], "has_more": False, "page_token": None}
 
     def get_bitable_records(
-        self, app_token: str, table_id: str, page_token: str | None = None
+        self,
+        app_token: str,
+        table_id: str,
+        page_token: str | None = None,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         """Alias used by the read-only case importer."""
         self.calls.append("get_bitable_records")
@@ -404,6 +426,7 @@ class FakeFeishuSyncClient:
         key_value: str,
         secondary_field: str,
         secondary_value: str,
+        field_names: list[str] | None = None,
     ) -> dict[str, Any] | None:
         self.calls.append("find_record")
         for record in self._tables.get(table_id, []):
@@ -411,7 +434,13 @@ class FakeFeishuSyncClient:
             if str(fields.get(key_field, "")) == str(key_value) and str(
                 fields.get(secondary_field, "")
             ) == str(secondary_value):
-                return record
+                if field_names is None:
+                    return record
+                selected = dict.fromkeys([key_field, secondary_field, *field_names])
+                return {
+                    "record_id": record["record_id"],
+                    "fields": {name: fields.get(name) for name in selected},
+                }
         return None
 
     def upload_attachment(

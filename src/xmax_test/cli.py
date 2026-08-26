@@ -878,6 +878,7 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
             "combination_selection": request.get(
                 "combination_selection", {"strategy": "cartesian"}
             ),
+            "scenario_overrides": request.get("scenario_overrides", {}),
             "generation_config": {
                 "quality": composition.project.get("xmax_offline_quality", "hd"),
                 "fps": composition.project.get("xmax_offline_fps", 24),
@@ -1632,6 +1633,7 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
         "filters": request.get("filters", {}),
         "seed": request.get("seed"),
         "combination_selection": request.get("combination_selection", {"strategy": "cartesian"}),
+        "scenario_overrides": request.get("scenario_overrides", {}),
         "generation_config": {
             "quality": composition.project.get("xmax_offline_quality", "hd"),
             "fps": composition.project.get("xmax_offline_fps", 24),
@@ -1792,7 +1794,11 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
         metadata={"generation_mode": "offline", "plan_id": plan.get("plan_id")},
     )
     for run in runs:
-        if not run.get("batch_reused"):
+        current = composition.database.get_run(run["run_id"])
+        if (
+            not run.get("batch_reused")
+            and current.get("run_batch_id") == provisional_batch_id
+        ):
             composition.database.set_run_batch_id(run["run_id"], manifest["batch_id"])
     composition.database.save_batch_manifest(manifest)
     _emit(

@@ -60,6 +60,7 @@ class StrategyRegistry:
             RandomPairsStrategy(),
             RandomRunsStrategy(),
             ExplicitPairsStrategy(),
+            MatchedRecordGroupsStrategy(),
         ):
             registry.register(strategy)
         return registry
@@ -206,4 +207,30 @@ class ExplicitPairsStrategy:
                 "explicit pair is not eligible after filters/recipe/mode checks: "
                 + "; ".join(missing)
             )
+        return _expand_repeats(chosen, repeat_count)
+
+
+class MatchedRecordGroupsStrategy:
+    """Pair only Feed and Prompt bindings originating from the same source record."""
+
+    name = "matched_record_groups"
+    version = "1"
+
+    def select(self, candidates, selection, *, repeat_count, seed):
+        chosen = [
+            item
+            for item in candidates
+            if item["feed"].get("metadata", {}).get("group_id")
+            and item["feed"].get("metadata", {}).get("group_id")
+            == item["bundle"].metadata.get("group_id")
+        ]
+        if not chosen:
+            raise ContractError("matched_record_groups found no eligible same-record pairs")
+        chosen.sort(
+            key=lambda item: (
+                str(item["bundle"].metadata.get("record_id") or ""),
+                item["feed"]["asset_id"],
+                item["pair_key"],
+            )
+        )
         return _expand_repeats(chosen, repeat_count)

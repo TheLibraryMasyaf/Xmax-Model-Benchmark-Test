@@ -64,6 +64,10 @@ def load_benchmark_contract(path: str | Path) -> dict[str, Any]:
     _assert_unique_ids(contract["scene_weight_rules"], "rule_id", "scene_weight_rules")
     _assert_unique_ids(contract["hard_gates"], "gate_id", "hard_gates")
     _assert_unique_ids(contract["score_schemas"], "score_schema_id", "score_schemas")
+    if "reporting_metrics" in contract:
+        if not isinstance(contract["reporting_metrics"], list):
+            raise BenchmarkContractError("BENCHMARK field reporting_metrics must be list")
+        _assert_unique_ids(contract["reporting_metrics"], "metric_id", "reporting_metrics")
     _validate_weight_references(contract, dimension_ids)
 
     return contract

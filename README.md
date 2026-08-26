@@ -35,7 +35,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -
 
 ```text
 Project check passed
-BENCHMARK valid: version=0.2.0-draft status=shadow dimensions=23 weight_profiles=2 scene_weight_rules=14 score_schemas=1 scenarios=32
+BENCHMARK valid: version=0.3.0-draft status=shadow dimensions=10 weight_profiles=2 scene_weight_rules=16 score_schemas=1 scenarios=10
 ```
 
 ## 2. 目录

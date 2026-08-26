@@ -29,7 +29,11 @@ class FeishuClient(Protocol):
         """
 
     def get_bitable_records(
-        self, app_token: str, table_id: str, page_token: str | None = None
+        self,
+        app_token: str,
+        table_id: str,
+        page_token: str | None = None,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         """Return one page of records plus ``has_more`` and next page_token."""
 
@@ -135,11 +139,14 @@ class LarkCliFeishuClient:
         }
 
     def get_bitable_records(
-        self, app_token: str, table_id: str, page_token: str | None = None
+        self,
+        app_token: str,
+        table_id: str,
+        page_token: str | None = None,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         offset = int(page_token or 0)
-        data = self._run(
-            [
+        args = [
                 "base",
                 "+record-list",
                 "--base-token",
@@ -151,7 +158,9 @@ class LarkCliFeishuClient:
                 "--limit",
                 "200",
             ]
-        )
+        if view_id:
+            args.extend(["--view-id", view_id])
+        data = self._run(args)
         return normalize_record_page(data, offset=offset)
 
     def get_wiki_node(self, wiki_token: str) -> dict[str, Any]:
@@ -246,7 +255,11 @@ class FakeFeishuClient:
         return self._sheet_meta
 
     def get_bitable_records(
-        self, app_token: str, table_id: str, page_token: str | None = None
+        self,
+        app_token: str,
+        table_id: str,
+        page_token: str | None = None,
+        view_id: str | None = None,
     ) -> dict[str, Any]:
         self._maybe_fail("bitable_records")
         for page in self._bitable_pages:

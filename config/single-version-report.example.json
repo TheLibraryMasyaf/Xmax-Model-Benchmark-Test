@@ -4,6 +4,6 @@
   "model_version": "x2.0",
   "run_batch_id": "runs-replace-me",
   "evaluation_batch_id": "eval-replace-me",
-  "requested_scene_ids": ["core-selfie-appearance"],
+  "requested_scene_ids": ["core-indoor-selfie-person-replacement"],
   "output_directory": "var/reports/single-version"
 }

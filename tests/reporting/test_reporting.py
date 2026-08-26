@@ -78,7 +78,7 @@ class ReportingTestBase(unittest.TestCase):
                 "operation_recipe_version": "0.1.0",
                 "edited_video_asset_id": "feed-a",
                 "expected_audio_source_asset_id": "feed-a",
-                "scenario_id": "core-selfie-appearance",
+                "scenario_id": "core-indoor-selfie-person-replacement",
                 "scenario_pack_version": self.pack.get("version"),
                 "scene_tags": {"input_dimension": "自拍"},
             },
@@ -223,7 +223,7 @@ class ComparisonTests(ReportingTestBase):
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
             **self.selectors(),
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
         )
 
         self.assertEqual(compared["overall"]["canonical"]["delta_points"], 20.0)
@@ -235,7 +235,7 @@ class ComparisonTests(ReportingTestBase):
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
             **self.selectors(),
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
         )
         self.assertEqual(compared["status"], "complete")
         self.assertTrue(compared["comparability"]["comparable"])
@@ -251,7 +251,7 @@ class ComparisonTests(ReportingTestBase):
             baseline_model_version="x2.0",
             candidate_model_version="x9.9",
             **self.selectors(candidate="x9.9"),
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
         )
         self.assertEqual(compared["status"], "not_comparable")
         self.assertFalse(compared["comparability"]["comparable"])
@@ -327,7 +327,7 @@ class ComparisonTests(ReportingTestBase):
             baseline_model_version="x2.0",
             candidate_model_version="x2.2",
             **self.selectors(candidate="x2.2"),
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
         )
         self.assertEqual(compared["status"], "not_comparable")
         self.assertIn(
@@ -366,8 +366,8 @@ class ClassificationTests(ReportingTestBase):
             }
         }
         pair = {
-            "key": ("feed001_prompt001_01", "core-selfie-appearance", "offline"),
-            "scene_id": "core-selfie-appearance",
+            "key": ("feed001_prompt001_01", "core-indoor-selfie-person-replacement", "offline"),
+            "scene_id": "core-indoor-selfie-person-replacement",
             "mode": "offline",
             "baseline": baseline,
             "candidate": candidate,
@@ -428,7 +428,7 @@ class ClassificationTests(ReportingTestBase):
 
 
 class RenderTests(ReportingTestBase):
-    def test_credibility_rejects_wrong_group_members_even_below_batch_size(self) -> None:
+    def test_legacy_group_criteria_do_not_affect_new_report_credibility(self) -> None:
         cases = [
             {
                 "run_id": "run-a",
@@ -473,8 +473,8 @@ class RenderTests(ReportingTestBase):
 
         result = _credibility(cases, evaluations, run_count=2)
 
-        self.assertEqual(result["status"], "diagnostic")
-        self.assertIn(
+        self.assertEqual(result["status"], "credible_with_warnings")
+        self.assertNotIn(
             "group_scope_membership_mismatch",
             {item["code"] for item in result["issues"]},
         )
@@ -488,7 +488,7 @@ class RenderTests(ReportingTestBase):
             run_batch_id="batch-x2.0",
             evaluation_batch_id="eval-batch-x2.0",
             output_directory=self.output,
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
         )
         payload = json.loads(Path(result["json_path"]).read_text(encoding="utf-8"))
         schema = json.loads(
@@ -508,7 +508,7 @@ class RenderTests(ReportingTestBase):
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
             **self.selectors(),
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
             template_path=self.template,
             output_directory=self.output,
         )
@@ -542,7 +542,7 @@ class RenderTests(ReportingTestBase):
             baseline_model_version="x2.0",
             candidate_model_version="x2.1",
             **self.selectors(),
-            requested_scene_ids=["core-selfie-appearance"],
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
             template_path=self.template,
             output_directory=self.output,
         )
@@ -560,7 +560,7 @@ class RenderTests(ReportingTestBase):
                 baseline_model_version="x2.0",
                 candidate_model_version="x2.1",
                 **self.selectors(),
-                requested_scene_ids=["core-selfie-appearance"],
+                requested_scene_ids=["core-indoor-selfie-person-replacement"],
                 template_path=self.output / "missing.md",
                 output_directory=self.output,
             )
