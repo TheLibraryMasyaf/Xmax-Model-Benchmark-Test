@@ -22,6 +22,12 @@ xmax-test report single-version --request config/single-version-report.json
 
 命令会生成同名Markdown和JSON，并强制校验批次中的模型版本，不扫描历史全库。模板`report-templates/single-version-evaluation-report.md`是人读字段合同；CLI按同一口径动态渲染全量维度、细则、Case和P0/P1/P2证据包，不留未替换占位符。
 
+报告器必须从Benchmark正向枚举全部评价要求，不能只从本批已经产生的EvaluationResult反向收集。所有0/1/2评分细则统一在唯一一张“细则结果”表中列出状态、分数、分布和覆盖缺口，不得再复制一张内容相同的“完整性”表；`reporting_metrics`因不使用0/1/2，单独列结构化指标。没有数据时仍保留对应行并标记不适用、不可评、未执行实验或未覆盖。
+
+正式报告正文必须简洁：不复述设计取舍、Agent执行过程或对话上下文；同一数字和规则不在多个章节重复解释。摘要只保留总体分、覆盖、主要强弱项和下一步；P0/P1/P2每项按“关键数据→问题说明→行动与验收”呈现，问题说明必须把数字翻译成实际失败现象和用户影响。
+
+面向读者的标准差统一换算为0–100分上的“百分点”：维度和细则的0–2原始标准差乘以50，总分标准差直接使用0–100分结果。P.3只在同输入且评分口径一致的重复组内判定；组内适用细则或有效维度权重不一致时标记为`basis_mismatch`，不进入稳定/不稳定分母。
+
 确定性报告器只生成可复核统计、可信度诊断和证据包，并写`analysis_required=true`；它不得用固定脚本冒充执行Agent生成针对性建议。最终建议必须由执行Agent读取证据包、代表性媒体和Benchmark锚点后撰写。P.3会记录实际参与统计的`member_run_ids`，并按模型、Feed、Prompt文字、Prompt素材、配方、生成参数、场景与模式重建重复组；缺少来源、引用Manifest外Run或成员不一致都会把报告降为`diagnostic`，不得作为正式结论发布。
 
 ## 2. 分数口径
@@ -31,6 +37,9 @@ xmax-test report single-version --request config/single-version-report.json
 - 生成失败、结果无效和阻断型Hard Gate按0%进入统计。
 - P.2/P.3只作为批次统计，不产生0/1/2评分，也不回灌单视频。
 - 一组重复实验同时报告实际重复次数、成员Run、完成率、有效率、平均、中位数、最小/最大、标准差和离散范围。
+- P.3正式报告必须给出稳定组数、不稳定组数、不稳定组占比，并汇总各组Case总分的总体标准差；不得只报告重复组总数。
+- 当前报告诊断策略`repeat-score-population-sd-10-v1`以组内Case总分总体标准差大于10分判为不稳定，小于等于10分判为稳定。“组间不稳定率”定义为不稳定重复组数除以可判定重复组总数，不做组均分两两比较。该策略不是Benchmark单视频0/1/2评分线；调整阈值必须升级`policy_id`。
+- P.3摘要不单独列不稳定组明细；逐Case表按重复组连续排列，并用HTML `rowspan`合并“组内总分标准差”和“稳定性”两列。机器可读JSON的每条Case同时保存`repeat_group_id`、`repeat_group_standard_deviation`和`repeat_group_stability`。
 - 不适用维度从分子和分母同时剔除；不可评要单独报告覆盖缺口。
 
 ## 3. 维度与细则

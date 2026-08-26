@@ -11,6 +11,7 @@ from __future__ import annotations
 import statistics
 from typing import Any
 
+from ..evaluation.group_metrics import BatchReportingMetrics
 from ..feedback.overrides import HumanOverrideService
 from ..hashing import content_hash
 from ..pipeline.manifests import frozen_evaluation_batch, frozen_run_batch
@@ -67,12 +68,17 @@ class ModelComparisonService:
                     "excluded_case_ids": [],
                 },
                 "pairs": [],
+                "reporting_metrics": {
+                    "baseline": self._batch_reporting_metrics(baseline_runs),
+                    "candidate": self._batch_reporting_metrics(candidate_runs),
+                },
             }
 
         baseline_by_key = self._keyed(baseline_runs, baseline_model_version)
         candidate_by_key = self._keyed(candidate_runs, candidate_model_version)
         shared_keys = sorted(set(baseline_by_key) & set(candidate_by_key))
         excluded = sorted(set(baseline_by_key) ^ set(candidate_by_key))
+        excluded_labels = ["|".join(item) for item in excluded]
 
         differences = self._comparability_differences(
             baseline_by_key,
@@ -91,6 +97,7 @@ class ModelComparisonService:
         comparable = not differences
 
         pairs: list[dict[str, Any]] = []
+        score_basis_excluded: list[str] = []
         for key in shared_keys:
             baseline = baseline_by_key[key]
             candidate = candidate_by_key[key]
@@ -105,6 +112,8 @@ class ModelComparisonService:
                         "candidate": candidate,
                     }
                 )
+            else:
+                score_basis_excluded.append(str(baseline.get("case_number") or "|".join(key)))
         if not comparable and not pairs:
             return {
                 "comparison_id": "",
@@ -112,9 +121,13 @@ class ModelComparisonService:
                 "comparability": {
                     "comparable": False,
                     "differences": differences,
-                    "excluded_case_ids": excluded,
+                    "excluded_case_ids": excluded_labels + score_basis_excluded,
                 },
                 "pairs": [],
+                "reporting_metrics": {
+                    "baseline": self._batch_reporting_metrics(baseline_runs),
+                    "candidate": self._batch_reporting_metrics(candidate_runs),
+                },
             }
 
         overall = self._aggregate(pairs)
@@ -124,12 +137,16 @@ class ModelComparisonService:
             "comparability": {
                 "comparable": comparable,
                 "differences": differences,
-                "excluded_case_ids": excluded,
+                "excluded_case_ids": excluded_labels + score_basis_excluded,
             },
             "pairs": pairs,
             "overall": overall,
             "scene_results": scene_results,
             "generation_config_hash": self._common_generation_config_hash(pairs),
+            "reporting_metrics": {
+                "baseline": self._batch_reporting_metrics(baseline_runs),
+                "candidate": self._batch_reporting_metrics(candidate_runs),
+            },
             "judge_versions": sorted(
                 {
                     version
@@ -255,6 +272,11 @@ class ModelComparisonService:
                     _judge_versions(left_eval),
                     _judge_versions(right_eval),
                 ),
+                (
+                    "score_basis",
+                    _score_basis_signature(left_eval),
+                    _score_basis_signature(right_eval),
+                ),
             ):
                 if left_value != right_value:
                     differences.append(
@@ -275,8 +297,28 @@ class ModelComparisonService:
         }
         return next(iter(hashes)) if len(hashes) == 1 else None
 
+    def _batch_reporting_metrics(self, runs: list[dict[str, Any]]) -> dict[str, Any]:
+        if not runs:
+            return {}
+        results = [
+            run.get("_evaluation", {})
+            for run in runs
+            if run.get("_evaluation", {}).get("run_id")
+        ]
+        metrics = BatchReportingMetrics(self._repository).summarize(runs, results)
+        metrics["P.3"]["diagnostic_stability"] = _repeat_stability_summary(
+            metrics["P.3"], runs
+        )
+        return metrics
+
     def _keys_comparable(self, baseline: dict[str, Any], candidate: dict[str, Any]) -> bool:
-        return baseline.get("mode") == candidate.get("mode")
+        if baseline.get("mode") != candidate.get("mode"):
+            return False
+        left = _score_basis_signature(baseline.get("_evaluation", {}))
+        right = _score_basis_signature(candidate.get("_evaluation", {}))
+        if left is None and right is None:
+            return True
+        return left is not None and left == right
 
     def _aggregate(self, pairs: list[dict[str, Any]]) -> dict[str, Any]:
         baseline_scores = [self._case_score(p["baseline"]) for p in pairs]
@@ -294,74 +336,99 @@ class ModelComparisonService:
         }
 
     def _dimension_summaries(self, pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        dimension_ids = sorted(
-            {
-                item.get("dimension_id")
-                for pair in pairs
-                for side in ("baseline", "candidate")
-                for item in pair[side].get("_evaluation", {}).get("dimension_results", [])
-                if item.get("dimension_id")
-            }
-        )
         summaries = []
-        for dimension_id in dimension_ids:
-            baseline = _mean(_dimension_score(pair["baseline"], dimension_id) for pair in pairs)
-            candidate = _mean(_dimension_score(pair["candidate"], dimension_id) for pair in pairs)
+        batch_modes = {str(pair.get("mode") or "") for pair in pairs}
+        for dimension in self._benchmark.get("dimensions", []):
+            dimension_id = str(dimension.get("dimension_id") or "")
+            modes = _eligible_modes(dimension.get("applicable_modes", []))
+            if not batch_modes & modes:
+                continue
+            baseline_values = [
+                value
+                for pair in pairs
+                if pair.get("mode") in modes
+                for value in [_dimension_score(pair["baseline"], dimension_id)]
+                if value is not None
+            ]
+            candidate_values = [
+                value
+                for pair in pairs
+                if pair.get("mode") in modes
+                for value in [_dimension_score(pair["candidate"], dimension_id)]
+                if value is not None
+            ]
+            baseline = _mean(baseline_values)
+            candidate = _mean(candidate_values)
             # Dimension scores use 0..2; report them as percentages.
             baseline_percent = round(baseline / 2 * 100, 2) if baseline is not None else None
             candidate_percent = round(candidate / 2 * 100, 2) if candidate is not None else None
             summaries.append(
                 {
                     "dimension_id": dimension_id,
+                    "dimension_name": dimension.get("name", ""),
                     "baseline": baseline_percent,
                     "candidate": candidate_percent,
                     "delta_points": _delta(baseline_percent, candidate_percent),
+                    "baseline_assessable_count": len(baseline_values),
+                    "candidate_assessable_count": len(candidate_values),
+                    "baseline_standard_deviation_points": _raw_sd_points(baseline_values),
+                    "candidate_standard_deviation_points": _raw_sd_points(candidate_values),
                 }
             )
         return summaries
 
     def _criterion_summaries(self, pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        contracts: dict[str, dict[str, Any]] = {}
-        for pair in pairs:
-            for side in ("baseline", "candidate"):
-                for item in pair[side].get("_evaluation", {}).get("criterion_results", []):
-                    criterion_id = item.get("criterion_id")
-                    if criterion_id:
-                        contracts.setdefault(criterion_id, item)
         summaries: list[dict[str, Any]] = []
-        for criterion_id, contract in sorted(contracts.items()):
-            baseline_values = [_criterion_score(pair["baseline"], criterion_id) for pair in pairs]
-            candidate_values = [_criterion_score(pair["candidate"], criterion_id) for pair in pairs]
-            baseline_numbers = [value for value in baseline_values if value is not None]
-            candidate_numbers = [value for value in candidate_values if value is not None]
-            baseline = _mean(baseline_numbers)
-            candidate = _mean(candidate_numbers)
-            baseline_percent = round(baseline / 2 * 100, 2) if baseline is not None else None
-            candidate_percent = round(candidate / 2 * 100, 2) if candidate is not None else None
-            summaries.append(
-                {
-                    "dimension_id": contract.get("dimension_id"),
-                    "criterion_id": criterion_id,
-                    "criterion_name": contract.get("criterion_name", ""),
-                    "baseline": baseline_percent,
-                    "candidate": candidate_percent,
-                    "delta_points": _delta(baseline_percent, candidate_percent),
-                    "baseline_assessable_count": len(baseline_numbers),
-                    "candidate_assessable_count": len(candidate_numbers),
-                    "classification": "unclassified",
-                    "evidence_ids": sorted(
-                        {
-                            run_id
-                            for pair in pairs
-                            for run_id in (
-                                pair["baseline"].get("run_id"),
-                                pair["candidate"].get("run_id"),
-                            )
-                            if run_id
-                        }
-                    ),
-                }
-            )
+        for dimension in self._benchmark.get("dimensions", []):
+            modes = _eligible_modes(dimension.get("applicable_modes", []))
+            eligible_pairs = [pair for pair in pairs if pair.get("mode") in modes]
+            for criterion in dimension.get("criteria", []):
+                criterion_id = str(criterion.get("criterion_id") or "")
+                left = _criterion_side_summary(eligible_pairs, "baseline", criterion_id)
+                right = _criterion_side_summary(eligible_pairs, "candidate", criterion_id)
+                summaries.append(
+                    {
+                        "dimension_id": dimension.get("dimension_id"),
+                        "dimension_name": dimension.get("name", ""),
+                        "criterion_id": criterion_id,
+                        "criterion_name": criterion.get("name", ""),
+                        "baseline": left["score_percent"],
+                        "candidate": right["score_percent"],
+                        "delta_points": _delta(
+                            left["score_percent"], right["score_percent"]
+                        ),
+                        "baseline_status": left["status"],
+                        "candidate_status": right["status"],
+                        "baseline_assessable_count": left["assessable_count"],
+                        "candidate_assessable_count": right["assessable_count"],
+                        "baseline_eligible_count": left["eligible_count"],
+                        "candidate_eligible_count": right["eligible_count"],
+                        "baseline_not_applicable_count": left["not_applicable_count"],
+                        "candidate_not_applicable_count": right["not_applicable_count"],
+                        "baseline_unassessable_count": left["unassessable_count"],
+                        "candidate_unassessable_count": right["unassessable_count"],
+                        "baseline_uncovered_count": left["uncovered_count"],
+                        "candidate_uncovered_count": right["uncovered_count"],
+                        "baseline_standard_deviation_points": left[
+                            "standard_deviation_points"
+                        ],
+                        "candidate_standard_deviation_points": right[
+                            "standard_deviation_points"
+                        ],
+                        "classification": "unclassified",
+                        "evidence_ids": sorted(
+                            {
+                                run_id
+                                for pair in eligible_pairs
+                                for run_id in (
+                                    pair["baseline"].get("run_id"),
+                                    pair["candidate"].get("run_id"),
+                                )
+                                if run_id
+                            }
+                        ),
+                    }
+                )
         return summaries
 
     def _delta_summary(self, pairs: list[dict[str, Any]], field: str) -> dict[str, Any]:
@@ -393,10 +460,19 @@ class ModelComparisonService:
     def _scene_result(self, pairs: list[dict[str, Any]], scene_id: str) -> dict[str, Any]:
         scene_pairs = [p for p in pairs if p["scene_id"] == scene_id]
         modes = sorted({p["mode"] for p in scene_pairs})
+        scenario = next(
+            (
+                item
+                for item in self._scenario_pack.get("scenarios", [])
+                if item.get("scenario_id") == scene_id
+            ),
+            {},
+        )
         baseline_scores = [self._case_score(p["baseline"]) for p in scene_pairs]
         candidate_scores = [self._case_score(p["candidate"]) for p in scene_pairs]
         return {
             "scenario_id": scene_id,
+            "scenario_name": scenario.get("name", scene_id),
             "mode": modes[0] if len(modes) == 1 else "offline",
             "score_summary": self._delta_summary(scene_pairs, "scenario_score")
             if scene_pairs
@@ -407,6 +483,7 @@ class ModelComparisonService:
                 "delta_percent": None,
                 "classification": "not_comparable",
             },
+            "dimensions": self._dimension_summaries(scene_pairs),
             "items": [
                 {
                     "scope": "scene",
@@ -475,6 +552,62 @@ def _mean(values: list[Any]) -> float | None:
     return round(statistics.fmean(numbers), 2)
 
 
+def _raw_sd_points(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(statistics.pstdev(values) / 2 * 100, 2)
+
+
+def _eligible_modes(applicable_modes: list[Any]) -> set[str]:
+    modes = {str(item) for item in applicable_modes}
+    return {"offline", "realtime"} if "both" in modes else modes & {"offline", "realtime"}
+
+
+def _criterion_side_summary(
+    pairs: list[dict[str, Any]], side: str, criterion_id: str
+) -> dict[str, Any]:
+    observed = [
+        item
+        for pair in pairs
+        for item in [_criterion_item(pair[side], criterion_id)]
+        if item is not None
+    ]
+    applicable = [item for item in observed if item.get("applicable", True)]
+    assessed = [
+        float(item["score"])
+        for item in applicable
+        if isinstance(item.get("score"), (int, float))
+    ]
+    not_applicable = [item for item in observed if not item.get("applicable", True)]
+    unassessable = [
+        item for item in applicable if not isinstance(item.get("score"), (int, float))
+    ]
+    uncovered = max(0, len(pairs) - len(observed))
+    if not pairs:
+        status = "inapplicable_to_batch"
+    elif assessed and not unassessable and not uncovered:
+        status = "scored"
+    elif assessed:
+        status = "partially_scored"
+    elif applicable:
+        status = "unassessable"
+    elif observed and len(not_applicable) == len(observed) and not uncovered:
+        status = "not_applicable"
+    else:
+        status = "uncovered"
+    mean = _mean(assessed)
+    return {
+        "status": status,
+        "eligible_count": len(pairs),
+        "assessable_count": len(assessed),
+        "not_applicable_count": len(not_applicable),
+        "unassessable_count": len(unassessable),
+        "uncovered_count": uncovered,
+        "score_percent": round(mean / 2 * 100, 2) if mean is not None else None,
+        "standard_deviation_points": _raw_sd_points(assessed),
+    }
+
+
 def _stats(values: list[Any]) -> dict[str, Any]:
     numbers = [float(v) for v in values if v is not None]
     if not numbers:
@@ -508,11 +641,88 @@ def _dimension_score(run: dict[str, Any], dimension_id: str) -> float | None:
 
 
 def _criterion_score(run: dict[str, Any], criterion_id: str) -> float | None:
+    item = _criterion_item(run, criterion_id)
+    if item is not None:
+        value = item.get("score")
+        return float(value) if value is not None else None
+    return None
+
+
+def _criterion_item(run: dict[str, Any], criterion_id: str) -> dict[str, Any] | None:
     for item in run.get("_evaluation", {}).get("criterion_results", []):
         if item.get("criterion_id") == criterion_id:
-            value = item.get("score")
-            return float(value) if value is not None else None
+            return item
     return None
+
+
+def _score_basis_signature(evaluation: dict[str, Any]) -> str | None:
+    weights = (evaluation.get("weight_resolution") or {}).get("effective_weights")
+    criteria = evaluation.get("criterion_results")
+    if not isinstance(weights, dict) or not isinstance(criteria, list):
+        return None
+    return content_hash(
+        {
+            "effective_weights": weights,
+            "criterion_applicability": sorted(
+                (
+                    str(item.get("criterion_id") or ""),
+                    bool(item.get("applicable", True)),
+                )
+                for item in criteria
+                if item.get("criterion_id")
+            ),
+        }
+    )
+
+
+def _repeat_stability_summary(
+    repeat_metrics: dict[str, Any], runs: list[dict[str, Any]]
+) -> dict[str, Any]:
+    run_by_id = {str(run.get("run_id") or ""): run for run in runs}
+    stable = 0
+    unstable = 0
+    basis_mismatch = 0
+    basis_unavailable = 0
+    classified_standard_deviations: list[float] = []
+    for group in repeat_metrics.get("groups", []):
+        if int(group.get("configured_repeat_count") or 0) < 2:
+            continue
+        standard_deviation = (group.get("case_score_percent") or {}).get(
+            "standard_deviation"
+        )
+        if not isinstance(standard_deviation, (int, float)):
+            continue
+        signatures = {
+            signature
+            for run_id in group.get("member_run_ids", [])
+            for signature in [
+                _score_basis_signature(run_by_id.get(str(run_id), {}).get("_evaluation", {}))
+            ]
+            if signature
+        }
+        if not signatures:
+            basis_unavailable += 1
+        elif len(signatures) > 1:
+            basis_mismatch += 1
+        elif float(standard_deviation) > 10.0:
+            unstable += 1
+            classified_standard_deviations.append(float(standard_deviation))
+        else:
+            stable += 1
+            classified_standard_deviations.append(float(standard_deviation))
+    classified = stable + unstable
+    return {
+        "policy_id": "repeat-score-population-sd-10-comparable-basis-v2",
+        "classified_group_count": classified,
+        "stable_group_count": stable,
+        "unstable_group_count": unstable,
+        "unstable_group_rate_percent": (
+            round(unstable / classified * 100, 2) if classified else None
+        ),
+        "basis_mismatch_group_count": basis_mismatch,
+        "basis_unavailable_group_count": basis_unavailable,
+        "group_standard_deviation_points": _stats(classified_standard_deviations),
+    }
 
 
 def _judge_versions(evaluation: dict[str, Any]) -> list[str]:

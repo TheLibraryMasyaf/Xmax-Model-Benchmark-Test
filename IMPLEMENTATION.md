@@ -26,7 +26,7 @@
 | P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
 | P11 Release/Replay | DONE | Challenger、Holdout验证、回放、发布和回滚 | 发布仍需明确operator和验证文件 |
-| P12 Reporting | DONE | 精确Run/Evaluation Batch的版本对比与单版本报告、Case/维度/细则多统计量、人工修订、P0/P1/P2、JSON/Markdown | 对比阈值随Score Schema版本维护；无阈值时不臆造绝对合格线 |
+| P12 Reporting | DONE | 精确Run/Evaluation Batch的版本对比与单版本报告、Case/维度/细则多统计量、Benchmark全部评分细则与非评分指标覆盖清单、P.3标准差稳定性诊断、人工修订、P0/P1/P2、JSON/Markdown | 对比阈值随Score Schema版本维护；无阈值时不臆造绝对合格线 |
 | P13 Unified CLI | DONE | RUNBOOK命令、`run`内强制ContextChecker、配置内容指纹缓存、稳定退出码、生成预算批准门、`evaluation-budget status/authorize/pause` | 新命令须同步RUNBOOK和E2E |
 
 ### 1.1 外部运行就绪度

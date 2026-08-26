@@ -16,7 +16,11 @@ from xmax_test.reporting.classification import bucket_pairs, classify_pair
 from xmax_test.reporting.comparison import ModelComparisonService
 from xmax_test.reporting.renderer import render_markdown, template_hash
 from xmax_test.reporting.service import ModelUpdateReportService
-from xmax_test.reporting.single_version import SingleVersionReportService, _credibility
+from xmax_test.reporting.single_version import (
+    SingleVersionReportService,
+    _credibility,
+    _repeat_stability_diagnostics,
+)
 from xmax_test.scenarios import load_scenario_pack
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 
@@ -335,6 +339,64 @@ class ComparisonTests(ReportingTestBase):
             {item["kind"] for item in compared["comparability"]["differences"]},
         )
 
+    def test_different_score_basis_is_excluded_from_comparison(self) -> None:
+        criterion_id = self.benchmark["dimensions"][0]["criteria"][0]["criterion_id"]
+        for model, applicable in (("x2.0", True), ("x2.1", False)):
+            evaluation_id = f"eval-basis-{model}"
+            evaluation_batch_id = f"eval-batch-basis-{model}"
+            self.repository.save_evaluation_result(
+                {
+                    "evaluation_id": evaluation_id,
+                    "evaluation_batch_id": evaluation_batch_id,
+                    "run_id": f"run-{model}",
+                    "benchmark_version": "0.2.0-draft",
+                    "scenario_pack_version": "0.1.0-draft",
+                    "score_schema_version": "2.0.0",
+                    "criterion_results": [
+                        {
+                            "criterion_id": criterion_id,
+                            "score": 1.0 if applicable else None,
+                            "applicable": applicable,
+                        }
+                    ],
+                    "dimension_results": [],
+                    "weight_resolution": {"effective_weights": {"G1": 1.0}},
+                    "canonical_score": 60.0 if model == "x2.0" else 80.0,
+                    "scenario_score": 60.0 if model == "x2.0" else 80.0,
+                    "case_score_percent": 60.0 if model == "x2.0" else 80.0,
+                    "applied_gate_ids": [],
+                    "final_verdict": None,
+                }
+            )
+            self.repository.save_batch_manifest(
+                build_batch_manifest(
+                    entity_type="evaluation_batch",
+                    item_entity_type="evaluation_result",
+                    item_ids=[evaluation_id],
+                    producer_stage_run_id="stage-test",
+                    batch_id=evaluation_batch_id,
+                )
+            )
+
+        compared = ModelComparisonService(
+            self.repository, self.benchmark, self.pack, TEST_SCHEMA
+        ).compare(
+            baseline_model_version="x2.0",
+            candidate_model_version="x2.1",
+            baseline_run_batch_id="batch-x2.0",
+            candidate_run_batch_id="batch-x2.1",
+            baseline_evaluation_batch_id="eval-batch-basis-x2.0",
+            candidate_evaluation_batch_id="eval-batch-basis-x2.1",
+            requested_scene_ids=["core-indoor-selfie-person-replacement"],
+        )
+
+        self.assertEqual(compared["status"], "not_comparable")
+        self.assertEqual(compared["pairs"], [])
+        self.assertIn(
+            "score_basis",
+            {item["kind"] for item in compared["comparability"]["differences"]},
+        )
+
 
 class ClassificationTests(ReportingTestBase):
     def test_classify_delta_by_schema_thresholds(self) -> None:
@@ -428,6 +490,107 @@ class ClassificationTests(ReportingTestBase):
 
 
 class RenderTests(ReportingTestBase):
+    def test_repeat_stability_uses_group_population_standard_deviation(self) -> None:
+        repeat_summary = {
+            "groups": [
+                {
+                    "group_id": "repeat-stable",
+                    "configured_repeat_count": 3,
+                    "member_run_ids": ["run-1", "run-2", "run-3"],
+                    "mode": "offline",
+                    "scenario_id": "scene-a",
+                    "case_score_percent": {
+                        "count": 3,
+                        "mean": 80.0,
+                        "minimum": 70.0,
+                        "maximum": 90.0,
+                        "standard_deviation": 8.165,
+                    },
+                    "case_score_spread": 20.0,
+                },
+                {
+                    "group_id": "repeat-unstable",
+                    "configured_repeat_count": 3,
+                    "member_run_ids": ["run-4", "run-5", "run-6"],
+                    "mode": "offline",
+                    "scenario_id": "scene-a",
+                    "case_score_percent": {
+                        "count": 3,
+                        "mean": 60.0,
+                        "minimum": 45.0,
+                        "maximum": 75.0,
+                        "standard_deviation": 12.247,
+                    },
+                    "case_score_spread": 30.0,
+                },
+            ]
+        }
+        cases = [
+            {
+                "run_id": f"run-{index}",
+                "case_number": f"case-{index}",
+                "score_basis_signature": "same-basis",
+            }
+            for index in range(1, 7)
+        ]
+
+        result = _repeat_stability_diagnostics(
+            repeat_summary,
+            cases,
+            standard_deviation_threshold_points=10.0,
+        )
+
+        self.assertEqual(result["stable_group_count"], 1)
+        self.assertEqual(result["unstable_group_count"], 1)
+        self.assertEqual(result["unstable_group_rate_percent"], 50.0)
+        self.assertEqual(result["group_standard_deviation"]["mean"], 10.21)
+        self.assertNotIn("between_group", result)
+
+    def test_repeat_stability_excludes_groups_with_mixed_score_bases(self) -> None:
+        repeat_summary = {
+            "groups": [
+                {
+                    "group_id": "repeat-mixed-basis",
+                    "configured_repeat_count": 2,
+                    "member_run_ids": ["run-1", "run-2"],
+                    "mode": "offline",
+                    "scenario_id": "scene-a",
+                    "case_score_percent": {
+                        "count": 2,
+                        "mean": 70.0,
+                        "minimum": 50.0,
+                        "maximum": 90.0,
+                        "standard_deviation": 20.0,
+                    },
+                    "case_score_spread": 40.0,
+                }
+            ]
+        }
+        cases = [
+            {
+                "run_id": "run-1",
+                "case_number": "case-1",
+                "score_basis_signature": "basis-a",
+            },
+            {
+                "run_id": "run-2",
+                "case_number": "case-2",
+                "score_basis_signature": "basis-b",
+            },
+        ]
+
+        result = _repeat_stability_diagnostics(
+            repeat_summary,
+            cases,
+            standard_deviation_threshold_points=10.0,
+        )
+
+        self.assertEqual(result["classified_group_count"], 0)
+        self.assertEqual(result["basis_mismatch_group_count"], 1)
+        self.assertEqual(
+            result["unclassified_groups"][0]["classification"], "basis_mismatch"
+        )
+
     def test_legacy_group_criteria_do_not_affect_new_report_credibility(self) -> None:
         cases = [
             {
@@ -497,9 +660,56 @@ class RenderTests(ReportingTestBase):
         Draft202012Validator(schema).validate(payload)
         markdown = Path(result["markdown_path"]).read_text(encoding="utf-8")
         self.assertIn("## 细则结果", markdown)
+        self.assertNotIn("## 评价要求全量覆盖", markdown)
+        self.assertNotIn("### 0/1/2评分细则", markdown)
+        self.assertIn("## 批次与运行指标", markdown)
+        self.assertNotIn("## 可信度检查", markdown)
+        self.assertNotIn("## 模型与实时运行性能", markdown)
+        self.assertIn("| 维度 | 细则 | 状态 | 得分 | 可评/应出现 |", markdown)
+        self.assertEqual(markdown.count("| P 模型性能与基础可用性 | P.1 单次结果有效性 |"), 1)
+        criteria_section = markdown.split("## 细则结果", 1)[1].split(
+            "## P0 证据包（待Agent分析）", 1
+        )[0]
+        benchmark_criteria = [
+            criterion
+            for dimension in self.benchmark["dimensions"]
+            for criterion in dimension.get("criteria", [])
+        ]
+        self.assertEqual(criteria_section.count("\n| ") - 2, len(benchmark_criteria))
+        for criterion in benchmark_criteria:
+            self.assertEqual(
+                criteria_section.count(
+                    f"{criterion['criterion_id']} {criterion.get('name', '')}"
+                ),
+                1,
+            )
+        self.assertIn("## P.3 同输入重复稳定性", markdown)
+        self.assertIn("组内总分标准差", markdown)
+        self.assertIn("标准差（百分点）", markdown)
+        self.assertNotIn("组均分两两比较", markdown)
+        self.assertNotIn("| 不稳定重复组 |", markdown)
+        self.assertIn("组内总分标准差", markdown)
+        self.assertIn('rowspan="', markdown)
         self.assertIn("## P0 证据包（待Agent分析）", markdown)
         self.assertTrue(payload["analysis_required"])
-        self.assertEqual(payload["report_schema_version"], "single-version-report/1.1")
+        stability = payload["reporting_metrics"]["P.3"]["diagnostic_stability"]
+        self.assertEqual(
+            stability["policy_id"],
+            "repeat-score-population-sd-10-comparable-basis-v2",
+        )
+        self.assertNotIn("between_group", stability)
+        self.assertIn("repeat_group_standard_deviation", payload["case_results"][0])
+        self.assertIn("repeat_group_stability", payload["case_results"][0])
+        self.assertEqual(payload["report_schema_version"], "single-version-report/1.2")
+        requirements = payload["evaluation_requirement_results"]
+        benchmark_requirement_count = sum(
+            len(item.get("criteria", [])) for item in self.benchmark["dimensions"]
+        ) + len(self.benchmark["reporting_metrics"])
+        self.assertEqual(requirements["requirement_count"], benchmark_requirement_count)
+        self.assertEqual(
+            {item["requirement_id"] for item in requirements["reporting_metrics"]},
+            {"P.2", "P.3", "RP.1", "RP.2"},
+        )
         self.assertNotIn("Recommendation:", markdown)
 
     def test_full_report_writes_json_and_markdown_without_placeholders(self) -> None:
@@ -518,9 +728,16 @@ class RenderTests(ReportingTestBase):
         self.assertTrue(json_path.is_file())
         md_text = md_path.read_text(encoding="utf-8")
         self.assertNotIn("{{", md_text)
-        self.assertIn("### P0 — 新模型总分提升与明显改进", md_text)
-        self.assertIn("### P1 — 新模型持平项", md_text)
-        self.assertIn("### P2 — 新模型劣化项", md_text)
+        self.assertIn("### P0 — 新模型明显改进", md_text)
+        self.assertIn("### P1 — 新模型持平", md_text)
+        self.assertIn("### P2 — 新模型劣化", md_text)
+        self.assertIn("## 4. 全量维度变化", md_text)
+        self.assertIn("## 5. 全量细则变化", md_text)
+        self.assertIn("P.3 同输入重复稳定性", md_text)
+        self.assertIn("基线/新版标准差（百分点）", md_text)
+        self.assertNotIn("Canonical Score", md_text)
+        self.assertNotIn("complete / partial / not_comparable", md_text)
+        self.assertNotIn("promote / shadow / block", md_text)
         self.assertIn("3.1", md_text)
 
         report = json.loads(json_path.read_text(encoding="utf-8"))
@@ -529,6 +746,25 @@ class RenderTests(ReportingTestBase):
         )
         Draft202012Validator(schema).validate(report)
         self.assertIn("p0_improvements", report)
+        self.assertTrue(report["analysis_required"])
+        self.assertEqual(
+            len(report["dimension_results"]),
+            sum(
+                1
+                for dimension in self.benchmark["dimensions"]
+                if "offline" in dimension.get("applicable_modes", [])
+                or "both" in dimension.get("applicable_modes", [])
+            ),
+        )
+        self.assertEqual(
+            len(report["criterion_results"]),
+            sum(len(dimension.get("criteria", [])) for dimension in self.benchmark["dimensions"]),
+        )
+        self.assertTrue(
+            {"P.2", "P.3", "RP.1", "RP.2"}.issubset(
+                report["reporting_metric_results"]["baseline"]
+            )
+        )
         self.assertTrue(report["generation_config_hash"])
         self.assertIn("template_hash", report["audit"])
         self.assertEqual(

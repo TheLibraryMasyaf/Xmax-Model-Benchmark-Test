@@ -42,6 +42,16 @@ def classify_pair(pair: dict[str, Any], policy: dict[str, Any] | None) -> dict[s
         "case_number": pair.get("case_number") or pair["key"][0],
         "scenario_id": pair["scene_id"],
         "mode": pair["mode"],
+        "evidence_ids": [
+            value
+            for value in (
+                pair["baseline"].get("run_id"),
+                baseline_eval.get("evaluation_id"),
+                pair["candidate"].get("run_id"),
+                candidate_eval.get("evaluation_id"),
+            )
+            if value
+        ],
         "canonical": _classify_field(baseline_eval, candidate_eval, "canonical_score", policy),
         "scenario": _classify_field(baseline_eval, candidate_eval, "scenario_score", policy),
     }

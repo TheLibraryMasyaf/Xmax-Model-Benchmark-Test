@@ -65,15 +65,37 @@ class ModelUpdateReportService:
         )
         if status == "not_comparable":
             classified = {"p0": [], "p1": [], "p2": [], "unclassified": []}
+        for score_name in ("canonical", "scenario"):
+            score = compared.get("overall", {}).get(score_name)
+            if isinstance(score, dict):
+                score["classification"] = (
+                    "not_comparable"
+                    if status == "not_comparable"
+                    else classify_delta(score.get("delta_points"), policy)
+                )
         classified = {
             key: [_to_comparison_item(item) for item in items] for key, items in classified.items()
         }
+        for criterion in compared.get("overall", {}).get("criteria", []):
+            criterion["classification"] = classify_delta(
+                criterion.get("delta_points"), policy
+            )
+        for scene in compared.get("scene_results", []):
+            scene["score_summary"]["classification"] = classify_delta(
+                scene.get("score_summary", {}).get("delta_points"), policy
+            )
+            for dimension in scene.get("dimensions", []):
+                dimension["classification"] = classify_delta(
+                    dimension.get("delta_points"), policy
+                )
         for dimension in compared.get("overall", {}).get("dimensions", []):
             bucket = classify_delta(dimension.get("delta_points"), policy)
+            dimension["classification"] = bucket
             classified.setdefault(bucket, []).append(
                 {
                     "scope": "dimension",
                     "item_id": dimension["dimension_id"],
+                    "item_name": dimension.get("dimension_name", ""),
                     "scenario_id": None,
                     "baseline": dimension.get("baseline"),
                     "candidate": dimension.get("candidate"),
@@ -124,7 +146,9 @@ class ModelUpdateReportService:
         present_scenes = {scene["scenario_id"] for scene in compared.get("scene_results", [])}
         missing_scenes = [scene for scene in requested_scene_ids if scene not in present_scenes]
         if missing_scenes:
-            report["status"] = "partial"
+            if report["status"] != "not_comparable":
+                report["status"] = "partial"
+                report["release_recommendation"] = "retest"
             report["comparability"]["excluded_case_ids"] = (
                 report["comparability"].get("excluded_case_ids", []) + missing_scenes
             )
@@ -158,5 +182,5 @@ def _to_comparison_item(classified: dict[str, Any]) -> dict[str, Any]:
         "candidate": scenario.get("candidate"),
         "delta_points": scenario.get("delta_points"),
         "severity": "blocker" if classified.get("new_hard_gate_failure") else "medium",
-        "evidence_ids": [],
+        "evidence_ids": classified.get("evidence_ids", []),
     }

@@ -15,6 +15,7 @@
     "dimension_results",
     "criterion_results",
     "reporting_metrics",
+    "evaluation_requirement_results",
     "case_results",
     "strengths",
     "weaknesses",
@@ -24,7 +25,7 @@
     "audit"
   ],
   "properties": {
-    "report_schema_version": {"const": "single-version-report/1.1"},
+    "report_schema_version": {"const": "single-version-report/1.2"},
     "report_id": {"type": "string", "minLength": 1},
     "status": {"enum": ["complete", "partial"]},
     "model_version": {"type": "string", "minLength": 1},
@@ -44,6 +45,17 @@
         "P.3": {"type": "object"},
         "RP.1": {"type": "object"},
         "RP.2": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "evaluation_requirement_results": {
+      "type": "object",
+      "required": ["policy", "scoring_criteria", "reporting_metrics", "requirement_count"],
+      "properties": {
+        "policy": {"type": "string", "minLength": 1},
+        "scoring_criteria": {"type": "array", "items": {"type": "object"}},
+        "reporting_metrics": {"type": "array", "items": {"type": "object"}},
+        "requirement_count": {"type": "integer", "minimum": 1}
       },
       "additionalProperties": false
     },

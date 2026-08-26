@@ -73,10 +73,17 @@ class ProjectIntegrityTests(unittest.TestCase):
         template = (ROOT / "report-templates" / "model-version-update-report.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("### P0 — 新模型总分提升与明显改进", template)
-        self.assertIn("### P1 — 新模型持平项", template)
-        self.assertIn("### P2 — 新模型劣化项", template)
-        self.assertIn("## 3. 分场景详细结果", template)
+        self.assertIn("### P0 — 新模型明显改进", template)
+        self.assertIn("### P1 — 新模型持平", template)
+        self.assertIn("### P2 — 新模型劣化", template)
+        self.assertIn("## 4. 全量维度变化", template)
+        self.assertIn("## 5. 全量细则变化", template)
+        self.assertNotIn("Canonical Score", template)
+        self.assertIn("{{ report_status }}", template)
+        self.assertIn("{{ release_recommendation }}", template)
+        self.assertIn("关键数据→变化/问题说明→行动与验收", template)
+        self.assertIn("基线/新版标准差（百分点）", template)
+        self.assertIn("## 3. 分场景结果", template)
 
     def test_single_version_template_keeps_scores_and_priority_levels(self) -> None:
         template = (ROOT / "report-templates" / "single-version-evaluation-report.md").read_text(
@@ -90,6 +97,10 @@ class ProjectIntegrityTests(unittest.TestCase):
         self.assertIn("### P0 — 发布/可用性阻断", template)
         self.assertIn("### P1 — 明显短板", template)
         self.assertIn("### P2 — 局部优化", template)
+        self.assertEqual(
+            template.count("| 优先问题 | 关键数据 | 问题说明 | 行动与验收 |"),
+            3,
+        )
         self.assertIn("禁止把维度分平均拆给各细则", template)
 
     def test_draft_scenario_pack_matches_benchmark_rules(self) -> None:

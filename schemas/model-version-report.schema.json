@@ -13,11 +13,14 @@
     "requested_scene_ids",
     "comparability",
     "score_summary",
+    "dimension_results",
     "p0_improvements",
     "p1_ties",
     "p2_regressions",
     "scene_results",
     "criterion_results",
+    "reporting_metric_results",
+    "analysis_required",
     "audit"
   ],
   "properties": {
@@ -56,6 +59,16 @@
     "p0_improvements": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
     "p1_ties": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
     "p2_regressions": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
+    "dimension_results": {"type": "array", "items": {"type": "object"}},
+    "reporting_metric_results": {
+      "type": "object",
+      "required": ["baseline", "candidate"],
+      "properties": {
+        "baseline": {"type": "object"},
+        "candidate": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
     "scene_results": {
       "type": "array",
       "items": {
@@ -63,8 +76,10 @@
         "required": ["scenario_id", "mode", "score_summary", "items", "evidence_ids"],
         "properties": {
           "scenario_id": {"type": "string"},
+          "scenario_name": {"type": "string"},
           "mode": {"enum": ["offline", "realtime"]},
           "score_summary": {"$ref": "#/$defs/scoreDelta"},
+          "dimensions": {"type": "array", "items": {"type": "object"}},
           "items": {"type": "array", "items": {"$ref": "#/$defs/comparisonItem"}},
           "evidence_ids": {"type": "array", "items": {"type": "string"}}
         },
@@ -93,6 +108,8 @@
           "delta_points": {"type": ["number", "null"]},
           "baseline_assessable_count": {"type": "integer", "minimum": 0},
           "candidate_assessable_count": {"type": "integer", "minimum": 0},
+          "baseline_standard_deviation_points": {"type": ["number", "null"]},
+          "candidate_standard_deviation_points": {"type": ["number", "null"]},
           "classification": {"type": "string"},
           "evidence_ids": {"type": "array", "items": {"type": "string"}}
         },
@@ -100,6 +117,7 @@
       }
     },
     "human_signal_summary": {"type": "object"},
+    "analysis_required": {"const": true},
     "release_recommendation": {"enum": ["promote", "shadow", "block", "retest"]},
     "audit": {
       "type": "object",

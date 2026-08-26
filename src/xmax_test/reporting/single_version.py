@@ -6,6 +6,7 @@ import json
 import math
 import statistics
 from collections.abc import Iterable
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ from ..feedback.overrides import HumanOverrideService
 from ..hashing import content_hash
 from ..pipeline.manifests import frozen_evaluation_batch, frozen_run_batch
 from ..time import utc_now
+
+
+_P3_STANDARD_DEVIATION_THRESHOLD_POINTS = 10.0
 
 
 class SingleVersionReportService:
@@ -84,6 +88,20 @@ class SingleVersionReportService:
             runs, effective_results
         )
         cases = [self._case_row(run, evaluations.get(run["run_id"])) for run in runs]
+        reporting_metrics["P.3"]["diagnostic_stability"] = _repeat_stability_diagnostics(
+            reporting_metrics["P.3"],
+            cases,
+            standard_deviation_threshold_points=_P3_STANDARD_DEVIATION_THRESHOLD_POINTS,
+        )
+        cases = _attach_repeat_stability(
+            cases, reporting_metrics["P.3"]["diagnostic_stability"]
+        )
+        requirement_results = _evaluation_requirement_results(
+            self._benchmark,
+            runs,
+            effective_results,
+            reporting_metrics,
+        )
         scenes = sorted({row["scenario_id"] for row in cases if row.get("scenario_id")})
         requested = requested_scene_ids or scenes
         missing_scenes = sorted(set(requested) - set(scenes))
@@ -105,18 +123,41 @@ class SingleVersionReportService:
             for row in cases
             if isinstance(row.get("scenario_score"), (int, float))
         ]
+        dimension_names = {
+            str(item.get("dimension_id")): str(item.get("name") or "")
+            for item in self._benchmark.get("dimensions", [])
+        }
         dimensions = sorted(
-            aggregate["dimension_summary"],
+            (
+                {
+                    **item,
+                    "dimension_name": dimension_names.get(
+                        str(item.get("dimension_id") or ""), ""
+                    ),
+                    "standard_deviation_percent_points": _raw_score_sd_to_points(
+                        item.get("standard_deviation")
+                    ),
+                }
+                for item in aggregate["dimension_summary"]
+            ),
             key=lambda item: _natural_key(item.get("dimension_id", "")),
         )
         criteria = sorted(
-            aggregate["criterion_summary"],
+            (
+                {
+                    **item,
+                    "standard_deviation_percent_points": _raw_score_sd_to_points(
+                        item.get("standard_deviation")
+                    ),
+                }
+                for item in aggregate["criterion_summary"]
+            ),
             key=lambda item: _natural_key(item.get("criterion_id", "")),
         )
-        priorities = _evidence_packets(cases, dimensions, criteria)
+        priorities = _evidence_packets(cases, dimensions, criteria, reporting_metrics)
         credibility = _credibility(cases, evaluations, len(runs))
         report = {
-            "report_schema_version": "single-version-report/1.1",
+            "report_schema_version": "single-version-report/1.2",
             "report_id": report_id,
             "status": (
                 "complete"
@@ -148,6 +189,7 @@ class SingleVersionReportService:
             "dimension_results": dimensions,
             "criterion_results": criteria,
             "reporting_metrics": reporting_metrics,
+            "evaluation_requirement_results": requirement_results,
             "case_results": cases,
             "strengths": _rank(dimensions, reverse=True),
             "weaknesses": _rank(dimensions, reverse=False),
@@ -220,6 +262,7 @@ class SingleVersionReportService:
             "feed_asset_id": case.get("feed_asset_id"),
             "prompt_asset_ids": list(case.get("prompt_asset_ids", [])),
             "prompt_text": case.get("prompt_text", ""),
+            "score_basis_signature": _score_basis_signature(evaluation),
         }
 
 
@@ -235,10 +278,42 @@ def _rank(items: list[dict[str, Any]], *, reverse: bool) -> list[dict[str, Any]]
     )[:5]
 
 
+def _raw_score_sd_to_points(value: Any) -> float | None:
+    """Convert a population SD on the 0–2 rubric to 0–100 percentage points."""
+
+    if not isinstance(value, (int, float)):
+        return None
+    return round(float(value) / 2 * 100, 2)
+
+
+def _score_basis_signature(evaluation: dict[str, Any] | None) -> str | None:
+    """Identify the scoring denominator used by one evaluated run."""
+
+    if not evaluation:
+        return None
+    weights = (evaluation.get("weight_resolution") or {}).get("effective_weights")
+    criteria = evaluation.get("criterion_results")
+    if not isinstance(weights, dict) or not isinstance(criteria, list):
+        return None
+    basis = {
+        "effective_weights": weights,
+        "criterion_applicability": sorted(
+            (
+                str(item.get("criterion_id") or ""),
+                bool(item.get("applicable", True)),
+            )
+            for item in criteria
+            if item.get("criterion_id")
+        ),
+    }
+    return content_hash(basis)
+
+
 def _evidence_packets(
     cases: list[dict[str, Any]],
     dimensions: list[dict[str, Any]],
     criteria: list[dict[str, Any]],
+    reporting_metrics: dict[str, Any],
 ) -> dict[str, list[dict[str, Any]]]:
     p0 = []
     failed = [item for item in cases if item.get("score_percent") == 0]
@@ -299,7 +374,329 @@ def _evidence_packets(
         }
         for item in variable_dimensions[:10]
     ]
+    stability = reporting_metrics.get("P.3", {}).get("diagnostic_stability", {})
+    for item in stability.get("unstable_groups", [])[:5]:
+        p1.append(
+            {
+                "issue": f"重复组 {item['group_id']} 的同输入输出波动超过报告诊断界线",
+                "affected_group": item["group_id"],
+                "case_score_spread": item["case_score_spread"],
+                "standard_deviation": item["standard_deviation"],
+                "member_case_numbers": item["member_case_numbers"],
+                "analysis_status": "requires_agent_analysis",
+            }
+        )
     return {"p0": p0, "p1": p1, "p2": p2}
+
+
+def _repeat_stability_diagnostics(
+    repeat_summary: dict[str, Any],
+    cases: list[dict[str, Any]],
+    *,
+    standard_deviation_threshold_points: float,
+) -> dict[str, Any]:
+    """Add an explicit report-only interpretation to P.3 repeat facts.
+
+    The Benchmark intentionally does not turn P.3 into a 0/1/2 score.  This
+    diagnostic therefore keeps its own versioned threshold and exposes every
+    denominator.  Population standard deviation is used because the frozen
+    repetitions are the complete run set for this batch, not a sample estimate.
+    """
+
+    case_by_run = {item["run_id"]: item for item in cases}
+    repeated = [
+        item
+        for item in repeat_summary.get("groups", [])
+        if int(item.get("configured_repeat_count") or 0) >= 2
+    ]
+    classified: list[dict[str, Any]] = []
+    unclassified: list[dict[str, Any]] = []
+    for group in repeated:
+        stats = group.get("case_score_percent") or {}
+        spread = group.get("case_score_spread")
+        standard_deviation = stats.get("standard_deviation")
+        if (
+            not isinstance(standard_deviation, (int, float))
+            or not isinstance(spread, (int, float))
+            or int(stats.get("count") or 0) < 2
+        ):
+            continue
+        member_rows = [
+            case_by_run[run_id]
+            for run_id in group.get("member_run_ids", [])
+            if run_id in case_by_run
+        ]
+        base = {
+            "group_id": group["group_id"],
+            "mode": group.get("mode"),
+            "scenario_id": group.get("scenario_id"),
+            "member_run_ids": list(group.get("member_run_ids", [])),
+            "member_case_numbers": sorted(
+                (str(item.get("case_number") or "") for item in member_rows),
+                key=_natural_key,
+            ),
+            "score_count": int(stats["count"]),
+            "mean_score_percent": stats.get("mean"),
+            "minimum_score_percent": stats.get("minimum"),
+            "maximum_score_percent": stats.get("maximum"),
+            "standard_deviation": standard_deviation,
+            "case_score_spread": round(float(spread), 4),
+        }
+        basis_signatures = sorted(
+            {
+                str(item["score_basis_signature"])
+                for item in member_rows
+                if item.get("score_basis_signature")
+            }
+        )
+        if not basis_signatures:
+            unclassified.append(
+                {
+                    **base,
+                    "classification": "basis_unavailable",
+                    "unclassified_reason": "missing_score_basis",
+                }
+            )
+            continue
+        if len(basis_signatures) > 1:
+            unclassified.append(
+                {
+                    **base,
+                    "classification": "basis_mismatch",
+                    "unclassified_reason": "inconsistent_score_basis",
+                    "score_basis_variant_count": len(basis_signatures),
+                }
+            )
+            continue
+        classified.append(
+            {
+                **base,
+                "classification": (
+                    "unstable"
+                    if float(standard_deviation) > standard_deviation_threshold_points
+                    else "stable"
+                ),
+            }
+        )
+
+    stable = [item for item in classified if item["classification"] == "stable"]
+    unstable = sorted(
+        (item for item in classified if item["classification"] == "unstable"),
+        key=lambda item: (-float(item["standard_deviation"]), item["group_id"]),
+    )
+    group_standard_deviations = [
+        float(item["standard_deviation"])
+        for item in classified
+        if isinstance(item.get("standard_deviation"), (int, float))
+    ]
+
+    return {
+        "status": "report_diagnostic_only_not_a_0_1_2_score",
+        "policy_id": "repeat-score-population-sd-10-comparable-basis-v2",
+        "standard_deviation_threshold_points": standard_deviation_threshold_points,
+        "classification_definition": (
+            "同一冻结重复组且评分口径一致时，Case总分总体标准差大于阈值为不稳定；"
+            "小于等于阈值为稳定"
+        ),
+        "standard_deviation_definition": (
+            "评分口径一致的组内所有已评分独立Run之Case总分总体标准差"
+            "（population standard deviation，单位：百分点）"
+        ),
+        "interpretation": "稳定只表示重复一致，不表示质量高；低分结果也可能稳定复现。",
+        "classified_group_count": len(classified),
+        "unclassified_group_count": len(repeated) - len(classified),
+        "basis_mismatch_group_count": sum(
+            item["classification"] == "basis_mismatch" for item in unclassified
+        ),
+        "basis_unavailable_group_count": sum(
+            item["classification"] == "basis_unavailable" for item in unclassified
+        ),
+        "stable_group_count": len(stable),
+        "unstable_group_count": len(unstable),
+        "unstable_group_rate_percent": _rate(len(unstable), len(classified)),
+        "group_standard_deviation": _stats(group_standard_deviations),
+        "stable_groups": stable,
+        "unstable_groups": unstable,
+        "unclassified_groups": unclassified,
+    }
+
+
+def _rate(numerator: int, denominator: int) -> float | None:
+    return round(numerator / denominator * 100, 2) if denominator else None
+
+
+def _attach_repeat_stability(
+    cases: list[dict[str, Any]], diagnostic: dict[str, Any]
+) -> list[dict[str, Any]]:
+    by_run: dict[str, dict[str, Any]] = {}
+    groups = (
+        diagnostic.get("stable_groups", [])
+        + diagnostic.get("unstable_groups", [])
+        + diagnostic.get("unclassified_groups", [])
+    )
+    for group in groups:
+        for run_id in group.get("member_run_ids", []):
+            by_run[str(run_id)] = group
+    output = []
+    for item in cases:
+        group = by_run.get(str(item.get("run_id") or ""))
+        output.append(
+            {
+                **item,
+                "repeat_group_id": group.get("group_id") if group else None,
+                "repeat_group_standard_deviation": (
+                    group.get("standard_deviation") if group else None
+                ),
+                "repeat_group_stability": group.get("classification") if group else None,
+            }
+        )
+    return output
+
+
+def _evaluation_requirement_results(
+    benchmark: dict[str, Any],
+    runs: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    reporting_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Enumerate every Benchmark scoring criterion and report-only metric.
+
+    A requirement is never dropped merely because it is inapplicable,
+    unassessable, uncovered, or represented by a non-score metric.
+    """
+
+    mode_by_run = {str(run["run_id"]): str(run.get("mode") or "") for run in runs}
+    result_by_mode: dict[str, list[dict[str, Any]]] = {"offline": [], "realtime": []}
+    for result in results:
+        mode = mode_by_run.get(str(result.get("run_id") or ""))
+        if mode in result_by_mode:
+            result_by_mode[mode].append(result)
+
+    scoring_rows = []
+    for dimension in benchmark.get("dimensions", []):
+        eligible_modes = _eligible_modes(dimension.get("applicable_modes", []))
+        eligible_results = [
+            result for mode in eligible_modes for result in result_by_mode.get(mode, [])
+        ]
+        for criterion in dimension.get("criteria", []):
+            criterion_id = criterion.get("criterion_id")
+            observed = [
+                item
+                for result in eligible_results
+                for item in result.get("criterion_results", [])
+                if item.get("criterion_id") == criterion_id
+            ]
+            applicable = [item for item in observed if item.get("applicable", True)]
+            assessed = [
+                item for item in applicable if isinstance(item.get("score"), (int, float))
+            ]
+            not_applicable = [item for item in observed if not item.get("applicable", True)]
+            unassessable = [
+                item for item in applicable if not isinstance(item.get("score"), (int, float))
+            ]
+            uncovered_count = max(0, len(eligible_results) - len(observed))
+            if not eligible_results:
+                status = "inapplicable_to_batch"
+            elif assessed and not unassessable and not uncovered_count:
+                status = "scored"
+            elif assessed:
+                status = "partially_scored"
+            elif applicable:
+                status = "unassessable"
+            elif observed and len(not_applicable) == len(observed) and not uncovered_count:
+                status = "not_applicable"
+            else:
+                status = "uncovered"
+            scores = [float(item["score"]) for item in assessed]
+            scoring_rows.append(
+                {
+                    "requirement_id": criterion_id,
+                    "requirement_name": criterion.get("name", ""),
+                    "dimension_id": dimension.get("dimension_id"),
+                    "dimension_name": dimension.get("name", ""),
+                    "measurement_type": "score_0_1_2",
+                    "applicable_modes": sorted(eligible_modes),
+                    "status": status,
+                    "eligible_result_count": len(eligible_results),
+                    "observed_result_count": len(observed),
+                    "assessable_count": len(assessed),
+                    "unassessable_count": len(unassessable),
+                    "not_applicable_count": len(not_applicable),
+                    "uncovered_count": uncovered_count,
+                    "score_percent": (
+                        round(statistics.mean(scores) / 2 * 100, 2) if scores else None
+                    ),
+                }
+            )
+
+    metric_rows = []
+    run_modes = {str(run.get("mode") or "") for run in runs}
+    for metric in benchmark.get("reporting_metrics", []):
+        metric_id = str(metric.get("metric_id") or "")
+        eligible_modes = _eligible_modes(metric.get("applicable_modes", []))
+        applicable = bool(run_modes & eligible_modes)
+        payload = reporting_metrics.get(metric_id)
+        status = "reported" if applicable and isinstance(payload, dict) else "uncovered"
+        if not applicable:
+            status = "inapplicable_to_batch"
+        elif metric_id == "RP.2" and not int((payload or {}).get("perturbation_run_count") or 0):
+            status = "reported_no_perturbation_evidence"
+        metric_rows.append(
+            {
+                "requirement_id": metric_id,
+                "requirement_name": metric.get("name", ""),
+                "measurement_type": "batch_or_runtime_metric",
+                "applicable_modes": sorted(eligible_modes),
+                "status": status,
+                "result_summary": _reporting_metric_result_summary(metric_id, payload or {}),
+            }
+        )
+
+    return {
+        "policy": (
+            "Benchmark中的每条评价要求均必须列出：0/1/2评分细则统一进入细则结果表，"
+            "非评分批次/运行指标单独列出；无结果时显式标为不适用、不可评或未覆盖。"
+        ),
+        "scoring_criteria": scoring_rows,
+        "reporting_metrics": metric_rows,
+        "requirement_count": len(scoring_rows) + len(metric_rows),
+    }
+
+
+def _eligible_modes(applicable_modes: list[Any]) -> set[str]:
+    modes = {str(item) for item in applicable_modes}
+    return {"offline", "realtime"} if "both" in modes else modes & {"offline", "realtime"}
+
+
+def _reporting_metric_result_summary(metric_id: str, payload: dict[str, Any]) -> str:
+    if metric_id == "P.2":
+        return (
+            f"计划{payload.get('planned_run_count', 0)}，完成{payload.get('completed_run_count', 0)}，"
+            f"有效{payload.get('valid_result_count', 0)}，无效{payload.get('invalid_output_count', 0)}，"
+            f"失败{payload.get('generation_failure_count', 0)}，重试{payload.get('retry_count', 0)}"
+        )
+    if metric_id == "P.3":
+        stability = payload.get("diagnostic_stability", {})
+        return (
+            f"可判定{stability.get('classified_group_count', 0)}组，"
+            f"稳定{stability.get('stable_group_count', 0)}组，"
+            f"不稳定{stability.get('unstable_group_count', 0)}组，"
+            f"不稳定率{_pct(stability.get('unstable_group_rate_percent'))}，"
+            f"评分口径不一致{stability.get('basis_mismatch_group_count', 0)}组"
+        )
+    if metric_id == "RP.1":
+        return (
+            f"实时Run {payload.get('run_count', 0)}，"
+            f"首帧观测{payload.get('first_frame_ms', {}).get('observed_count', 0)}，"
+            f"FPS观测{payload.get('fps', {}).get('observed_count', 0)}"
+        )
+    if metric_id == "RP.2":
+        return (
+            f"实时Run {payload.get('run_count', 0)}，异常实验"
+            f"{payload.get('perturbation_run_count', 0)}，恢复"
+            f"{payload.get('recovered_run_count', 0)}"
+        )
+    return "已取得结构化指标" if payload else "未取得指标"
 
 
 def _credibility(
@@ -432,62 +829,74 @@ def _percentile(values: list[float], fraction: float) -> float:
 def _render(report: dict[str, Any]) -> str:
     coverage = report["coverage"]
     scores = report["scores"]
+    stability = report["reporting_metrics"]["P.3"].get("diagnostic_stability", {})
+    group_sd = stability.get("group_standard_deviation", {})
     lines = [
         f"# XMAX {report['model_version']} 单版本评测报告",
         "",
         f"- 报告ID：`{report['report_id']}`",
         f"- 完整性状态：`{report['status']}`",
-        f"- 可信度状态：`{report['credibility']['status']}`",
         f"- Run批次：`{report['run_batch_id']}`",
         f"- 评测批次：`{report['evaluation_batch_id']}`",
         f"- Benchmark：`{report['benchmark_version']}`",
         "",
         "## 摘要",
         "",
-        f"- Case分：{_format_stats(scores['case_score_percent'])}",
-        "- 通用分：当前Benchmark停用（不设置脱离核心场景的通用权重）",
-        f"- 场景分：{_format_stats(scores['scenario_score'])}",
-        f"- Run总数：{coverage['run_count']}；完成：{coverage['completed_run_count']}；生成失败：{coverage['generation_failure_count']}；已评测：{coverage['evaluated_completed_run_count']}；人工修订：{coverage['human_override_count']}",
+        f"- 总分：{_format_stats(scores['scenario_score'])}",
+        f"- 覆盖：Run {coverage['run_count']}；完成 {coverage['completed_run_count']}；生成失败 {coverage['generation_failure_count']}；已评测 {coverage['evaluated_completed_run_count']}；人工修订 {coverage['human_override_count']}",
+        "- 可信度：自动Judge结果，尚未进行独立人工盲评校准。",
         "",
-        "## 模型与实时运行性能（批次统计）",
+        "## P.3 同输入重复稳定性",
         "",
-        f"- P.2 生成：有效视频率 {_pct(report['reporting_metrics']['P.2'].get('valid_result_rate_percent'))}；完成 {report['reporting_metrics']['P.2'].get('completed_run_count', 0)}/{report['reporting_metrics']['P.2'].get('planned_run_count', 0)}；无效输出 {report['reporting_metrics']['P.2'].get('invalid_output_count', 0)}；重试 {report['reporting_metrics']['P.2'].get('retry_count', 0)}。",
-        f"- P.3 重复：冻结重复组 {report['reporting_metrics']['P.3'].get('repeated_group_count', 0)}/{report['reporting_metrics']['P.3'].get('group_count', 0)}；重复次数来自Run Request，不写死。",
-        f"- RP.1 交付：实时Run {report['reporting_metrics']['RP.1'].get('run_count', 0)}；首帧P50 {_value(report['reporting_metrics']['RP.1'].get('first_frame_ms', {}).get('p50'))} ms；FPS均值 {_value(report['reporting_metrics']['RP.1'].get('fps', {}).get('mean'))}。",
-        f"- RP.2 稳定恢复：异常实验 {report['reporting_metrics']['RP.2'].get('perturbation_run_count', 0)}；自动恢复率 {_pct(report['reporting_metrics']['RP.2'].get('automatic_recovery_rate_percent'))}。",
+        f"- 组内总分标准差：均值 {_value(group_sd.get('mean'))}，中位数 {_value(group_sd.get('median'))}，范围 {_value(group_sd.get('minimum'))}–{_value(group_sd.get('maximum'))} 个百分点；标准差>{_value(stability.get('standard_deviation_threshold_points'))}个百分点判为不稳定。",
+        f"- 仅判定同输入且评分口径一致的重复组；口径不一致 {stability.get('basis_mismatch_group_count', 0)} 组。稳定性不代表质量高。",
+    ]
+    lines.extend(
+        [
         "",
-        "## 可信度检查",
-        "",
-        *[
-            f"- [{item['severity']}] {item['description']}"
-            for item in report["credibility"]["issues"]
-        ],
+            "## 批次与运行指标",
+            "",
+            "| 指标 | 状态 | 本批次结果 |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for item in report["evaluation_requirement_results"]["reporting_metrics"]:
+        lines.append(
+            f"| {item['requirement_id']} {item.get('requirement_name', '')} | {_requirement_status_label(item['status'])} | {item['result_summary']} |"
+        )
+    lines.extend(
+        [
         "",
         "## 维度结果",
         "",
-        "| 维度 | 分数 | 覆盖 | 标准差 |",
+        "| 维度 | 分数 | 覆盖 | 标准差（百分点） |",
         "| --- | ---: | ---: | ---: |",
-    ]
+        ]
+    )
     for item in report["dimension_results"]:
         lines.append(
-            f"| {item['dimension_id']} | {_pct(item.get('score_percent'))} | {item.get('assessable_count', 0)}/{item.get('total_evaluations', 0)} | {_value(item.get('standard_deviation'))} |"
+            f"| {item['dimension_id']} {item.get('dimension_name', '')} | {_pct(item.get('score_percent'))} | {item.get('assessable_count', 0)}/{item.get('total_evaluations', 0)} | {_value(item.get('standard_deviation_percent_points'))} |"
         )
     lines.extend(
         [
             "",
             "## 细则结果",
             "",
-            "| 维度 | 细则 | 分数 | 覆盖 | 分布 0/(0,1)/1/(1,2)/2 |",
-            "| --- | --- | ---: | ---: | --- |",
+            "| 维度 | 细则 | 状态 | 得分 | 可评/应出现 | 不可评 | 不适用 | 未覆盖 | 标准差（百分点） | 分布 0/(0,1)/1/(1,2)/2 |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
-    for item in report["criterion_results"]:
-        distribution = item.get("score_distribution") or {}
+    criterion_summary = {
+        item["criterion_id"]: item for item in report["criterion_results"]
+    }
+    for item in report["evaluation_requirement_results"]["scoring_criteria"]:
+        summary = criterion_summary.get(item["requirement_id"], {})
+        distribution = summary.get("score_distribution") or {}
         values = "/".join(
             str(distribution.get(key, 0)) for key in ("0", "0_to_1", "1", "1_to_2", "2")
         )
         lines.append(
-            f"| {item.get('dimension_id', '')} | {item['criterion_id']} {item.get('criterion_name', '')} | {_pct(item.get('score_percent'))} | {item.get('assessable_count', 0)}/{item.get('total_evaluations', 0)} | {values} |"
+            f"| {item.get('dimension_id', '')} {item.get('dimension_name', '')} | {item['requirement_id']} {item.get('requirement_name', '')} | {_requirement_status_label(item['status'])} | {_pct(item.get('score_percent'))} | {item['assessable_count']}/{item['eligible_result_count']} | {item['unassessable_count']} | {item['not_applicable_count']} | {item['uncovered_count']} | {_value(summary.get('standard_deviation_percent_points'))} | {values} |"
         )
     for priority in ("p0", "p1", "p2"):
         lines.extend(["", f"## {priority.upper()} 证据包（待Agent分析）", ""])
@@ -499,6 +908,7 @@ def _render(report: dict[str, Any]) -> str:
                 affected = (
                     item.get("affected_criterion")
                     or item.get("affected_dimension")
+                    or item.get("affected_group")
                     or ", ".join(item.get("affected_runs", []))
                 )
                 lines.append(f"- {item['issue']}。受影响对象：{affected}")
@@ -507,14 +917,40 @@ def _render(report: dict[str, Any]) -> str:
             "",
             "## 逐Case结果",
             "",
-            "| Case | Run | 状态 | 场景 | 重复序号 | 分数 | Evaluation |",
-            "| --- | --- | --- | --- | ---: | ---: | --- |",
+            "<table>",
+            "<thead><tr><th>Case</th><th>Run</th><th>状态</th><th>场景</th><th>重复序号</th><th>分数</th><th>组内总分标准差（百分点）</th><th>稳定性</th><th>Evaluation</th></tr></thead>",
+            "<tbody>",
         ]
     )
-    for item in report["case_results"]:
-        lines.append(
-            f"| {item['case_number']} | {item['run_id']} | {item['status']} | {item.get('scenario_id') or ''} | {item.get('repeat_index') or ''} | {_pct(item.get('score_percent'))} | {item.get('evaluation_id') or 'not evaluated'} |"
-        )
+    for group in _case_display_groups(report["case_results"]):
+        rowspan = len(group)
+        for index, item in enumerate(group):
+            cells = [
+                f"<td>{escape(str(item['case_number']))}</td>",
+                f"<td>{escape(str(item['run_id']))}</td>",
+                f"<td>{escape(str(item['status']))}</td>",
+                f"<td>{escape(str(item.get('scenario_id') or ''))}</td>",
+                f"<td>{escape(str(item.get('repeat_index') or ''))}</td>",
+                f"<td>{_pct(item.get('score_percent'))}</td>",
+            ]
+            if index == 0:
+                stability_label = {
+                    "stable": "稳定",
+                    "unstable": "不稳定",
+                    "basis_mismatch": "评分口径不一致",
+                    "basis_unavailable": "缺少评分口径",
+                }.get(item.get("repeat_group_stability"), "不可判定")
+                cells.extend(
+                    [
+                        f'<td rowspan="{rowspan}">{_value(item.get("repeat_group_standard_deviation"))}</td>',
+                        f'<td rowspan="{rowspan}">{stability_label}</td>',
+                    ]
+                )
+            cells.append(
+                f"<td>{escape(str(item.get('evaluation_id') or 'not evaluated'))}</td>"
+            )
+            lines.append("<tr>" + "".join(cells) + "</tr>")
+    lines.extend(["</tbody>", "</table>"])
     lines.extend(
         [
             "",
@@ -529,13 +965,48 @@ def _render(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _case_display_groups(cases: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Keep first-seen group order while making rowspan members contiguous."""
+
+    members: dict[str, list[dict[str, Any]]] = {}
+    for item in cases:
+        group_id = item.get("repeat_group_id")
+        if group_id:
+            members.setdefault(str(group_id), []).append(item)
+    seen: set[str] = set()
+    output: list[list[dict[str, Any]]] = []
+    for item in cases:
+        group_id = item.get("repeat_group_id")
+        if not group_id:
+            output.append([item])
+            continue
+        key = str(group_id)
+        if key not in seen:
+            output.append(members[key])
+            seen.add(key)
+    return output
+
+
+def _requirement_status_label(status: Any) -> str:
+    return {
+        "scored": "已评分",
+        "partially_scored": "部分评分",
+        "not_applicable": "不适用",
+        "inapplicable_to_batch": "本批不适用",
+        "unassessable": "不可评",
+        "uncovered": "未覆盖",
+        "reported": "已报告",
+        "reported_no_perturbation_evidence": "已报告（未执行异常实验）",
+    }.get(str(status), str(status))
+
+
 def _format_stats(stats: dict[str, Any]) -> str:
     if not stats.get("count"):
         return "不可评"
     return (
         f"均值 {_pct(stats['mean'])}，中位数 {_pct(stats['median'])}，"
         f"最小/最大 {_pct(stats['minimum'])}/{_pct(stats['maximum'])}，"
-        f"标准差 {_value(stats['standard_deviation'])}，n={stats['count']}"
+        f"标准差 {_value(stats['standard_deviation'])} 个百分点，n={stats['count']}"
     )
 
 
