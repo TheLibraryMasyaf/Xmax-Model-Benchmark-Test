@@ -26,3 +26,9 @@ config/feishu.json
 config/judges.json
 config/run-*.local.json
 config/single-version-report.json
+
+# 本地批次运行配置（保留现场，不提交仓库）
+config/asset-sources-eval-*.json
+config/plan-eval-*.json
+config/scenario-classification-eval-*.json
+config/single-version-report-eval-*.json
