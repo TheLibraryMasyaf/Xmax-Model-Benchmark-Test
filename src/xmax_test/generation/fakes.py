@@ -43,6 +43,7 @@ def build_offline_adapter(
     """Composition helper returning a fully-fake offline adapter."""
 
     from .offline.adapter import OfflineGenerationAdapter
+    from .feed_input import FakeFeedPreprocessor
     from .offline.rtc_adapter import FakeRtcAdapter
     from .offline.session_api import FakeSessionApiClient
 
@@ -68,5 +69,6 @@ def build_offline_adapter(
         heartbeat_interval_s=heartbeat_interval_s,
         lifecycle_timeout_s=lifecycle_timeout_s,
         capture_extractor=lambda feed: {**feed, "kind": "feed_image"},
+        feed_preprocessor=FakeFeedPreprocessor(),
         clock=clock,
     )

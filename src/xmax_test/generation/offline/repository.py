@@ -81,6 +81,9 @@ class OfflineRunRepository:
                 return str(external_id)
         return None
 
+    def get_event_log(self, run_id: str) -> list[dict[str, Any]]:
+        return self._repository.get_event_log(run_id)
+
     def submitted_external_task(self, external_task_id: str) -> dict[str, Any] | None:
         for run in self._repository.list_runs():
             if run.get("metrics", {}).get("external_task_id") == external_task_id:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
-from xmax_test.context import _judge_coverage
+from xmax_test.context import ContextChecker, _judge_coverage
 
 
 class JudgeCoverageTests(unittest.TestCase):
@@ -58,6 +61,35 @@ class JudgeCoverageTests(unittest.TestCase):
         ]
         result = _judge_coverage(self.benchmark(), judges, ["offline"])
         self.assertTrue(result["complete"])
+
+
+class ProviderCredentialTests(unittest.TestCase):
+    def test_decart_generation_requires_decart_not_xmax_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"DECART_API_KEY": "test-only"}, clear=True
+        ):
+            checker = ContextChecker(Path(directory))
+            checker._check_keys(
+                {
+                    "generation_provider": "decart",
+                    "generation_modes": ["offline"],
+                    "dry_run": False,
+                },
+                ["generate"],
+            )
+            self.assertTrue(checker.summary()["ok"])
+
+    def test_missing_decart_key_names_the_configured_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {}, clear=True
+        ):
+            checker = ContextChecker(Path(directory))
+            checker._check_keys(
+                {"generation_provider": "decart", "dry_run": False}, ["generate"]
+            )
+            errors = checker.summary()["errors"]
+            self.assertEqual(len(errors), 1)
+            self.assertIn("DECART_API_KEY", errors[0]["message"])
 
 
 if __name__ == "__main__":

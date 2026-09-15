@@ -18,11 +18,11 @@
 | P2.5 Existing Result Ingestion | DONE | 飞书/本地/Manifest导入、Run归一、来源追溯、Fake和CLI | 真实Case字段由Existing Results Pack提供 |
 | P3 Planning | DONE | 配方解析、模式优先级、Case后缀、成本预览、可插拔组合策略、可修改重复数、Task Batch冻结 | 新玩法通过Recipe/Profile包接入；新分配法通过StrategyRegistry接入 |
 | P3.5 Task Execution | DONE | SQLite原子租约、过期回收、单任务生成→评测→飞书同步→对账、COS真实前检、`evaluation_paused`断点、断点续跑、CLI和全Fake E2E | 真实批量执行仍需预算批准和密钥 |
-| P4 Offline Generation | DONE | 真实REST/COS、Session API边界、状态机、续跑、Fake | Session+RTC的真实RTC传输不内置，常规离线路径使用官方REST |
-| P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、标准触控按Case稳定随机抽取Feed静帧、版本化互动Profile、4–6条随机用户滑动、Fake | 需Key的付费真实会话待运行时smoke |
+| P4 Offline Generation | DONE | XMAX REST/COS、Decart Lucy 2.5 Queue API、720p H.264输入归一化、Session API边界、状态机、续跑、Fake | Lucy仅离线；Session+RTC的真实RTC传输不内置 |
+| P5 Realtime Generation | DONE | 新旧SDK兼容的浏览器Harness、录流、逐帧/事件/RTC快照、标准触控按Case稳定随机抽取Feed静帧、版本化互动Profile、4–6条随机用户滑动、TUN+WebRTC版本化网络准入、不可评Attempt保留、0–5可配重试和Fake | 需Key的付费真实会话待按新的最坏预算另行批准smoke；`autoStart=false`预检是否产生计费尚需真实账单校准 |
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
 | P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、15模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
-| P8 Evaluation | DONE | Orchestrator、P/G/E/R细则级Judge路由、P.1硬门槛、核心场景分、P.2/P.3/RP.1/RP.2批次报告事实、精确批次续跑和结果Schema | G3、R1.2/R2.3等仍由实际样本是否具备对应音轨或连续交互实验决定可评性 |
+| P8 Evaluation | DONE | Orchestrator、P/G/E/R细则级Judge路由、P.1硬门槛、核心场景分、P.2/P.3/P.4/RP.1/RP.2/RP.3批次报告事实、精确批次续跑和结果Schema | G3、E5、R1.2/R2.3等仍由实际样本是否具备对应音轨、物理关系或连续交互实验决定可评性；P.4分离耗时，RP.3网络事实已受Network Profile准入保护，仍需付费smoke校准真实SDK统计完整性 |
 | P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
 | P11 Release/Replay | DONE | Challenger、Holdout验证、回放、发布和回滚 | 发布仍需明确operator和验证文件 |
@@ -31,9 +31,12 @@
 
 ### 1.1 外部运行就绪度
 
+2026-09-11 生成输入维护：P4/P5 增加统一 `drop-first-decoded-frame-v1`，按实际第二帧 PTS 裁剪 Feed 和音频；缓存内容校验、输出哈希幂等、换动作截图与新计划签名同步。FFmpeg 实际短片回归覆盖 CFR/VFR、有声/无声、单帧拒绝和缓存损坏，历史已完成结果不自动重跑。
+
 | 边界 | 代码状态 | 本轮已验证 | 真实运行前输入 |
 | --- | --- | --- | --- |
 | XMAX离线REST/COS | 已实现 | Fake、合同、失败/续跑测试；2026-08-20按官方上传协议完成2次真实付费任务并成功下载结果 | 后续批量运行仍需`XMAX_API_KEY`、`cos-python-sdk-v5`和与冻结计划绑定的预算批准 |
+| Decart Lucy 2.5离线Queue | 已实现，未付费实测 | multipart角色映射、Queue轮询/下载、输入转码缓存、美元预算、断点续跑、模糊提交防重和全Fake测试 | 真实smoke需`DECART_API_KEY`、预算批准，并从1条最短Case校准账单 |
 | XMAX实时SDK | 已实现新旧API双路 | `tsc --noEmit`、JS语法、无Key安全失败 | Key、预算批准、可用WebRTC环境；未做付费smoke |
 | 预处理/音频 | 已实现ffmpeg适配器 | Fake与PCM包络测试 | 当前机器PATH中需安装`ffmpeg`/`ffprobe` |
 | Qwen视频MLLM | 已实现JSON Mode/本地Schema校验/盲评/15候选免费额度回退、唯一末位`qwen3-vl-flash`付费兜底、原生媒体角色隔离、整条Case原子重试、生成操作合同和实际Feed截图输入；SQLite按请求预留并执行99元本地硬上限 | 2026-08-20实测`qwen3-vl-plus`同请求识别两段视频和一张参考图，角色无串位（5089输入+273输出Token）；2026-08-24移除10个日期快照别名，当前总列表16个；已验证quota规则跨HTTP状态回退、未知quota停批、同模型网络退避、15免费模型到付费闸门和流式排空由自动测试覆盖 | `QWEN_API.csv`；Base64超限媒体需Provider可访问URL；前15个保持免费用尽即停，付费前只关闭末位泛化`qwen3-vl-flash`的该开关，并人工充值、执行本地授权；本地估算不覆盖账户外部调用 |
@@ -211,7 +214,7 @@ CLI目标：`xmax-test judges list|check|run`。
 
 CLI目标：`xmax-test evaluate --run-batch-id|--run-id ...`。
 
-验收：动态加载Benchmark；Judge按细则分工且可续跑；只有Benchmark明确N/A的细则可从分母移除，缺评不得重归一；P.2/P.3/RP.1/RP.2在冻结批次完成后生成报告事实且不回填单视频；命中核心场景后输出Scenario分；硬门槛生效；输入可为生成或导入的completed Run；评测路径不依赖XMAX Adapter或飞书下载器。
+验收：动态加载Benchmark；Judge按细则分工且可续跑；只有Benchmark明确N/A的细则可从分母移除，缺评不得重归一；P.2/P.3/P.4/RP.1/RP.2/RP.3在冻结批次完成后生成报告事实且不回填单视频；命中核心场景后输出Scenario分；硬门槛生效；输入可为生成或导入的completed Run；评测路径不依赖XMAX Adapter或飞书下载器。
 
 ### P9 Human Signals
 
@@ -251,7 +254,7 @@ CLI目标：`xmax-test replay run`、`xmax-test release validate|promote|rollbac
 
 CLI目标：`xmax-test report model-update --request config/run-request.json`、`xmax-test report single-version --request config/single-version-report.json`。
 
-验收：版本对比必须显式选择两侧Run/Evaluation Batch，相同配对样本按核心场景计算Scenario变化；不可比配置拒绝升降结论；每个请求场景有独立小节；P0/P1/P2按已发布策略归类；新增Hard Gate失败必入P2。单版本报告必须输出场景总分、P.2/P.3/RP.1/RP.2批次事实、全量维度、全量细则、逐Case、多统计量、优劣项及建议；失败Run计0%；人工有效修订进入报告且保留AI原值；JSON与Markdown同时落盘并通过Schema。
+验收：版本对比必须显式选择两侧Run/Evaluation Batch，相同配对样本按核心场景计算Scenario变化；不可比配置拒绝升降结论；每个请求场景有独立小节；P0/P1/P2按已发布策略归类；新增Hard Gate失败必入P2。单版本报告必须输出场景总分、P.2/P.3/P.4/RP.1/RP.2/RP.3批次事实、全量维度、全量细则、逐Case、多统计量、优劣项及建议；失败Run计0%；人工有效修订进入报告且保留AI原值；JSON与Markdown同时落盘并通过Schema。
 
 ### P13 Unified CLI
 

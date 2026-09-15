@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +20,56 @@ from .captures import SeededFrameCaptureExtractor
 # export codec for edited XMAX feeds) must be transcoded before the browser
 # SDK can open a video track from them.
 _H264_TRANSCODE_DIR = "var/realtime-transcodes"
+
+
+def probe_network_environment() -> dict[str, Any]:
+    """Capture local TUN evidence without changing routes or traffic."""
+
+    observations: dict[str, Any] = {
+        "probe": "macos-netstat-ifconfig-v1",
+        "tun_active": False,
+        "active_tun_interfaces": [],
+        "ipv4_tun_route_count": 0,
+    }
+    try:
+        interface_result = subprocess.run(
+            ["ifconfig"], capture_output=True, text=True, timeout=10
+        )
+        blocks = [
+            match.group(0)
+            for match in re.finditer(
+                r"(?ms)^(utun\d+):.*?(?=^[A-Za-z0-9]|\Z)",
+                interface_result.stdout,
+            )
+        ]
+        observations["active_tun_interfaces"] = sorted(
+            match.group(1)
+            for block in blocks
+            if "\n\tinet " in block
+            for match in [re.match(r"^(utun\d+):", block)]
+            if match
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        route_result = subprocess.run(
+            ["netstat", "-rn", "-f", "inet"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        observations["ipv4_tun_route_count"] = sum(
+            1
+            for line in route_result.stdout.splitlines()
+            if re.search(r"\butun\d+\s*$", line)
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    observations["tun_active"] = bool(
+        observations["active_tun_interfaces"]
+        and observations["ipv4_tun_route_count"]
+    )
+    return observations
 
 
 def _file_sha256(path: Path) -> str:
@@ -40,6 +91,7 @@ class BrowserRealtimeHarness:
         timeout_s: int = 900,
         headed: bool = False,
         capture_extractor: Any = None,
+        feed_preprocessor: Any = None,
     ) -> None:
         self._root = Path(project_root)
         self._artifacts = artifacts
@@ -48,6 +100,9 @@ class BrowserRealtimeHarness:
         self._headed = headed
         self._api_key = api_key
         self._capture_extractor = capture_extractor or SeededFrameCaptureExtractor(artifacts)
+        from ..feed_input import FfmpegFeedPreprocessor
+        from ...assets.validator import MediaValidator
+        self._feed_preprocessor = feed_preprocessor or FfmpegFeedPreprocessor(artifacts, MediaValidator())
 
     @staticmethod
     def _video_codec(path: Path) -> str | None:
@@ -159,6 +214,8 @@ class BrowserRealtimeHarness:
             raise MissingDependencyError("node is required for realtime generation")
         input_asset = self._repository.get_asset(case["edited_video_asset_id"])
         input_path = Path(self._artifacts.resolve(input_asset["uri"])).resolve()
+        input_asset = self._feed_preprocessor.prepare({**input_asset, "path": str(input_path)})
+        input_path = Path(input_asset["path"])
         input_path, input_capture = self._prepare_input(case, input_asset, input_path)
         input_sha256 = (
             input_capture.get("sha256")
@@ -192,6 +249,10 @@ class BrowserRealtimeHarness:
                 "tracks": config.get("tracks", []),
                 "base_url": config.get("base_url"),
                 "headed": config.get("headed", self._headed),
+                "network_profile": config.get("network_profile"),
+                "network_environment": (
+                    config.get("network_environment") or probe_network_environment()
+                ),
                 "output_json_path": str(output_json),
                 "output_video_path": str(output_video),
             }
@@ -221,6 +282,8 @@ class BrowserRealtimeHarness:
             )
             if input_capture:
                 result["input_capture"] = input_capture
+            if input_asset.get("feed_preprocessing"):
+                result["feed_preprocessing"] = input_asset["feed_preprocessing"]
             if output_video.is_file() and output_video.stat().st_size:
                 stored = self._artifacts.put_file(
                     "runs",

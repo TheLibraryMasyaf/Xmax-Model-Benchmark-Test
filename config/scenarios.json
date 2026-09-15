@@ -1,14 +1,14 @@
 {
   "$schema": "../schemas/scenario-pack.schema.json",
   "scenario_pack_id": "xmax-core-scenarios",
-  "version": "0.2.0-draft",
+  "version": "0.3.0-draft",
   "status": "shadow",
   "provisional": true,
   "review_after": "first_round_pger_calibration",
   "tag_definitions": {
     "input_dimension": {
       "description": "核心输入视频难点",
-      "values": ["自拍", "复杂场景或复杂光线", "宠物", "快速或复杂运动", "缓慢移动镜头", "多镜头或多阶段", "多主体"]
+      "values": ["自拍", "复杂场景或复杂光线", "宠物", "快速或复杂运动", "缓慢移动镜头", "多镜头或多阶段", "多主体", "长时间单人直播", "长时间多人直播"]
     },
     "instruction_dimension": {
       "description": "核心指令对象或目的",
@@ -50,7 +50,7 @@
       "supported_modes": ["realtime"],
       "weight_policy": "scene_rule",
       "source_characteristics": "难点是触发正确、对象正确、反应正确、持续保持的闭环，以及宠物形体、四肢和接触关系。",
-      "source_weight_rationale": "实时G/E/R为19/53/28；生成效果仍最大，R2高于R1。"
+      "source_weight_rationale": "实时G/E/R为19/54/27；生成效果仍最大，E5突出物理接触与状态演化，R2高于R1。"
     },
     {
       "scenario_id": "core-pet-replacement",
@@ -122,7 +122,7 @@
       "supported_modes": ["realtime"],
       "weight_policy": "scene_rule",
       "source_characteristics": "新增主体没有Feed原实例可跟随，需要同时完成空间锚定、尺度透视、接地遮挡和互动因果。",
-      "source_weight_rationale": "实时G/E/R为18/58/24；E4与R2突出空间自然度和跟随准确性。"
+      "source_weight_rationale": "实时G/E/R为18/60/22；E4/E5突出跨视角空间、接地与环境互动，R2评价跟随准确性。"
     },
     {
       "scenario_id": "core-moving-camera-effects",
@@ -134,7 +134,31 @@
       "supported_modes": ["offline", "realtime"],
       "weight_policy": "scene_rule",
       "source_characteristics": "特效必须出现在正确对象、位置和时间，并随镜头透视、遮挡、光线和表面变化。",
-      "source_weight_rationale": "离线G/E为23/77；实时G/E/R为18/63/19，E4最高，R2评价实时触发和跟随。"
+      "source_weight_rationale": "离线G/E为23/77；实时G/E/R为18/64/18，E4与E5评价空间、视觉和物理融合，R2评价实时触发和跟随。"
+    },
+    {
+      "scenario_id": "core-long-single-host-live-replacement",
+      "name": "长时间单人直播中进行各类替换",
+      "aliases": ["长时单人直播替换", "单人长时直播替换"],
+      "description": "单人主播长时连续出镜并多次进行人物、服装、角色、动作或表情替换，经历说话、转身、遮挡、离镜返回和光照变化；会话时长、操作脚本和采样窗口随Run Request冻结。",
+      "tier": "core",
+      "tags": {"input_dimension": "长时间单人直播", "instruction_dimension": "修改主体"},
+      "supported_modes": ["realtime"],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "长时运行会放大身份和参考漂移、背景慢性误改、遮挡恢复退化、帧率下降与延迟累积。",
+      "source_weight_rationale": "实时G/E/R为22/61/17；G2与E3/E4突出长时画面和身份稳定，E1/E2检查动态遵循与非目标保持，持续性能由RP.3报告。"
+    },
+    {
+      "scenario_id": "core-long-multi-host-live-replacement",
+      "name": "长时间多人直播中进行各类替换",
+      "aliases": ["长时多人直播替换", "多人长时直播替换"],
+      "description": "两人或多人长时连续出镜并对指定一人或多人进行人物、服装、角色、动作或表情替换，覆盖交叉、换位、遮挡、出入镜和多人动作；会话时长、目标映射、操作脚本和采样窗口随Run Request冻结。",
+      "tier": "core",
+      "tags": {"input_dimension": "长时间多人直播", "instruction_dimension": "修改主体"},
+      "supported_modes": ["realtime"],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "除长时漂移与性能退化外，多人交叉和换位会放大串人、错绑、非目标误改及遮挡后身份映射丢失。",
+      "source_weight_rationale": "实时G/E/R为21/62/17；E1/E2/R2高于单人场景以突出目标映射和非目标保持，E3/E4检查多主体身份持续。"
     }
   ]
 }

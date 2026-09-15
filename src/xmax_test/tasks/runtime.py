@@ -28,8 +28,9 @@ class PipelineTaskRuntime:
     def preflight(self, tasks: list[dict[str, Any]]) -> None:
         """Validate shared offline transport before TaskWorker claims a task."""
 
-        if getattr(self._composition, "_offline_preflight_ok", False):
-            return
+        checked_providers = getattr(
+            self._composition, "_offline_preflight_providers", set()
+        )
         for task in tasks:
             if task.get("status") in {"completed", "cancelled"}:
                 continue
@@ -38,13 +39,20 @@ class PipelineTaskRuntime:
             case = task.get("payload", {}).get("case", {})
             if case.get("generation_mode", "offline") != "offline":
                 continue
+            provider = case.get("generation_provider", "xmax")
+            if provider in checked_providers:
+                continue
             adapter = self._composition.offline_adapter(
                 run_batch_id=f"runs-{task['task_id'][5:17]}",
                 model_id=case.get("model_id")
                 or self._composition.project.get("default_model", "x2.0"),
+                provider=provider,
             )
             adapter.preflight()
-            self._composition._offline_preflight_ok = True
+            self._composition._offline_preflight_providers = {
+                *checked_providers,
+                provider,
+            }
             return
 
     def evaluation_available(self) -> bool:
@@ -71,6 +79,8 @@ class PipelineTaskRuntime:
             self.preflight([task])
             self._status(task_id, "generating")
             if case.get("generation_mode") == "realtime":
+                if case.get("generation_provider", "xmax") != "xmax":
+                    raise ContractError("realtime generation remains XMAX-only")
                 controller = self._composition.realtime_controller(
                     run_batch_id=run_batch_id,
                     model_id=case.get("model_id")
@@ -86,6 +96,7 @@ class PipelineTaskRuntime:
                     run_batch_id=run_batch_id,
                     model_id=case.get("model_id")
                     or self._composition.project.get("default_model", "x2.0"),
+                    provider=case.get("generation_provider", "xmax"),
                 )
                 run = adapter.run_case(case)
             self._repository.set_run_batch_id(run["run_id"], run_batch_id)
@@ -125,7 +136,7 @@ class PipelineTaskRuntime:
                 evaluation_batch_id=evaluation_batch_id,
             )
 
-        if self._sync_policy != "none":
+        if self._sync_policy != "none" and run.get("status") == "completed":
             self._status(task_id, "syncing")
             evaluations = {run["run_id"]: evaluation} if evaluation else {}
             item_sync = self._composition.feishu_sync_service().sync_case_run(

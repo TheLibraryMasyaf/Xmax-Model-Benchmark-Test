@@ -6,7 +6,7 @@
 
 根目录 `BENCHMARK.md` 是唯一标准入口。机器读取标记之间的JSON合同，人阅读其余Markdown说明。代码、Prompt和飞书列不得形成另一个独立标准副本。
 
-当前合同为`0.3.0-draft / shadow`，包含P.1 Gate、9个G/E/R计分标准、22条单视频细则、4个批次报告指标和10个核心场景的16组模式权重。它可以执行Shadow评测，但不作为稳定正式榜单；首轮后用新版本调整并Replay，不能原地覆盖。运行`xmax-test db check`会按Benchmark版本列出历史Evaluation；非当前版本不得与当前批次混用，需要新口径时对明确Run Batch执行`replay run`。
+当前合同为`0.4.0-draft / shadow`，包含P.1 Gate、10个G/E/R计分标准、28条单视频细则、6个批次报告指标和12个核心场景的18组模式权重。它可以执行Shadow评测，但不作为稳定正式榜单；首轮后用新版本调整并Replay，不能原地覆盖。运行`xmax-test db check`会按Benchmark版本列出历史Evaluation；非当前版本不得与当前批次混用，需要新口径时对明确Run Batch执行`replay run`。
 
 ## 2. 维度生命周期
 

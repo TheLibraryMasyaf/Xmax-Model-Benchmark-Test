@@ -12,6 +12,7 @@ from xmax_test.generation.realtime.controller import (
     RealtimeController,
 )
 from xmax_test.generation.realtime.interactions import InteractionProfileResolver
+from xmax_test.config import load_config
 from xmax_test.storage.artifacts import ArtifactStore
 from xmax_test.storage.sqlite import SqliteMetadataRepository
 from xmax_test.time import FixedClock
@@ -54,6 +55,16 @@ class RealtimeTestBase(unittest.TestCase):
 
 
 class RealtimeControllerTests(RealtimeTestBase):
+    @staticmethod
+    def network_profile() -> dict:
+        root = Path(__file__).resolve().parents[3]
+        pack = load_config(
+            root / "config" / "network-profiles.json",
+            "network-profiles.schema.json",
+            base_dir=root,
+        )
+        return pack["profiles"][0]
+
     @staticmethod
     def randomized_profile() -> dict:
         return {
@@ -158,7 +169,10 @@ class RealtimeControllerTests(RealtimeTestBase):
             resolver.expand("random-swipes", width=1280, height=720, seed_key="case-a")
 
     def test_run_case_persists_completed_realtime_run(self) -> None:
-        run = self.controller.run_case(self.case())
+        run = self.controller.run_case(
+            self.case(),
+            config={"network_profile_id": "wifi-baseline-v1", "latency_threshold_ms": 100},
+        )
         self.assertEqual(run["status"], "completed")
         self.assertEqual(run["origin"], "xmax_realtime")
         self.assertEqual(run["metrics"]["input_method"], "connectMedia")
@@ -168,7 +182,12 @@ class RealtimeControllerTests(RealtimeTestBase):
         self.assertEqual(run["metrics"]["audio"]["contract_status"], "available")
         self.assertEqual(run["metrics"]["interaction_event_count"], 1)
         self.assertEqual(run["metrics"]["first_output_change_ms"], 80.0)
+        self.assertEqual(run["metrics"]["interaction_latency_p50_ms"], 80.0)
         self.assertEqual(run["metrics"]["interaction_latency_p95_ms"], 80.0)
+        self.assertEqual(run["metrics"]["interaction_latency_p99_ms"], 80.0)
+        self.assertEqual(run["metrics"]["interaction_latency_jitter_ms"], 0.0)
+        self.assertEqual(run["metrics"]["latency_threshold_exceed_ratio"], 0.0)
+        self.assertEqual(run["metrics"]["network_profile_id"], "wifi-baseline-v1")
         self.assertEqual(run["metrics"]["duplicate_frame_ratio"], 0.0)
         self.assertEqual(run["metrics"]["freeze_duration_ms"], 0.0)
         self.assertEqual(run["metrics"]["first_valid_result_ms"], 200.0)
@@ -331,6 +350,84 @@ class RealtimeControllerTests(RealtimeTestBase):
         # Constructing and running the controller never touches XMAX credentials.
         run = self.controller.run_case(self.case())
         self.assertEqual(run["status"], "completed")
+
+    def test_network_rejection_retries_then_only_qualified_run_can_score(self) -> None:
+        harness = FakeRealtimeHarness(clock=self.clock, artifacts=self.artifacts)
+        controller = RealtimeController(
+            self.repository,
+            self.artifacts,
+            harness=harness,
+            clock=self.clock,
+            sleeper=lambda _seconds: None,
+        )
+        run = controller.run_case(
+            self.case(),
+            config={
+                "network_profile_id": "common-tun-webrtc-v1",
+                "network_profile": self.network_profile(),
+                "max_network_retries": 3,
+                "fake_network_attempt_statuses": [
+                    "rejected_preflight",
+                    "rejected_runtime",
+                    "qualified",
+                ],
+            },
+        )
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["metrics"]["network_qualification"]["status"], "qualified")
+        self.assertEqual(run["metrics"]["network_retry_count"], 2)
+        attempts = sorted(
+            self.repository.list_runs(case_id=self.case()["case_id"]),
+            key=lambda item: item["metrics"]["network_attempt_index"],
+        )
+        self.assertEqual([item["status"] for item in attempts], ["cancelled", "cancelled", "completed"])
+        self.assertEqual(len(run["metrics"]["network_attempt_run_ids"]), 3)
+        for rejected in attempts[:2]:
+            self.assertEqual(
+                rejected["metrics"]["network_error"]["code"],
+                "xmax.network_unqualified",
+            )
+            self.assertIsNotNone(rejected["raw_events_uri"])
+
+    def test_network_retry_exhaustion_is_cancelled_and_not_completed(self) -> None:
+        harness = FakeRealtimeHarness(clock=self.clock, artifacts=self.artifacts)
+        controller = RealtimeController(
+            self.repository,
+            self.artifacts,
+            harness=harness,
+            clock=self.clock,
+            sleeper=lambda _seconds: None,
+        )
+        run = controller.run_case(
+            self.case(),
+            config={
+                "network_profile_id": "common-tun-webrtc-v1",
+                "network_profile": self.network_profile(),
+                "max_network_retries": 3,
+                "fake_network_attempt_statuses": ["unverified"],
+            },
+        )
+        self.assertEqual(run["status"], "cancelled")
+        self.assertEqual(run["metrics"]["network_attempt_index"], 4)
+        self.assertEqual(len(self.repository.list_runs(case_id=self.case()["case_id"])), 4)
+        self.assertFalse(run["metrics"]["network_error"]["retryable"])
+
+    def test_network_retry_count_is_bounded_to_five(self) -> None:
+        controller = RealtimeController(
+            self.repository,
+            self.artifacts,
+            harness=FakeRealtimeHarness(clock=self.clock),
+            clock=self.clock,
+            sleeper=lambda _seconds: None,
+        )
+        with self.assertRaises(ContractError):
+            controller.run_case(
+                self.case(),
+                config={
+                    "network_profile": self.network_profile(),
+                    "max_network_retries": 6,
+                },
+            )
 
 
 if __name__ == "__main__":

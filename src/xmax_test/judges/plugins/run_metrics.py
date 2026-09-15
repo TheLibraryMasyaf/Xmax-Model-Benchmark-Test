@@ -1,6 +1,6 @@
 """Deterministic single-Run facts for P.1, realtime G2.1 and R1.
 
-P.2/P.3/RP.1/RP.2 are produced by BatchReportingMetrics without scores.
+P.2/P.3/P.4/RP.1/RP.2/RP.3 are produced by BatchReportingMetrics without scores.
 """
 
 from __future__ import annotations

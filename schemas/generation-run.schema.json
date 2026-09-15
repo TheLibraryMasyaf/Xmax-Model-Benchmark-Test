@@ -24,6 +24,7 @@
     "origin": {
       "enum": [
         "xmax_offline",
+        "decart_offline",
         "xmax_realtime",
         "feishu_import",
         "local_import",

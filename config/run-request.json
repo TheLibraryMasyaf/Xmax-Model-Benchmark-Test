@@ -21,6 +21,8 @@
   "execution_mode": "streaming",
   "pipeline_queue_size": 4,
   "repeat_count": 5,
+  "network_profile_id": "common-tun-webrtc-v1",
+  "max_network_retries": 3,
   "dry_run": true,
   "filters": {},
   "manifest_directory": "var/manifests"

@@ -25,6 +25,7 @@ SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"
 SECRET_KEYS = {
     "XMAX_API_KEY",
     "XMAX_API_SECRET",
+    "DECART_API_KEY",
     "api_key",
     "apiKey",
     "api_secret",

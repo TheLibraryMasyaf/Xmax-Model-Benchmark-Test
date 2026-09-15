@@ -6,11 +6,15 @@ from xmax_test.evaluation.group_metrics import BatchReportingMetrics
 
 
 class CaseRepository:
-    def __init__(self, cases: dict[str, dict]) -> None:
+    def __init__(self, cases: dict[str, dict], assets: dict[str, dict] | None = None) -> None:
         self.cases = cases
+        self.assets = assets or {}
 
     def get_test_case(self, case_id: str) -> dict:
         return self.cases[case_id]
+
+    def get_asset(self, asset_id: str) -> dict:
+        return self.assets[asset_id]
 
 
 class BatchReportingMetricsTests(unittest.TestCase):
@@ -30,6 +34,45 @@ class BatchReportingMetricsTests(unittest.TestCase):
         summary = BatchReportingMetrics(CaseRepository(cases)).summarize([self.run_record("run-a1", "case-a1")], [self.result("run-a1")])
         self.assertEqual(summary["P.3"]["group_count"], 1)
         self.assertEqual(summary["P.3"]["repeated_group_count"], 0)
+
+    def test_offline_timeliness_separates_model_time_and_rtf(self) -> None:
+        cases = {"case-a1": self.case("feed-a", 1)}
+        run = self.run_record("run-a1", "case-a1")
+        run["metrics"].update(
+            {
+                "queue_wait_s": 2.0,
+                "model_generation_elapsed_s": 4.0,
+                "result_transfer_elapsed_s": 1.0,
+                "end_to_end_delivery_elapsed_s": 7.0,
+                "generation_elapsed_s": 8.0,
+            }
+        )
+        repository = CaseRepository(
+            cases, {"asset-run-a1": {"media": {"duration_s": 10.0}}}
+        )
+        summary = BatchReportingMetrics(repository).summarize([run], [self.result("run-a1")])
+        self.assertEqual(summary["P.4"]["generation_rtf"]["p50"], 0.4)
+        self.assertEqual(summary["P.4"]["model_generation_elapsed_s"]["p50"], 4.0)
+        self.assertEqual(summary["P.4"]["legacy_combined_generation_elapsed_s"]["p50"], 8.0)
+
+    def test_realtime_latency_reports_network_profile_and_tail_latency(self) -> None:
+        cases = {"case-a1": self.case("feed-a", 1)}
+        run = self.run_record("run-a1", "case-a1")
+        run["mode"] = "realtime"
+        run["metrics"].update(
+            {
+                "interaction_latency_p50_ms": 90.0,
+                "interaction_latency_p95_ms": 140.0,
+                "interaction_latency_p99_ms": 170.0,
+                "interaction_latency_jitter_ms": 18.0,
+                "network_profile_id": "wifi-baseline-v1",
+            }
+        )
+        summary = BatchReportingMetrics(CaseRepository(cases)).summarize(
+            [run], [self.result("run-a1")]
+        )
+        self.assertEqual(summary["RP.3"]["event_to_output_p95_ms"]["p50"], 140.0)
+        self.assertEqual(summary["RP.3"]["network_profile_ids"], ["wifi-baseline-v1"])
 
     def test_hard_gated_result_is_invalid_even_when_fused_p_score_is_nonzero(self) -> None:
         cases = {"case-a1": self.case("feed-a", 1)}
@@ -69,7 +112,7 @@ class BatchReportingMetricsTests(unittest.TestCase):
 
     @staticmethod
     def result(run_id: str) -> dict:
-        return {"evaluation_id": f"eval-{run_id}", "run_id": run_id, "benchmark_version": "0.3.0-draft", "case_score_percent": 100.0, "criterion_results": [{"dimension_id": "P", "criterion_id": "P.1", "score": 2.0}]}
+        return {"evaluation_id": f"eval-{run_id}", "run_id": run_id, "benchmark_version": "0.4.0-draft", "case_score_percent": 100.0, "criterion_results": [{"dimension_id": "P", "criterion_id": "P.1", "score": 2.0}]}
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ XMAX实时能力通过浏览器JavaScript SDK和WebRTC运行。`realtime-harness
 
 模式由Operation Recipe决定：互动Prompt默认实时，非互动玩法默认离线；用户或Agent可在Run Request中显式覆盖，但不支持的组合必须在计划阶段报错。
 
+固定 Feed 输入在进入浏览器前统一执行 `drop-first-decoded-frame-v1`，总是去掉第一帧并同步裁剪音频。静帧玩法随后从裁剪后的 Feed 抽图，截图种子使用裁剪结果哈希，`timestamp_s` 相对于处理后的时间轴；`feed_preprocessing` 保存原始哈希、裁剪点和结果哈希以回溯原时间轴。完整视频输入同样使用裁剪结果。新计划冻结策略版本，已完成历史 Run 不自动重跑。详细媒体校验和幂等规则见[离线生成](generation-offline.md)。
+
 对`realtime-track-interaction@0.3.0`，Python Harness在启动浏览器前按`seeded_random_safe_window_v1`抽取Feed静帧：时间戳位于时长10%–90%之间，种子由Case ID和Feed内容哈希决定。JPEG产物按内容哈希缓存，再转为无音轨的静态H.264流输入SDK。Run原始事件和metrics必须保存实际截图的Artifact URI、SHA-256、抽帧时间戳、原Feed ID和策略版本，供评测与飞书回读。
 
 ## 2. 会话流程
@@ -23,9 +25,11 @@ XMAX实时能力通过浏览器JavaScript SDK和WebRTC运行。`realtime-harness
 ```text
 创建client并注册回调
 → 记录connect调用时刻
-→ connectMedia/connectCamera/connect
+→ connectMedia/connectCamera/connect（网络准入开启时autoStart=false）
 → 记录Promise完成
 → 读取session uid与media设置
+→ 采集预检RTC样本并验证TUN/候选链路/RTT
+→ 准入后调用session.start()
 → onRemoteStream取得远程流
 → 记录首个解码帧
 → start/set/sendTracks执行测试事件
@@ -56,9 +60,9 @@ XMAX实时能力通过浏览器JavaScript SDK和WebRTC运行。`realtime-harness
 - 录制结果视频。
 - 轨迹、Prompt更新和状态事件。
 
-RTC日志约两秒一次，只适合趋势；冻结、重复帧和短时响应需要逐帧数据。
+RTC日志按当前Network Profile的周期采样，默认一秒一次，只适合网络趋势与准入；冻结、重复帧和短时响应需要逐帧数据。RTC记录包含RTP、候选对、本地/远端候选和transport条目，每个样本标记`preflight`或`runtime`。
 
-浏览器对输出帧计算8×8感知哈希。每个离散交互起点保存发送时刻和发送前基准哈希，并把首个达到差异阈值的后续输出帧记为`firstOutputChangeMs`。Python据此派生首次变化、P95、延迟趋势、事件堆积，以及重复帧率和最长冻结时段。该事实只测“何时出现可见变化”，不证明变化是否正确；语义跟手准确性由R2结合轨迹与画面证据评分。
+浏览器对输出帧计算8×8感知哈希。每个离散交互起点保存发送时刻和发送前基准哈希，并把首个达到差异阈值的后续输出帧记为`firstOutputChangeMs`。Python据此派生首次变化、P50/P95/P99、抖动、延迟趋势、事件堆积，以及重复帧率和最长冻结时段；配置`latency_threshold_ms`时还会记录超阈值占比。该事实只测“何时出现可见变化”，不证明变化是否正确；语义跟手准确性由R2结合轨迹与画面证据评分。
 
 ## 5. R指标所需原始事实
 
@@ -73,7 +77,20 @@ RTC日志约两秒一次，只适合趋势；冻结、重复帧和短时响应�
 | 恢复 | 异常注入、错误、断开、重连、新首帧和稳定恢复时间 |
 | 设备网络 | 分辨率、码率、丢包、RTT、浏览器和系统采集指标 |
 
-具体名称、门槛和计分均由Benchmark更新后决定。
+当前运行配置使用`network_profile_id`、`max_network_retries`和`latency_threshold_ms`。前两者会冻结到Case和预算，Profile ID进入Run事实及RP.3批次汇总。`max_network_retries`指首次尝试之外的重试数，默认3，可配0–5；因此默认最多4次Attempt。
+
+### 5.1 常见稳定网络Profile
+
+`config/network-profiles.json`中的`common-tun-webrtc-v1@1.0.0`用于排除网络波动，不是弱网鲁棒性测试。它保留本机TUN路由，并在会话实际WebRTC路径上判定：
+
+| 阶段 | 准入范围 |
+| --- | --- |
+| 生成前5秒 | TUN有效；有效候选对样本≥4；RTT P50≤50 ms、P95≤80 ms；候选对切换0次 |
+| 生成期 | 样本≥2；RTT P50≤50 ms、P95≤80 ms、单样本≤120 ms；入站抖动P95≤30 ms；收/发丢包≤1%；可用上行P05≥800 kbps；无候选切换或断连；合格样本占比≥95% |
+
+阈值是版本化的运行环境准入线，不是Benchmark评分项。判定不读取首帧、输出FPS、冻结、互动语义或视觉质量。预检不合格时不调用`session.start()`；生成期超出范围时尽快停止会话。两种失败都以`cancelled`保留Run、RTC原始日志和原因，不预处理、不评分、不同步为0分Case；只有`network_qualification.status=qualified`的`completed` Run继续。
+
+阈值调整必须新建Profile ID/版本，不覆盖旧Run使用的口径；Plan会同时冻结版本和内容哈希，就地改动后执行会拒绝。无候选对、统计缺失或无法验证TUN时状态为`unverified`，同样不得评分。
 
 ## 6. 受控事件脚本与轨迹控制
 
@@ -105,7 +122,7 @@ audio: { publish: true, subscribe: true }
 
 ## 8. 重复与清理
 
-- 一个重复任务使用独立 `run_id`和task标识。
+- 一个重复任务使用独立 `run_id`和task标识；网络重试也是独立Attempt/`run_id`，不覆盖前次证据。
 - Feed视频自动循环时，Harness必须限定单轮时间窗。
 - 每轮结束调用`stopGeneration`，必要时等待收尾事件。
 - 完成测试后调用`disconnect`并释放SDK管理的媒体。

@@ -109,8 +109,10 @@
 | --- | --- | --- | --- | --- |
 | P.2 批次生成成功与失败 | `{{ baseline_p2 }}` | `{{ candidate_p2 }}` | `{{ p2_delta }}` | `{{ p2_explanation }}` |
 | P.3 同输入重复稳定性 | `{{ baseline_p3 }}` | `{{ candidate_p3 }}` | `{{ p3_delta }}` | `{{ p3_explanation }}` |
+| P.4 离线生成时效性 | `{{ baseline_p4 }}` | `{{ candidate_p4 }}` | `{{ p4_delta }}` | `{{ p4_explanation }}` |
 | RP.1 启动与画面交付 | `{{ baseline_rp1 }}` | `{{ candidate_rp1 }}` | `{{ rp1_delta }}` | `{{ rp1_explanation }}` |
 | RP.2 稳定与恢复 | `{{ baseline_rp2 }}` | `{{ candidate_rp2 }}` | `{{ rp2_delta }}` | `{{ rp2_explanation }}` |
+| RP.3 持续端到端时延与抖动 | `{{ baseline_rp3 }}` | `{{ candidate_rp3 }}` | `{{ rp3_delta }}` | `{{ rp3_explanation }}` |
 
 ## 7. 人工信号与AI结论修订
 

@@ -71,10 +71,11 @@
         "path": "var/feedback/learning.train.jsonl",
         "max_examples_per_dimension": 2
       },
-      "supported_dimensions": ["P", "E1", "E2", "E3", "E4", "R2"],
+      "supported_dimensions": ["P", "E1", "E2", "E3", "E4", "E5", "R2"],
       "supported_criteria": [
-        "P.1", "E1.1", "E1.2", "E1.3", "E2.1", "E2.2",
-        "E3.1", "E3.2", "E4.1", "E4.2", "E4.3",
+        "P.1", "E1.1", "E1.2", "E1.3", "E1.4", "E2.1", "E2.2", "E2.3",
+        "E3.1", "E3.2", "E4.1", "E4.2", "E4.3", "E4.4",
+        "E5.1", "E5.2", "E5.3",
         "R2.1", "R2.2", "R2.3"
       ],
       "supported_modes": ["offline", "realtime"],

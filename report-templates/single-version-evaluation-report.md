@@ -47,10 +47,12 @@
 | --- | ---: | --- |
 | P.2有效视频率/无效输出率/失败分布 | `{{ generation_success_and_failure }}` | Frozen Run Batch + P.1 |
 | P.3同输入重复稳定性 | `{{ repeat_group_stability }}` | Frozen Run Request；`repeat_count`可配置；逐Case表合并展示组内标准差与稳定性 |
+| P.4离线生成时效性 | 见完整评价要求表 | 分离后的排队/模型生成/传输/端到端时间 + 输出时长 |
 | Hard Gate通过率 | `{{ hard_gate_pass_rate }}` | EvaluationResult |
 | 可评维度覆盖率 | `{{ assessable_dimension_rate }}` | Judgment |
 | RP.1启动与画面交付 | `{{ realtime_delivery }}` | RTC/Harness timestamps + Per-frame facts |
 | RP.2稳定与恢复 | `{{ realtime_stability_and_recovery }}` | 异常脚本/长会话事实 |
+| RP.3持续端到端时延与抖动 | 见完整评价要求表 | 冻结网络Profile + 持续输入事件/输出呈现时间戳 |
 
 ### 2.1 P.3同输入重复稳定性
 

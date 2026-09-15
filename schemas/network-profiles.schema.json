@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Realtime Network Profile Pack",
+  "type": "object",
+  "required": ["profile_pack_id", "version", "profiles"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "profile_pack_id": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/profile"}
+    }
+  },
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "required": [
+        "profile_id",
+        "version",
+        "status",
+        "kind",
+        "required_transport",
+        "preflight",
+        "runtime",
+        "retry"
+      ],
+      "properties": {
+        "profile_id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "status": {"enum": ["shadow", "active", "disabled"]},
+        "kind": {"const": "natural_network_qualification"},
+        "description": {"type": "string"},
+        "required_transport": {
+          "type": "object",
+          "required": ["tun_required", "candidate_pair_required"],
+          "properties": {
+            "tun_required": {"type": "boolean"},
+            "candidate_pair_required": {"const": true}
+          },
+          "additionalProperties": false
+        },
+        "preflight": {"$ref": "#/$defs/preflight"},
+        "runtime": {"$ref": "#/$defs/runtime"},
+        "retry": {"$ref": "#/$defs/retry"}
+      },
+      "additionalProperties": false
+    },
+    "preflight": {
+      "type": "object",
+      "required": [
+        "duration_s",
+        "sample_interval_ms",
+        "min_samples",
+        "max_rtt_p50_ms",
+        "max_rtt_p95_ms",
+        "max_candidate_switches"
+      ],
+      "properties": {
+        "duration_s": {"type": "number", "minimum": 3, "maximum": 30},
+        "sample_interval_ms": {"type": "integer", "minimum": 250, "maximum": 5000},
+        "min_samples": {"type": "integer", "minimum": 2},
+        "max_rtt_p50_ms": {"type": "number", "minimum": 0},
+        "max_rtt_p95_ms": {"type": "number", "minimum": 0},
+        "max_candidate_switches": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "sample_interval_ms",
+        "min_samples",
+        "max_rtt_sample_ms",
+        "max_rtt_p50_ms",
+        "max_rtt_p95_ms",
+        "max_inbound_jitter_p95_ms",
+        "max_inbound_packet_loss_ratio",
+        "max_outbound_packet_loss_ratio",
+        "min_available_outgoing_bitrate_bps",
+        "max_candidate_switches",
+        "max_disconnects",
+        "max_consecutive_breach_s",
+        "min_in_range_sample_ratio"
+      ],
+      "properties": {
+        "sample_interval_ms": {"type": "integer", "minimum": 250, "maximum": 5000},
+        "min_samples": {"type": "integer", "minimum": 2},
+        "max_rtt_sample_ms": {"type": "number", "minimum": 0},
+        "max_rtt_p50_ms": {"type": "number", "minimum": 0},
+        "max_rtt_p95_ms": {"type": "number", "minimum": 0},
+        "max_inbound_jitter_p95_ms": {"type": "number", "minimum": 0},
+        "max_inbound_packet_loss_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_outbound_packet_loss_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "min_available_outgoing_bitrate_bps": {"type": "number", "minimum": 0},
+        "max_candidate_switches": {"type": "integer", "minimum": 0},
+        "max_disconnects": {"type": "integer", "minimum": 0},
+        "max_consecutive_breach_s": {"type": "number", "minimum": 0},
+        "min_in_range_sample_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "retry": {
+      "type": "object",
+      "required": [
+        "default_max_network_retries",
+        "max_allowed_network_retries",
+        "cooldown_s"
+      ],
+      "properties": {
+        "default_max_network_retries": {"type": "integer", "minimum": 0, "maximum": 5},
+        "max_allowed_network_retries": {"const": 5},
+        "cooldown_s": {"type": "number", "minimum": 0, "maximum": 60}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

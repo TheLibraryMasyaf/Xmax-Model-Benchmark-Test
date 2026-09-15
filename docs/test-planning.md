@@ -5,7 +5,7 @@
 ## 1. 基本组合
 
 ```text
-Feed × Prompt包 × Operation Recipe × generation_mode × model_id × repeat_index × 环境配置
+Feed × Prompt包 × Operation Recipe × generation_provider × generation_mode × model_id × repeat_index × 环境配置
 ```
 
 Prompt包可以包含文字、参考图、参考视频和mask。`repeat_index`属于TestCase身份的一部分，用于离线成功率、重复稳定性和实时重复任务测试。
@@ -68,12 +68,18 @@ Case显式指定
 重复次数
 预计素材上传数
 预计积分范围
+按Provider的任务数和Decart预计美元成本
+预计基础积分/计费时长与网络重试最坏上界
 预计最长运行时间
 跳过素材及原因
 已知不支持的玩法
 ```
 
 计划阶段不读取真实密钥、不提交任务、不上传素材。
+
+实时Case启用Network Profile时，预览同时输出`expected_credits`、`expected_credits_worst_case`、`expected_billable_seconds_worst_case`和`network_retry_budget`。最坏值保守按每个Attempt都可能进入计费生成估算，不把预检`autoStart=false`当成已证实免费。真实执行批准应覆盖该上界。
+
+Decart Case按冻结输入视频时长与`cost_usd_per_second`计算`expected_cost_usd`；其`expected_credits=0`表示XMAX积分不适用，不表示Lucy免费。
 
 ## 5. Case编号、重复与可复现性
 
@@ -99,7 +105,7 @@ TestPlan保存：
 
 离线示例：质量档位、FPS、采样方式、mask、并发与批大小。
 
-实时示例：输入方式、流宽高、FPS、码率、contentHint、音频、会话时长、事件脚本、网络和设备配置。
+实时示例：输入方式、流宽高、FPS、码率、contentHint、音频、会话时长、事件脚本、`network_profile_id`和`max_network_retries`（默认3，可配0–5）。
 
 模式特有字段放在 `generation_config`，不能扩散为顶层固定列。
 

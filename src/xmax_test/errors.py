@@ -109,6 +109,18 @@ class ExternalServiceError(XmaxTestError):
     stage = "external"
 
 
+class AmbiguousSubmissionError(ExternalServiceError):
+    """A paid create request may have reached the provider.
+
+    Retrying automatically could duplicate billing, so the GenerationRun is
+    intentionally left running for operator reconciliation.
+    """
+
+    code = "xmax.submission_outcome_unknown"
+    retryable = False
+    stage = "generate"
+
+
 class RealtimeUnavailableError(XmaxTestError):
     """A realtime case cannot run because the harness rejects its inputs.
 

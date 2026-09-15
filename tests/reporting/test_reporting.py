@@ -204,6 +204,35 @@ class ReportRepositoryProxy:
 
 
 class ComparisonTests(ReportingTestBase):
+    def test_explicit_xmax_and_lucy_cases_pair_on_provider_neutral_inputs(self) -> None:
+        base = self.repository.get_test_case("case-a")
+        xmax_case = {
+            **base,
+            "generation_provider": "xmax",
+            "generation_config": {
+                "quality": "hd",
+                "fps": 24,
+                "estimated_credits": 12,
+            },
+        }
+        lucy_case = {
+            **base,
+            "case_id": "case-lucy",
+            "generation_provider": "decart",
+            "model_id": "lucy-2.5",
+            "generation_config": {
+                "resolution": "720p",
+                "enhance_prompt": False,
+                "self_anchor": True,
+                "input_normalization_profile": "decart-720p-h264-pad-v1",
+                "estimated_cost_usd": 0.16,
+            },
+        }
+        self.assertEqual(
+            ModelComparisonService._pairing_key(xmax_case),
+            ModelComparisonService._pairing_key(lucy_case),
+        )
+
     def test_comparison_ignores_evaluation_rows_not_in_frozen_manifest(self) -> None:
         self.repository.save_evaluation_result(
             {
@@ -708,7 +737,7 @@ class RenderTests(ReportingTestBase):
         self.assertEqual(requirements["requirement_count"], benchmark_requirement_count)
         self.assertEqual(
             {item["requirement_id"] for item in requirements["reporting_metrics"]},
-            {"P.2", "P.3", "RP.1", "RP.2"},
+            {"P.2", "P.3", "P.4", "RP.1", "RP.2", "RP.3"},
         )
         self.assertNotIn("Recommendation:", markdown)
 
@@ -761,7 +790,7 @@ class RenderTests(ReportingTestBase):
             sum(len(dimension.get("criteria", [])) for dimension in self.benchmark["dimensions"]),
         )
         self.assertTrue(
-            {"P.2", "P.3", "RP.1", "RP.2"}.issubset(
+            {"P.2", "P.3", "P.4", "RP.1", "RP.2", "RP.3"}.issubset(
                 report["reporting_metric_results"]["baseline"]
             )
         )

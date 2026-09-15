@@ -11,6 +11,8 @@
 
 因此Runner只能使用TestPlan已经冻结的绑定，不能根据扩展名、文件名或历史脚本重新猜测。
 
+生成输入统一先按 `drop-first-decoded-frame-v1` 去掉 Feed 视频首帧，再执行下述绑定；Feed 截图也从处理后的版本提取。该规则不裁剪 Prompt 视频，原始素材保留。处理证据和缓存规则见[离线生成](generation-offline.md)。
+
 同样的合同也必须提供给评测Judge。每条Recipe包含`evaluation_contract`，明确：操作摘要、结果预期、各输入角色的生成语义、必须保留内容和必须改变内容。新建TestPlan时该合同冻结到Case；历史Case没有冻结字段时，Evaluator只允许按相同Recipe ID回读版本化合同，不根据Prompt自由推断。
 
 ## 2. 离线图片参考类

@@ -10,6 +10,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from xmax_test.benchmark import load_benchmark_contract
+from xmax_test.errors import ContractError
 from xmax_test.planning.budget import BudgetPreview
 from xmax_test.planning.builder import TestPlanBuilder
 from xmax_test.planning.case_numbers import CaseNumberAllocator
@@ -511,6 +512,40 @@ class NumberingTests(PlanningTestBase):
 
 
 class PreviewTests(PlanningTestBase):
+    def test_decart_plan_freezes_provider_model_and_usd_budget(self) -> None:
+        request = self.request(
+            generation_provider="decart",
+            model_id="lucy-2.5",
+            generation_modes=["offline"],
+            repeat_count=1,
+            generation_config={
+                "resolution": "720p",
+                "cost_usd_per_second": 0.04,
+                "input_normalization_profile": "decart-720p-h264-pad-v1",
+            },
+        )
+        plan = self.builder.build(request)
+        self.assertEqual(plan["metadata"]["generation_provider"], "decart")
+        self.assertTrue(plan["cases"])
+        self.assertTrue(
+            all(case["generation_provider"] == "decart" for case in plan["cases"])
+        )
+        self.assertTrue(all(case["model_id"] == "lucy-2.5" for case in plan["cases"]))
+        preview = self.builder.preview(request)
+        self.assertEqual(preview["per_provider_tasks"], {"decart": len(plan["cases"])})
+        self.assertGreaterEqual(preview["expected_cost_usd"], 0)
+        self.assertEqual(preview["expected_credits"], 0)
+
+    def test_decart_realtime_is_rejected(self) -> None:
+        with self.assertRaises(ContractError):
+            self.builder.preview(
+                self.request(
+                    generation_provider="decart",
+                    model_id="lucy-2.5",
+                    generation_modes=["offline", "realtime"],
+                )
+            )
+
     def test_documented_per_case_estimates_are_used_when_available(self) -> None:
         preview = BudgetPreview().preview(
             cases=[
@@ -543,6 +578,30 @@ class PreviewTests(PlanningTestBase):
             repeat_count=1,
         )
         self.assertEqual(preview["expected_credits_range"], [240, 450])
+
+    def test_realtime_network_retry_is_visible_in_worst_case_budget(self) -> None:
+        preview = BudgetPreview().preview(
+            cases=[
+                {
+                    "generation_mode": "realtime",
+                    "generation_config": {
+                        "estimated_credits": 3,
+                        "estimated_billable_duration_s": 3,
+                        "network_profile_id": "common-tun-webrtc-v1",
+                        "max_network_retries": 3,
+                    },
+                }
+            ],
+            skipped=[],
+            repeat_count=1,
+        )
+        self.assertEqual(preview["expected_credits_range"], [3, 12])
+        self.assertEqual(preview["expected_credits"], 3)
+        self.assertEqual(preview["expected_credits_worst_case"], 12)
+        self.assertEqual(preview["expected_billable_seconds_worst_case"], 12)
+        self.assertEqual(
+            preview["network_retry_budget"]["maximum_attempts_per_case"], 4
+        )
 
     def test_preview_has_no_side_effects(self) -> None:
         before = self.repository.list_assets()

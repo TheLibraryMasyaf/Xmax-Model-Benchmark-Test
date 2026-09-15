@@ -40,6 +40,28 @@ class ContextChecker:
     def check_run_request(self, request: dict[str, Any]) -> dict[str, Any]:
         stages = request.get("stages", [])
         sync_policy = request.get("sync_policy", "none")
+        provider = self._generation_provider(request)
+
+        if provider == "decart" and set(request.get("generation_modes", ["offline"])) != {
+            "offline"
+        }:
+            self.report.add_item(
+                {
+                    "code": "xmax.contract_error",
+                    "message": "generation_provider=decart supports offline only; realtime is XMAX-only",
+                    "stage": "plan",
+                    "retryable": False,
+                }
+            )
+        if provider == "decart" and request.get("model_id", "lucy-2.5") != "lucy-2.5":
+            self.report.add_item(
+                {
+                    "code": "xmax.contract_error",
+                    "message": "generation_provider=decart requires model_id=lucy-2.5",
+                    "stage": "plan",
+                    "retryable": False,
+                }
+            )
 
         if "sync" in stages and sync_policy == "none":
             self.report.add_item(
@@ -77,6 +99,7 @@ class ContextChecker:
         self._check_benchmark(request)
         self._check_scenario_pack(request)
         self._check_operation_recipes(request)
+        self._check_network_profiles(request, stages)
         self._check_judges(request)
         self._check_feishu(stages)
         self._check_billed_approval(stages, request)
@@ -225,6 +248,56 @@ class ContextChecker:
                             "retryable": False,
                         }
                     )
+
+    def _check_network_profiles(
+        self, request: dict[str, Any], stages: list[str]
+    ) -> None:
+        if "generate" not in stages or "realtime" not in request.get(
+            "generation_modes", []
+        ):
+            return
+        project_path = self.root / "config" / "project.json"
+        project: dict[str, Any] = {}
+        if project_path.is_file():
+            try:
+                project = load_config(
+                    project_path, "project-config.schema.json", base_dir=self.root
+                )
+            except XmaxTestError as exc:
+                self.report.add(exc)
+                return
+        relative = project.get("network_profile_path", "config/network-profiles.json")
+        path = Path(relative)
+        if not path.is_absolute():
+            path = self.root / path
+        if not path.is_file():
+            self.report.add_item(
+                {
+                    "code": "xmax.missing_input",
+                    "message": f"network profile pack missing: {path}",
+                    "stage": "generate",
+                    "retryable": False,
+                }
+            )
+            return
+        try:
+            pack = load_config(path, "network-profiles.schema.json", base_dir=self.root)
+        except XmaxTestError as exc:
+            self.report.add(exc)
+            return
+        profile_id = request.get(
+            "network_profile_id", project.get("default_network_profile_id")
+        )
+        known = {item.get("profile_id") for item in pack.get("profiles", [])}
+        if not profile_id or profile_id not in known:
+            self.report.add_item(
+                {
+                    "code": "xmax.contract_error",
+                    "message": f"unknown realtime network profile: {profile_id!r}",
+                    "stage": "generate",
+                    "retryable": False,
+                }
+            )
 
     def _check_judges(self, request: dict[str, Any]) -> None:
         path = self.root / "config" / "judges.json"
@@ -458,6 +531,18 @@ class ContextChecker:
         if "generate" in stages and not request.get("dry_run"):
             project_path = self.root / "config" / "project.json"
             project = load_json(project_path) if project_path.is_file() else {}
+            if self._generation_provider(request, project) == "decart":
+                env_name = project.get("decart_api_key_env", "DECART_API_KEY")
+                if not (env.get(env_name) or _env(env_name)):
+                    self.report.add_item(
+                        {
+                            "code": "xmax.missing_dependency",
+                            "message": f"{env_name} missing for Decart Lucy 2.5 generation",
+                            "stage": "generate",
+                            "retryable": False,
+                        }
+                    )
+                return
             key_path = project.get("xmax_api_key_file")
             if key_path and not Path(key_path).is_absolute():
                 key_path = self.root / key_path
@@ -490,17 +575,21 @@ class ContextChecker:
         modes = set(request.get("generation_modes", []))
         if "generate" in stages and not request.get("dry_run"):
             if not modes or "offline" in modes:
-                try:
-                    from qcloud_cos import CosConfig, CosS3Client  # noqa: F401
-                except ImportError:
-                    self.report.add_item(
-                        {
-                            "code": "xmax.missing_dependency",
-                            "message": "cos-python-sdk-v5 missing for real offline asset upload; install .[production]",
-                            "stage": "generate",
-                            "retryable": False,
-                        }
-                    )
+                if self._generation_provider(request) == "decart":
+                    missing("ffmpeg", "generate", "Lucy input normalization")
+                    missing("ffprobe", "generate", "Lucy input validation")
+                else:
+                    try:
+                        from qcloud_cos import CosConfig, CosS3Client  # noqa: F401
+                    except ImportError:
+                        self.report.add_item(
+                            {
+                                "code": "xmax.missing_dependency",
+                                "message": "cos-python-sdk-v5 missing for real offline asset upload; install .[production]",
+                                "stage": "generate",
+                                "retryable": False,
+                            }
+                        )
             if "realtime" in modes:
                 missing("node", "generate", "realtime browser harness")
                 missing("npm", "generate", "realtime browser harness")
@@ -529,6 +618,16 @@ class ContextChecker:
                     return
                 if config.get("connection", {}).get("provider") == "lark-cli":
                     missing("lark-cli", "sync", "Feishu read/write adapter")
+
+    def _generation_provider(
+        self, request: dict[str, Any], project: dict[str, Any] | None = None
+    ) -> str:
+        if request.get("generation_provider"):
+            return str(request["generation_provider"])
+        if project is None:
+            path = self.root / "config" / "project.json"
+            project = load_json(path) if path.is_file() else {}
+        return str(project.get("default_offline_provider", "xmax"))
 
     def summary(self) -> dict[str, Any]:
         summary = {

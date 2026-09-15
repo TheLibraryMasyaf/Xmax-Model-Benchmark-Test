@@ -208,6 +208,14 @@ class FusionTests(EvaluationTestBase):
                         "assessable": True,
                         "evidence": [],
                     },
+                    {
+                        "criterion_id": "E2.3",
+                        "verdict": "acceptable",
+                        "score": 1.0,
+                        "confidence": 0.9,
+                        "assessable": True,
+                        "evidence": [],
+                    },
                 ],
             }
         ]
@@ -221,7 +229,7 @@ class FusionTests(EvaluationTestBase):
         e2 = next(item for item in result["dimension_results"] if item["dimension_id"] == "E2")
         self.assertEqual(e2["score"], 1.0)
         self.assertEqual(e2["score_percent"], 50.0)
-        self.assertEqual(e2["assessable_criterion_count"], 2)
+        self.assertEqual(e2["assessable_criterion_count"], 3)
 
     def test_multi_judge_fusion_happens_within_each_criterion(self) -> None:
         base = {
@@ -388,7 +396,7 @@ class FusionTests(EvaluationTestBase):
         self.assertIsNone(result["case_score_percent"])
         self.assertFalse(result["coverage"]["canonical_missing_dimensions"])
         self.assertTrue(result["coverage"]["scenario_missing_dimensions"])
-        self.assertEqual(result["weight_resolution"]["base_profile_id"], "scene-base-offline-0.3")
+        self.assertEqual(result["weight_resolution"]["base_profile_id"], "scene-base-offline-0.4")
         self.assertTrue(result["weight_resolution"]["matched_rule_ids"])
 
     def test_hard_gate_blocks_score_regardless_of_weights(self) -> None:

@@ -46,6 +46,8 @@ python3 -m venv .venv
 
 ## 4. 标准运行
 
+新生成自动去掉 Feed 视频的第一个解码帧（不判断是否封面），两个离线 Provider 及浏览器实时 Feed 输入均适用。音频同步裁剪，换动作的 Feed 参考截图重新提取，Prompt 视频不裁剪。无需新增 CLI 开关。已完成旧组合不自动补跑；主动重生成需显式选择新计划范围并授权。源文件和 `artifact://feed-preprocessing/` 中的输入/输出哈希回执应一并保留，防止跨进程重复裁剪。
+
 ```bash
 # 只预览，不下载、不生成、不写飞书
 .venv/bin/xmax-test run --request config/run-request.json --dry-run
@@ -62,13 +64,41 @@ python3 -m venv .venv
 
 CLI不会在无人值守运行中弹出交互问答；只有在看过`plan preview`/统一Run dry-run的任务数和积分范围后，操作者才能传`--budget-approved`。计划哈希改变后必须重新预览。
 
+实时运行默认使用`common-tun-webrtc-v1`，`max_network_retries=3`表示首次之外最多再试3次。可在Run Request改为0–5：
+
+```json
+{
+  "network_profile_id": "common-tun-webrtc-v1",
+  "max_network_retries": 3
+}
+```
+
+先执行`run --dry-run`检查`expected_credits_worst_case`和`network_retry_budget`，批准按最坏上界确认。运行后若出现`xmax.network_unqualified`，查看该Run的`metrics.network_qualification`和`raw_events_uri`；这些Attempt不会进入评分。不要为了通过而就地放宽旧Profile，需调整口径时复制为新Profile ID/版本。
+
 统一Run命令依次执行请求中显式列出的stages；已完成且输入/配置/生产者哈希未变的阶段自动跳过。依赖缺失时报错，不静默补跑未列出阶段。
 
 当Run Request同时列出`generate + preprocess + evaluate`且`execution_mode=streaming`（默认）时，统一Run采用有界流水线：每条completed Run立即进入预处理，每条completed Preprocess立即进入评测。若请求还显式列出`sync`且`sync_policy != none`，每条完整EvaluationResult会立即写入飞书，最后的`sync/reconcile`阶段再做幂等补偿和回读对账。`pipeline_queue_size`默认4，队列满后对上游反压。所有条目结束后才封口批次Manifest和总结报告。
 
 生成前会实际导入COS SDK的`CosConfig/CosS3Client`并校验STS响应，检查失败时不创建GenerationRun。统一Run、独立离线生成和TaskWorker遵循同一规则；批量Worker必须在领取第一条任务前完成共享预检。流水线对不可重试错误立即熔断，对完全相同的生成异常默认连续3次后熔断；可用`circuit_breaker_threshold`调整，不得为了“跑完”而关闭。
 
-### 4.1 Qwen免费链与99元付费兜底
+### 4.1 Decart Lucy 2.5离线生成
+
+先复制 [config/run-decart-offline.example.json](config/run-decart-offline.example.json) 为本地请求文件，在`.env`中放置`DECART_API_KEY=...`。不要把Token写入project/run JSON或Git。模板已固定`generation_provider=decart`、`model_id=lucy-2.5`、`generation_modes=[offline]`。
+
+```bash
+# 先保持模板dry_run=true，检查任务数、跳过项和expected_cost_usd
+.venv/bin/xmax-test run --request config/run-decart-offline.json --dry-run
+
+# 仅在确认美元预算后，改为dry_run=false并跑1条付费smoke
+.venv/bin/xmax-test run --request config/run-decart-offline.json --smoke-limit 1 --budget-approved
+
+# smoke的结果媒体和账单校验后再执行冻结批次；中断时原命令加--resume
+.venv/bin/xmax-test run --request config/run-decart-offline.json --budget-approved
+```
+
+Lucy会在提交前把输入缓存为720p H.264 MP4，这一转码是Provider可接收性处理，不改变评测中的原始Feed/Prompt证据。`enhance_prompt` 默认为false以维持与XMAX的Prompt可比性。创建Job时如果连接在上传后中断，命令会留下`ambiguous_submission`非终态Run；此时先在Decart侧对账，不要盲目重跑。
+
+### 4.2 Qwen免费链与99元付费兜底
 
 `config/judges.json`中的模型顺序就是调用顺序。前15个候选必须在百炼控制台保持“免费额度用完即停”；唯一例外是列表最后的`qwen3-vl-flash`，它是付费兜底。不要给其他模型关闭该开关，也不要把另一个收费模型加入末尾。
 

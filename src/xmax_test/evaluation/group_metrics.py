@@ -1,4 +1,4 @@
-"""Deterministic batch-report metrics for P.2/P.3 and RP.1/RP.2.
+"""Deterministic batch-report metrics for P.2/P.3/P.4 and RP.1/RP.2/RP.3.
 
 These facts are calculated from one frozen Run Batch plus its Evaluation
 Results.  They never emit Judgments and therefore can never change a
@@ -12,11 +12,15 @@ import statistics
 from collections import Counter, defaultdict
 from typing import Any
 
+from ..errors import NotFoundError
+
 REPORTING_METRIC_SCOPES = {
     "P.2": "frozen_run_batch",
     "P.3": "repeat_group",
+    "P.4": "frozen_offline_batch",
     "RP.1": "frozen_realtime_batch",
     "RP.2": "frozen_realtime_batch",
+    "RP.3": "frozen_realtime_batch",
 }
 
 
@@ -50,11 +54,57 @@ class BatchReportingMetrics:
         }
         by_run = {item["run_id"]: item for item in results}
         return {
-            "summary_version": "xmax-batch-reporting-metrics/1.0",
+            "summary_version": "xmax-batch-reporting-metrics/1.1",
             "P.2": self._generation_summary(runs, by_run),
             "P.3": self._repeat_summary(runs, cases, by_run),
+            "P.4": self._offline_timeliness_summary(runs),
             "RP.1": self._realtime_delivery_summary(runs),
             "RP.2": self._realtime_recovery_summary(runs),
+            "RP.3": self._realtime_latency_summary(runs),
+        }
+
+    def _offline_timeliness_summary(self, runs: list[dict[str, Any]]) -> dict[str, Any]:
+        offline = [item for item in runs if item.get("mode") == "offline"]
+        output_durations: dict[str, float] = {}
+        get_asset = getattr(self._repository, "get_asset", None)
+        if callable(get_asset):
+            for run in offline:
+                asset_id = run.get("result_asset_id")
+                if not asset_id:
+                    continue
+                try:
+                    duration = get_asset(asset_id).get("media", {}).get("duration_s")
+                except (KeyError, TypeError, ValueError, NotFoundError):
+                    continue
+                if isinstance(duration, (int, float)) and float(duration) > 0:
+                    output_durations[str(run.get("run_id"))] = float(duration)
+
+        model_elapsed_key = "model_generation_elapsed_s"
+        rtfs = []
+        for run in offline:
+            metrics = run.get("metrics", {})
+            elapsed = metrics.get(model_elapsed_key)
+            duration = output_durations.get(str(run.get("run_id")))
+            if isinstance(elapsed, (int, float)) and duration:
+                rtfs.append(float(elapsed) / duration)
+        return {
+            "scope": REPORTING_METRIC_SCOPES["P.4"],
+            "run_count": len(offline),
+            "queue_wait_s": _metric_stats(offline, "queue_wait_s"),
+            "model_generation_elapsed_s": _metric_stats(offline, model_elapsed_key),
+            "result_transfer_elapsed_s": _metric_stats(offline, "result_transfer_elapsed_s"),
+            "end_to_end_delivery_elapsed_s": _metric_stats(
+                offline, "end_to_end_delivery_elapsed_s"
+            ),
+            "legacy_combined_generation_elapsed_s": _metric_stats(
+                offline, "generation_elapsed_s"
+            ),
+            "output_duration_s": _stats(list(output_durations.values())),
+            "generation_rtf": _stats(rtfs),
+            "separation_policy": (
+                "RTF only uses model_generation_elapsed_s; legacy generation_elapsed_s may "
+                "include polling or transfer and is never substituted."
+            ),
         }
 
     @staticmethod
@@ -179,6 +229,11 @@ class BatchReportingMetrics:
             "connect_ms": _metric_stats(realtime, "connect_ms"),
             "first_frame_ms": _metric_stats(realtime, "first_frame_ms"),
             "first_valid_result_ms": _metric_stats(realtime, "first_valid_result_ms"),
+            "first_output_change_ms": _metric_stats(realtime, "first_output_change_ms"),
+            "first_meaningful_effect_ms": _metric_stats(
+                realtime, "first_meaningful_effect_ms"
+            ),
+            "first_stable_result_ms": _metric_stats(realtime, "first_stable_result_ms"),
             "fps": _metric_stats(realtime, "fps"),
             "dropped_frames": _metric_stats(realtime, "dropped_frames"),
             "duplicate_frame_ratio": _metric_stats(realtime, "duplicate_frame_ratio"),
@@ -205,6 +260,33 @@ class BatchReportingMetrics:
             "fps_window_cv": _metric_stats(realtime, "fps_window_cv"),
             "latency_window_cv": _metric_stats(realtime, "latency_window_cv"),
             "quality_window_delta": _metric_stats(realtime, "quality_window_delta"),
+        }
+
+    @staticmethod
+    def _realtime_latency_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+        realtime = [item for item in runs if item.get("mode") == "realtime"]
+        return {
+            "scope": REPORTING_METRIC_SCOPES["RP.3"],
+            "run_count": len(realtime),
+            "event_to_output_p50_ms": _metric_stats(realtime, "interaction_latency_p50_ms"),
+            "event_to_output_p95_ms": _metric_stats(realtime, "interaction_latency_p95_ms"),
+            "event_to_output_p99_ms": _metric_stats(realtime, "interaction_latency_p99_ms"),
+            "latency_jitter_ms": _metric_stats(realtime, "interaction_latency_jitter_ms"),
+            "latency_window_cv": _metric_stats(realtime, "latency_window_cv"),
+            "latency_threshold_exceed_ratio": _metric_stats(
+                realtime, "latency_threshold_exceed_ratio"
+            ),
+            "latency_drift_ms_per_event": _metric_stats(
+                realtime, "interaction_latency_slope_ms_per_event"
+            ),
+            "interaction_event_count": _metric_stats(realtime, "interaction_event_count"),
+            "network_profile_ids": sorted(
+                {
+                    str(item.get("metrics", {}).get("network_profile_id"))
+                    for item in realtime
+                    if item.get("metrics", {}).get("network_profile_id")
+                }
+            ),
         }
 
 

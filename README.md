@@ -1,6 +1,6 @@
 # XMAX Test
 
-XMAX 离线与实时视频模型测试平台。已实现可追溯、可续跑、可版本化的分阶段核心流程：
+XMAX 与 Decart Lucy 2.5 视频模型测试平台。离线生成可在 XMAX / Decart Provider 之间选择；浏览器实时生成、RTC证据和网络准入仍是 XMAX 专有测试项。已实现可追溯、可续跑、可版本化的分阶段核心流程：
 
 ```text
 素材下载
@@ -17,7 +17,7 @@ XMAX 离线与实时视频模型测试平台。已实现可追溯、可续跑、
 
 Plan同时产生冻结Task Batch：上层通过可插拔策略分配全量、随机或指定Feed×Prompt组合，下层Worker每次只领取一条任务执行“生成→预处理→评测→同步→对账”。默认重复5次，`repeat_count`可随每次请求修改。
 
-当前仓库包含真实 REST/COS、浏览器实时 SDK、Qwen3-VL OpenAI兼容Provider、Codex CLI备选Provider、音频指标、CV Python插件、飞书 `lark-cli`的适配边界及全 Fake 回归。巨大 CV 权重、GPU 运行环境、密钥和飞书映射仍是允许插件式提供的外部输入；缺失时该维度返回不可评，不伪造中性分。[BENCHMARK.md](BENCHMARK.md) 已录入当前暂定评测标准，整体以Shadow运行；第一轮测试后通过新版本调整维度、权重和规则，不原地覆盖历史。
+当前仓库包含 XMAX REST/COS、Decart Lucy 2.5 Queue API、Lucy输入转码缓存、XMAX浏览器实时 SDK、Qwen3-VL OpenAI兼容Provider、Codex CLI备选Provider、音频指标、CV Python插件、飞书 `lark-cli`的适配边界及全 Fake 回归。真实生成密钥不入库，付费请求仍需显式批准。
 
 没有历史上下文的建设 Agent 先读 [AGENTS.md](AGENTS.md) 和 [IMPLEMENTATION.md](IMPLEMENTATION.md)；项目建成后的操作者只按 [RUNBOOK.md](RUNBOOK.md) 执行。
 
@@ -35,7 +35,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -
 
 ```text
 Project check passed
-BENCHMARK valid: version=0.3.0-draft status=shadow dimensions=10 weight_profiles=2 scene_weight_rules=16 score_schemas=1 scenarios=10
+BENCHMARK valid: version=0.4.0-draft status=shadow dimensions=11 weight_profiles=2 scene_weight_rules=18 score_schemas=1 scenarios=12
 ```
 
 ## 2. 目录
@@ -104,7 +104,7 @@ xmax-test/
 4. 人工可以立即覆盖单条评测结果，但模型学习必须创建 Challenger 并通过 Holdout。
 5. 离线与实时生成共用 TestCase、GenerationRun、Judgment 合同，不共用不适合的运行指标。
 6. 飞书是协作数据库和展示面，不是唯一事实源；本地元数据与原始产物必须可重建飞书内容。
-7. 批量计费生成前必须先输出组合数、预计任务数、预计积分范围和跳过项，再由操作者放行。
+7. 批量计费生成前必须先输出组合数、Provider任务数、XMAX积分或Decart美元估算、最坏上界和跳过项，再由操作者放行。
 8. 默认飞书投影为Feed数据、Prompt数据、Case数据；每次Run独立占一个Case编号，失败为0%、未重评为空。
 9. 默认每个Feed × Prompt重复5次但可覆盖；Case只保存单次百分比，组平均与分布只出现在报告。
 10. 每条视频必须保存Benchmark细则级的0/1/2或不可评结果；维度分从细则确定性汇总，批次再按同一`criterion_id`统计，禁止从维度分反推细则。
@@ -115,7 +115,7 @@ xmax-test/
 
 ## 5. 运行准备
 
-建设状态和外部实测边界见 [IMPLEMENTATION.md](IMPLEMENTATION.md)，无上下文的执行 Agent 只需按 [RUNBOOK.md](RUNBOOK.md) 操作。真实运行前先执行 `context-check`：它会一次性列出 `ffmpeg/ffprobe`、COS SDK、Node/Playwright/XMAX SDK、Codex、Judge 插件、Key 和飞书映射等缺项。
+建设状态和外部实测边界见 [IMPLEMENTATION.md](IMPLEMENTATION.md)，无上下文的执行 Agent 只需按 [RUNBOOK.md](RUNBOOK.md) 操作。真实运行前先执行 `context-check`：它会按Provider检查 `XMAX_API_KEY` 或 `DECART_API_KEY`，并一次性列出 `ffmpeg/ffprobe`、COS SDK、Node/Playwright/XMAX SDK、Judge 插件和飞书映射等缺项。Lucy请求模板见 [config/run-decart-offline.example.json](config/run-decart-offline.example.json)。
 
 ## 6. 设计来源和排除项
 

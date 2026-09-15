@@ -14,10 +14,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ...errors import ContractError, ExternalServiceError, ValidationError
+from ...errors import (
+    AmbiguousSubmissionError,
+    ContractError,
+    ExternalServiceError,
+    ValidationError,
+)
 from ...hashing import content_hash, file_sha256
 from ...planning.builder import generation_signature
 from ...time import utc_now
+from ..feed_input import FfmpegFeedPreprocessor
 from .repository import OfflineRunRepository
 from .rest_adapter import OfflineTaskTransport
 from .session_api import SessionApiClient
@@ -48,6 +54,12 @@ class OfflineGenerationAdapter:
         heartbeat_interval_s: float = 5.0,
         lifecycle_timeout_s: float = 300.0,
         capture_extractor: Any = None,
+        input_normalizer: Any = None,
+        feed_preprocessor: Any = None,
+        origin: str = "xmax_offline",
+        provider_id: str = "xmax",
+        poll_interval_s: float = 0.0,
+        max_poll_attempts: int = 300,
         clock: Any = None,
     ) -> None:
         if backend not in {"rest", "session_rtc"}:
@@ -66,6 +78,15 @@ class OfflineGenerationAdapter:
         self._heartbeat_interval_s = heartbeat_interval_s
         self._lifecycle_timeout_s = lifecycle_timeout_s
         self._capture_extractor = capture_extractor
+        self._input_normalizer = input_normalizer
+        self._feed_preprocessor = feed_preprocessor or FfmpegFeedPreprocessor(artifacts, validator)
+        self._feed_evidence: dict[str, Any] = {}
+        self._origin = origin
+        self._provider_id = provider_id
+        self._poll_interval_s = poll_interval_s
+        if isinstance(max_poll_attempts, bool) or not isinstance(max_poll_attempts, int) or max_poll_attempts <= 0:
+            raise ContractError("max_poll_attempts must be a positive integer")
+        self._max_poll_attempts = max_poll_attempts
         self._clock = clock
         self._upload_cache: dict[str, str] = {}
 
@@ -90,6 +111,18 @@ class OfflineGenerationAdapter:
                 f"case {case['case_id']} has invalid refVideoPath binding: {ref_video_role!r}"
             )
         assets = self._resolve_assets(case, ref_video_role, ref_image_role)
+        normalization_profile = case.get("generation_config", {}).get(
+            "input_normalization_profile"
+        )
+        if normalization_profile:
+            if self._input_normalizer is None:
+                raise ContractError(
+                    f"case {case['case_id']} requires input normalization "
+                    f"{normalization_profile!r}, but no normalizer is configured"
+                )
+            assets["ref_video"] = self._input_normalizer.normalize(
+                assets["ref_video"], normalization_profile
+            )
         import uuid
 
         run_id = f"run-{uuid.uuid4().hex[:16]}"
@@ -98,6 +131,7 @@ class OfflineGenerationAdapter:
             "case": case,
             "bindings": bindings,
             "assets": assets,
+            "feed_preprocessing": self._feed_evidence,
             "backend": self._backend,
         }
 
@@ -245,9 +279,9 @@ class OfflineGenerationAdapter:
                 "status": "running",
                 "model_id": case.get("model_id") or self.model_id,
                 "mode": "offline",
-                "origin": "xmax_offline",
+                "origin": self._origin,
                 "provenance": {
-                    "source_type": "xmax_offline",
+                    "source_type": self._origin,
                     "source_locator": self._backend,
                     "source_hash": content_hash(
                         {"case": case["case_id"], "model": case.get("model_id")}
@@ -257,6 +291,7 @@ class OfflineGenerationAdapter:
                 "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
                 "metrics": {
                     "backend": self._backend,
+                    "provider": self._provider_id,
                     "generation_signature": case.get("generation_signature")
                     or generation_signature(case),
                 },
@@ -265,10 +300,35 @@ class OfflineGenerationAdapter:
         self._repository.append_event(
             run_id, "status_running", payload={"case_id": case["case_id"]}
         )
+        if prepared.get("feed_preprocessing"):
+            self._repository.append_event(run_id, "feed_preprocessed", payload=prepared["feed_preprocessing"])
 
         try:
             task = self.submit(prepared)
         except Exception as exc:
+            if isinstance(exc, AmbiguousSubmissionError):
+                self._repository.append_event(
+                    run_id,
+                    "submission_outcome_unknown",
+                    payload={"failure_class": "ambiguous_submission", "error": str(exc)},
+                )
+                raw_events_uri = self._repository.save_raw_events(
+                    run_id, self._repository.get_event_log(run_id)
+                )
+                self._repository.update_status(
+                    run_id,
+                    "running",
+                    metrics={
+                        "backend": self._backend,
+                        "provider": self._provider_id,
+                        "generation_signature": case.get("generation_signature")
+                        or generation_signature(case),
+                        "failure_class": "ambiguous_submission",
+                        "operator_action": "reconcile provider jobs before retrying",
+                    },
+                    raw_events_uri=raw_events_uri,
+                )
+                raise
             self._repository.append_event(
                 run_id,
                 "status_error",
@@ -279,6 +339,7 @@ class OfflineGenerationAdapter:
                 "error",
                 metrics={
                     "backend": self._backend,
+                    "provider": self._provider_id,
                     "generation_signature": case.get("generation_signature")
                     or generation_signature(case),
                     "failure_class": "submit_failure",
@@ -290,6 +351,9 @@ class OfflineGenerationAdapter:
             )
             raise
         task["run_id"] = run_id
+        task["fresh_run_timing"] = True
+        if task.get("backend") == "rest":
+            task["submitted_monotonic"] = time.monotonic()
 
         return self._finish_submitted_run(case, run_id, task, started_monotonic)
 
@@ -302,40 +366,80 @@ class OfflineGenerationAdapter:
     ) -> dict[str, Any]:
         """Poll and persist an already-submitted task without submitting it again."""
 
-        for _ in range(300):
+        submitted_monotonic = task.get("submitted_monotonic")
+        processing_started_monotonic: float | None = None
+        terminal_monotonic: float | None = None
+        for _ in range(self._max_poll_attempts):
             event = self.poll(task)
             self._repository.append_event(run_id, event["event"], payload={"state": event["state"]})
             task["state"] = event["state"]
+            state = event["state"].get("status")
+            now = time.monotonic()
+            if state == "processing" and processing_started_monotonic is None:
+                processing_started_monotonic = now
             if event["terminal"]:
+                terminal_monotonic = now
                 break
-            if (
-                self._backend == "rest"
-                and self._transport.__class__.__name__ == "HttpOfflineTaskTransport"
-            ):
-                time.sleep(2)
+            if self._poll_interval_s > 0:
+                time.sleep(self._poll_interval_s)
+
+        if terminal_monotonic is None:
+            task["state"] = {
+                "status": "error",
+                "failure_class": "poll_timeout",
+                "error": "offline generation did not reach a terminal state within the poll budget",
+            }
+            self._repository.append_event(
+                run_id,
+                "status_error",
+                payload={"state": task["state"]},
+            )
 
         collected = self.collect(task)
         status = collected["status"]
         metrics = {
             **collected["metrics"],
+            "provider": self._provider_id,
             "generation_elapsed_s": round(time.monotonic() - started_monotonic, 3),
             "generation_signature": case.get("generation_signature") or generation_signature(case),
             "expected_audio_source_asset_id": case.get("expected_audio_source_asset_id"),
             "audio_facts": self._audio_facts(case),
         }
+        if (
+            isinstance(submitted_monotonic, (int, float))
+            and processing_started_monotonic is not None
+            and terminal_monotonic is not None
+        ):
+            metrics["queue_wait_s"] = round(
+                processing_started_monotonic - float(submitted_monotonic), 3
+            )
+            metrics["model_generation_elapsed_s"] = round(
+                terminal_monotonic - processing_started_monotonic, 3
+            )
         result_asset_id = None
         if status == "completed":
             try:
-                result_asset_id = self._register_result(case, collected.get("result_url"))
+                result_asset_id, transfer_elapsed_s = self._register_result(
+                    case, collected.get("result_url")
+                )
+                metrics["result_transfer_elapsed_s"] = transfer_elapsed_s
             except (ValidationError, ExternalServiceError) as exc:
                 status = "error"
                 metrics["failure_class"] = "download_failure"
                 metrics["error"] = str(exc)
+        if task.get("fresh_run_timing") is True:
+            metrics["end_to_end_delivery_elapsed_s"] = round(
+                time.monotonic() - started_monotonic, 3
+            )
+        raw_events_uri = self._repository.save_raw_events(
+            run_id, self._repository.get_event_log(run_id)
+        )
         self._repository.update_status(
             run_id,
             status,
             metrics=metrics,
             result_asset_id=result_asset_id,
+            raw_events_uri=raw_events_uri,
         )
         return self._repository.get_run(run_id)
 
@@ -344,6 +448,8 @@ class OfflineGenerationAdapter:
         self, case: dict[str, Any], ref_video_role: str, ref_image_role: str | None
     ) -> dict[str, Any]:
         feed = self._asset_file(case["feed_asset_id"])
+        feed = self._feed_preprocessor.prepare(feed)
+        self._feed_evidence = feed.get("feed_preprocessing", {})
         if ref_video_role == "feed_video" and feed.get("kind") != "feed_video":
             raise ValidationError(
                 f"case {case['case_id']} requires a feed video, got {feed.get('kind')}"
@@ -464,14 +570,18 @@ class OfflineGenerationAdapter:
         self._upload_cache[cache_key] = url
         return url
 
-    def _register_result(self, case: dict[str, Any], result_url: str | None) -> str:
+    def _register_result(
+        self, case: dict[str, Any], result_url: str | None
+    ) -> tuple[str, float]:
         if not result_url:
             raise ExternalServiceError("completed task has no result_url")
         target = self._artifacts.resolve(f"artifact://runs/{case['case_id']}/result.mp4")
         target.parent.mkdir(parents=True, exist_ok=True)
+        transfer_started = time.monotonic()
         download = self._result_source.fetch(result_url, target)
+        transfer_elapsed_s = round(time.monotonic() - transfer_started, 3)
         media = self._validator.validate(target, "result_video")
-        return self._register_asset(download, media, case["case_id"])
+        return self._register_asset(download, media, case["case_id"]), transfer_elapsed_s
 
     def _register_asset(self, download: dict[str, Any], media: dict[str, Any], case_id: str) -> str:
         from ...assets.models import DownloadResult
@@ -492,7 +602,7 @@ class OfflineGenerationAdapter:
             "bytes": result.bytes,
             "mime_type": "video/mp4",
             "source": {
-                "source_id": "xmax_offline",
+                "source_id": self._origin,
                 "source_kind": "generation",
                 "case_id": case_id,
             },

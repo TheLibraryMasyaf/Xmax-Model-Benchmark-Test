@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "XMAX Run Request",
+  "title": "Video Evaluation Run Request",
   "type": "object",
   "required": [
     "request_id",
@@ -56,6 +56,8 @@
     "existing_results_request_path": {"type": ["string", "null"]},
     "benchmark_path": {"type": "string", "minLength": 1},
     "scenario_pack_path": {"type": "string", "minLength": 1},
+    "generation_provider": {"enum": ["xmax", "decart"]},
+    "model_id": {"type": "string", "minLength": 1},
     "generation_modes": {
       "type": "array",
       "uniqueItems": true,
@@ -78,6 +80,8 @@
       "default": 3
     },
     "repeat_count": {"type": "integer", "minimum": 1, "default": 5},
+    "network_profile_id": {"type": "string", "minLength": 1},
+    "max_network_retries": {"type": "integer", "minimum": 0, "maximum": 5},
     "seed": {"type": "integer"},
     "combination_selection": {
       "type": "object",
@@ -231,6 +235,18 @@
         "required": ["existing_results_request_path"]
       },
       "then": {"properties": {"stages": {"contains": {"const": "ingest"}}}}
+    },
+    {
+      "if": {
+        "properties": {"generation_provider": {"const": "decart"}},
+        "required": ["generation_provider", "generation_modes"]
+      },
+      "then": {
+        "properties": {
+          "generation_modes": {"items": {"const": "offline"}},
+          "model_id": {"const": "lucy-2.5"}
+        }
+      }
     }
   ],
   "additionalProperties": false

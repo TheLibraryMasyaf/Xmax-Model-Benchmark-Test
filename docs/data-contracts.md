@@ -46,13 +46,13 @@ pending → leased → generating → preprocessing → evaluating → syncing �
                     └─ 付费闸门或批次级评测基础设施暂停 → evaluation_paused
 ```
 
-模型正常返回生成失败Run时，Task仍标记`completed`且`outcome=generation_error`，并按0%同步；`error`只表示流程基础设施未完成，可用`--resume`重试。`evaluation_paused`不是失败，也不持有租约；它保存已有Run/Preprocess引用。付费闸门暂停需人工重新授权；评测基础设施暂停在修复网络、认证或错误分类后显式续跑。
+模型正常返回生成失败Run时，Task仍标记`completed`且`outcome=generation_error`，并按0%同步；但实时网络准入失败是环境无效，不是模型失败，其Run为`cancelled`且不同步、不评分。`error`只表示流程基础设施未完成，可用`--resume`重试。`evaluation_paused`不是失败，也不持有租约；它保存已有Run/Preprocess引用。付费闸门暂停需人工重新授权；评测基础设施暂停在修复网络、认证或错误分类后显式续跑。
 
 ### 2.3 GenerationRun
 
 Schema：`schemas/generation-run.schema.json`。每次尝试均追加Run；重试不能覆盖原Run。每个Run绑定一个`run_batch_id`和Case编号；失败Run同样保留并投影为0% Case记录。
 
-`origin`必须是`xmax_offline`、`xmax_realtime`、`feishu_import`、`local_import`或`stage_manifest_import`。所有Run都要保存`provenance`；导入Run不伪造XMAX task/session/延迟/FPS事实，缺失指标显式标为不可用。
+`origin`必须是`xmax_offline`、`decart_offline`、`xmax_realtime`、`feishu_import`、`local_import`或`stage_manifest_import`。TestCase的`generation_provider`和`model_id`是生成身份与`generation_signature`的一部分，XMAX与Lucy结果不得互相续跑复用。所有Run都要保存`provenance`；导入Run不伪造Provider task/session/延迟/FPS事实，缺失指标显式标为不可用。
 
 共同状态：
 
@@ -72,7 +72,7 @@ Schema：`schemas/judgment.schema.json`。每条只对应一个维度、一个Ju
 
 Schema：`schemas/evaluation-result.schema.json`。必须保存融合后的`criterion_results`与由它们确定性计算的`dimension_results`；维度分不得反向填充细则分。对同一细则的多Judge结果保存Judge列表、版本、证据和`judge_score_count`。当前Benchmark只按预设核心场景规则计算`scenario_score`，`canonical_score`保留为`null`兼容字段，并记录实现基底、命中规则、有评测能力的维度/细则集合、最终有效权重和硬门槛结果。未命中核心场景权重规则时`score_readiness=missing_scene_weight_rule`且不出总分。`case_score_percent`取Score Schema声明的`case_score_output`，范围0–100，用于单次Case的飞书展示。投影到飞书百分比字段时转为0–1（写入除100，读回乘100），内部对象始终保持0–100。
 
-Evaluation Batch Manifest的`metadata.aggregate`保存逐细则、逐维度、总分统计和P.2/P.3/RP.1/RP.2报告指标。四项批次指标不属于Judgment，不回填单视频。历史Evaluation没有`criterion_results`时只能标记为旧口径/缺失，必须用新Benchmark重评后才能进入细则汇总。
+Evaluation Batch Manifest的`metadata.aggregate`保存逐细则、逐维度、总分统计和P.2/P.3/P.4/RP.1/RP.2/RP.3报告指标。六项批次指标不属于Judgment，不回填单视频。历史Evaluation没有`criterion_results`时只能标记为旧口径/缺失，必须用新Benchmark重评后才能进入细则汇总。
 
 生成失败、结果无效或阻断型Hard Gate产生`case_score_percent=0`；尚未使用新Benchmark重评的历史Case使用`null`。空值与0分不可互换。
 

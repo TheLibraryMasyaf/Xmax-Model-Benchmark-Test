@@ -48,10 +48,13 @@ REQUIRED_PROJECT_FILES = (
     "config/human-feedback-source.example.json",
     "config/interaction-profiles.example.json",
     "config/interaction-profiles.json",
+    "config/network-profiles.example.json",
+    "config/network-profiles.json",
     "config/judges.example.json",
     "config/operation-recipes.example.json",
     "config/operation-recipes.json",
     "config/project.example.json",
+    "config/run-decart-offline.example.json",
     "config/run-evaluate-only.example.json",
     "config/run-generate-only.example.json",
     "config/run-import-evaluate-only.example.json",
@@ -84,6 +87,7 @@ REQUIRED_PROJECT_FILES = (
     "schemas/human-feedback-source.schema.json",
     "schemas/judge-registry.schema.json",
     "schemas/interaction-profiles.schema.json",
+    "schemas/network-profiles.schema.json",
     "schemas/model-version-report.schema.json",
     "schemas/single-version-report-request.schema.json",
     "schemas/single-version-report.schema.json",
@@ -154,6 +158,7 @@ class Composition:
         self.scenario_pack = load_scenario_pack(scenario_path)
         self.recipes = self._build_recipes()
         self.interactions = self._build_interactions()
+        self.network_profiles = self._build_network_profiles()
         self._evaluation_budget_gate = None
         self.judges = self._build_judges()
 
@@ -176,6 +181,25 @@ class Composition:
             self.project.get("xmax_api_key_file")
         )
 
+    def decart_api_key(self) -> str | None:
+        return env_secret(
+            self.project.get("decart_api_key_env", "DECART_API_KEY"), self.root / ".env"
+        )
+
+    def generation_provider(self, request: dict[str, Any] | None = None) -> str:
+        return str(
+            (request or {}).get("generation_provider")
+            or self.project.get("default_offline_provider", "xmax")
+        )
+
+    def generation_model(self, request: dict[str, Any] | None = None) -> str:
+        request = request or {}
+        if request.get("model_id"):
+            return str(request["model_id"])
+        if self.generation_provider(request) == "decart":
+            return str(self.project.get("decart_model", "lucy-2.5"))
+        return str(self.project.get("default_model", "x2.0"))
+
     def _build_interactions(self) -> Any:
         from .generation.realtime.interactions import InteractionProfileResolver
 
@@ -184,6 +208,50 @@ class Composition:
             path = self.PACKAGE_ROOT / "config" / "interaction-profiles.json"
         pack = load_config(path, "interaction-profiles.schema.json")
         return InteractionProfileResolver(pack)
+
+    def _build_network_profiles(self) -> Any:
+        from .generation.realtime.network import NetworkProfileResolver
+
+        path = self._path("network_profile_path", "config/network-profiles.json")
+        if not path.is_file():
+            path = self.PACKAGE_ROOT / "config" / "network-profiles.json"
+        pack = load_config(path, "network-profiles.schema.json", base_dir=self.root)
+        return NetworkProfileResolver(pack)
+
+    def planning_generation_config(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.generation_provider(request) == "decart":
+            return {
+                "resolution": self.project.get("decart_resolution", "720p"),
+                "enhance_prompt": self.project.get("decart_enhance_prompt", False),
+                "self_anchor": self.project.get("decart_self_anchor", True),
+                "input_normalization_profile": "decart-720p-h264-pad-v1",
+                "cost_usd_per_second": self.project.get(
+                    "decart_cost_usd_per_second", 0.04
+                ),
+                **({"seed": request["seed"]} if request.get("seed") is not None else {}),
+                **request.get("generation_config", {}),
+            }
+        config = {
+            "quality": self.project.get("xmax_offline_quality", "hd"),
+            "fps": self.project.get("xmax_offline_fps", 24),
+            "duration_s": 3,
+            **request.get("generation_config", {}),
+        }
+        profile_id = request.get(
+            "network_profile_id", self.project.get("default_network_profile_id")
+        )
+        if profile_id:
+            from .hashing import content_hash
+
+            profile = self.network_profiles.resolve(profile_id)
+            config["network_profile_id"] = profile_id
+            config["network_profile_version"] = profile["version"]
+            config["network_profile_hash"] = content_hash(profile)
+            config["max_network_retries"] = request.get(
+                "max_network_retries",
+                self.project.get("default_max_network_retries", 3),
+            )
+        return config
 
     def realtime_case_config(
         self, case: dict[str, Any], *, headed: bool = False
@@ -198,6 +266,34 @@ class Composition:
             seed_key=case.get("case_id"),
             duration_ms=duration_s * 1000,
         )
+        generation = case.get("generation_config", {})
+        profile_id = generation.get(
+            "network_profile_id", self.project.get("default_network_profile_id")
+        )
+        profile = self.network_profiles.resolve(profile_id)
+        if profile:
+            from .hashing import content_hash
+
+            expected_version = generation.get("network_profile_version")
+            expected_hash = generation.get("network_profile_hash")
+            if expected_version and expected_version != profile.get("version"):
+                raise ConfigError(
+                    f"frozen network profile version {expected_version!r} does not match "
+                    f"current {profile.get('version')!r}"
+                )
+            if expected_hash and expected_hash != content_hash(profile):
+                raise ConfigError(
+                    "frozen network profile content changed; create a new profile ID/version"
+                )
+        retry_count = None
+        if profile:
+            retry_count = self.network_profiles.retry_count(
+                profile,
+                generation.get(
+                    "max_network_retries",
+                    self.project.get("default_max_network_retries"),
+                ),
+            )
         return {
             "headed": headed,
             "content_width": width,
@@ -205,6 +301,10 @@ class Composition:
             "duration_s": duration_s,
             "tracks": interaction["tracks"],
             "interaction_profile": interaction["profile"],
+            "network_profile_id": profile_id,
+            "network_profile": profile,
+            "network_profile_hash": generation.get("network_profile_hash"),
+            "max_network_retries": retry_count,
         }
 
     def _build_judges(self) -> Any:
@@ -364,13 +464,50 @@ class Composition:
         )
 
     # ------------------------------------------------------------------
-    def offline_adapter(self, *, run_batch_id: str, model_id: str) -> Any:
+    def offline_adapter(
+        self, *, run_batch_id: str, model_id: str, provider: str = "xmax"
+    ) -> Any:
         from .generation.fakes import FakeResultSource, build_offline_adapter
         from .generation.offline.adapter import OfflineGenerationAdapter
         from .generation.offline.repository import OfflineRunRepository
         from .generation.offline.rest_adapter import HttpOfflineTaskTransport
 
         run_repo = OfflineRunRepository(self.database, self.artifacts)
+        if provider == "decart":
+            from .generation.offline.decart import (
+                DecartOfflineGenerationAdapter,
+                HttpDecartQueueTransport,
+            )
+            from .generation.offline.media import FfmpegOfflineInputNormalizer
+
+            transport = self.inject.get("decart_transport")
+            if transport is None:
+                transport = HttpDecartQueueTransport(
+                    base_url=self.project.get(
+                        "decart_api_base_url", "https://api.decart.ai/v1"
+                    ),
+                    api_key=self.decart_api_key(),
+                    timeout_s=int(self.project.get("decart_timeout_s", 600)),
+                )
+            normalizer = self.inject.get("offline_input_normalizer")
+            if normalizer is None:
+                normalizer = FfmpegOfflineInputNormalizer(
+                    self.artifacts, self._media_validator()
+                )
+            return DecartOfflineGenerationAdapter(
+                run_repo,
+                self.artifacts,
+                self._media_validator(),
+                run_repo,
+                transport=transport,
+                input_normalizer=normalizer,
+                model_id=model_id,
+                run_batch_id=run_batch_id,
+                poll_interval_s=float(self.project.get("decart_poll_interval_s", 2)),
+                clock=self.clock,
+            )
+        if provider != "xmax":
+            raise ConfigError(f"unsupported offline generation provider: {provider}")
         transport = self.inject.get("offline_transport")
         session_api = self.inject.get("session_api")
         rtc = self.inject.get("rtc")
@@ -408,6 +545,7 @@ class Composition:
             result_source=FakeResultSource(transport),
             model_id=model_id,
             run_batch_id=run_batch_id,
+            poll_interval_s=2,
             clock=self.clock,
         )
 
@@ -867,7 +1005,8 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
             "asset_batch_ids": [
                 ref.entity_id for ref in req.input_refs if ref.entity_type == "asset_batch"
             ],
-            "model_id": composition.project.get("default_model", "x2.0"),
+            "generation_provider": composition.generation_provider(request),
+            "model_id": composition.generation_model(request),
             "repeat_count": request.get(
                 "repeat_count", composition.project.get("default_repeats", 5)
             ),
@@ -879,12 +1018,7 @@ def _plan_executor(composition: Composition, request: dict[str, Any], args: argp
                 "combination_selection", {"strategy": "cartesian"}
             ),
             "scenario_overrides": request.get("scenario_overrides", {}),
-            "generation_config": {
-                "quality": composition.project.get("xmax_offline_quality", "hd"),
-                "fps": composition.project.get("xmax_offline_fps", 24),
-                "duration_s": 3,
-                **request.get("generation_config", {}),
-            },
+            "generation_config": composition.planning_generation_config(request),
         }
         if args.dry_run:
             preview = builder.preview(plan_request)
@@ -944,9 +1078,26 @@ def _generate_executor(
                 ],
             )
         plan = composition.database.get_test_plan(plan_ref.entity_id)
-        model_id = composition.project.get("default_model", "x2.0")
+        plan_provider = str(
+            plan.get("metadata", {}).get("generation_provider")
+            or request.get("generation_provider")
+            or "xmax"
+        )
+        model_id = str(
+            plan.get("metadata", {}).get("model_id")
+            or composition.generation_model(request)
+        )
         batch_id = f"runs-{plan.get('plan_hash', '')[:8]}-{req.stage_run_id[-8:]}"
         cases = _smoke_cases(plan.get("cases", []), req.smoke_limit)
+        providers = {
+            str(case.get("generation_provider") or plan_provider) for case in cases
+        }
+        if len(providers) > 1:
+            raise ConfigError("one frozen TestPlan cannot mix generation providers")
+        if plan_provider == "decart" and any(
+            case.get("generation_mode") == "realtime" for case in cases
+        ):
+            raise ConfigError("Decart Lucy 2.5 cannot execute realtime cases")
         offline_adapter = None
         realtime_controller = None
 
@@ -954,7 +1105,11 @@ def _generate_executor(
         # upload transport is unavailable or misconfigured. This prevents a
         # batch-wide storm of identical submit_failure rows.
         if any(case.get("generation_mode") == "offline" for case in cases):
-            offline_adapter = composition.offline_adapter(run_batch_id=batch_id, model_id=model_id)
+            offline_adapter = composition.offline_adapter(
+                run_batch_id=batch_id,
+                model_id=model_id,
+                provider=plan_provider,
+            )
             offline_adapter.preflight()
 
         def generate_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -1016,7 +1171,9 @@ def _generate_executor(
                     ) from exc
             if offline_adapter is None:
                 offline_adapter = composition.offline_adapter(
-                    run_batch_id=batch_id, model_id=model_id
+                    run_batch_id=batch_id,
+                    model_id=model_id,
+                    provider=str(case.get("generation_provider") or plan_provider),
                 )
             return offline_adapter.run_case(case)
 
@@ -1626,7 +1783,8 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
     builder = composition.plan_builder()
     plan_request = {
         "asset_batch_ids": [],
-        "model_id": composition.project.get("default_model", "x2.0"),
+        "generation_provider": composition.generation_provider(request),
+        "model_id": composition.generation_model(request),
         "repeat_count": request.get("repeat_count", composition.project.get("default_repeats", 5)),
         "generation_modes": request.get("generation_modes", ["offline"]),
         "generation_mode_overrides": request.get("generation_mode_overrides", []),
@@ -1634,12 +1792,7 @@ def cmd_plan(composition: Composition, args: argparse.Namespace) -> int:
         "seed": request.get("seed"),
         "combination_selection": request.get("combination_selection", {"strategy": "cartesian"}),
         "scenario_overrides": request.get("scenario_overrides", {}),
-        "generation_config": {
-            "quality": composition.project.get("xmax_offline_quality", "hd"),
-            "fps": composition.project.get("xmax_offline_fps", 24),
-            "duration_s": 3,
-            **request.get("generation_config", {}),
-        },
+        "generation_config": composition.planning_generation_config(request),
     }
     if args.action == "preview":
         data = builder.preview(plan_request)
@@ -1756,10 +1909,14 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
             "standalone offline generation requires --budget-approved after plan preview"
         )
     plan = composition.database.get_test_plan(args.plan_id)
-    model_id = composition.project.get("default_model", "x2.0")
+    provider = str(plan.get("metadata", {}).get("generation_provider") or "xmax")
+    model_id = str(
+        plan.get("metadata", {}).get("model_id")
+        or ("lucy-2.5" if provider == "decart" else composition.project.get("default_model", "x2.0"))
+    )
     provisional_batch_id = f"pending-offline-{plan.get('plan_hash', '')[:12]}"
     adapter = composition.offline_adapter(
-        run_batch_id=provisional_batch_id, model_id=model_id
+        run_batch_id=provisional_batch_id, model_id=model_id, provider=provider
     )
     if any(case.get("generation_mode") == "offline" for case in plan.get("cases", [])):
         adapter.preflight()
@@ -1773,7 +1930,9 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
                 for run in composition.database.list_runs(
                     case_id=case["case_id"], status="completed"
                 )
-                if run.get("model_id") == model_id and run.get("mode") == "offline"
+                if run.get("model_id") == (case.get("model_id") or model_id)
+                and run.get("origin") == f"{provider}_offline"
+                and run.get("mode") == "offline"
             ]
             if existing:
                 reused = max(
@@ -1791,7 +1950,12 @@ def cmd_generate_offline(composition: Composition, args: argparse.Namespace) -> 
         item_entity_type="generation_run",
         item_ids=[run["run_id"] for run in runs],
         producer_stage_run_id="cli-generate",
-        metadata={"generation_mode": "offline", "plan_id": plan.get("plan_id")},
+        metadata={
+            "generation_mode": "offline",
+            "generation_provider": provider,
+            "model_id": model_id,
+            "plan_id": plan.get("plan_id"),
+        },
     )
     for run in runs:
         current = composition.database.get_run(run["run_id"])
@@ -1833,7 +1997,15 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
                 for run in composition.database.list_runs(
                     case_id=case["case_id"], status="completed"
                 )
-                if run.get("model_id") == model_id and run.get("mode") == "realtime"
+                if run.get("model_id") == model_id
+                and run.get("mode") == "realtime"
+                and (
+                    not case.get("generation_config", {}).get("network_profile_id")
+                    or run.get("metrics", {})
+                    .get("network_qualification", {})
+                    .get("status")
+                    == "qualified"
+                )
             ]
             if existing:
                 reused = max(
@@ -1861,6 +2033,18 @@ def cmd_generate_realtime(composition: Composition, args: argparse.Namespace) ->
             )
             continue
         runs.append(run)
+        if run.get("status") != "completed":
+            errors.append(
+                {
+                    **(
+                        run.get("error")
+                        or run.get("metrics", {}).get("network_error", {})
+                    ),
+                    "stage": "generate",
+                    "entity_id": case["case_id"],
+                    "run_id": run["run_id"],
+                }
+            )
     from .pipeline.manifests import build_batch_manifest
 
     manifest = build_batch_manifest(

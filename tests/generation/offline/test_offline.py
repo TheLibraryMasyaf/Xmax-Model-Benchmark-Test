@@ -128,6 +128,23 @@ class OfflineTestBase(unittest.TestCase):
 
 
 class RestBindingTests(OfflineTestBase):
+    def test_feed_processing_precedes_both_video_and_capture_bindings(self):
+        from unittest.mock import Mock
+        for case in [self.image_case(), self.video_case()]:
+            adapter = self.adapter()
+            processor = Mock()
+            processor.prepare.side_effect = lambda feed: {**feed, "sha256": "trimmed-feed"}
+            adapter._feed_preprocessor = processor
+            prepared = adapter.prepare(case)
+            processor.prepare.assert_called_once()
+            assets = prepared["assets"]
+            if case["api_asset_bindings"]["refVideoPath"] == "feed_video":
+                self.assertEqual(assets["ref_video"]["sha256"], "trimmed-feed")
+                self.assertEqual(assets["ref_image"]["sha256"], "sha-prompt-img")
+            else:
+                self.assertEqual(assets["ref_video"]["sha256"], "sha-prompt-vid")
+                self.assertEqual(assets["ref_image"]["sha256"], "trimmed-feed")
+
     def test_extensionless_assets_get_official_media_types(self) -> None:
         root = Path(self.directory.name)
         png = root / "image.bin"
@@ -267,6 +284,10 @@ class RestBindingTests(OfflineTestBase):
         adapter = self.adapter(transport=transport)
         run = adapter.run_case(self.image_case())
         self.assertEqual(run["status"], "completed")
+        self.assertIn("queue_wait_s", run["metrics"])
+        self.assertIn("model_generation_elapsed_s", run["metrics"])
+        self.assertIn("result_transfer_elapsed_s", run["metrics"])
+        self.assertIn("end_to_end_delivery_elapsed_s", run["metrics"])
         from xmax_test.hashing import sha256_bytes
 
         self.assertEqual(run["result_asset_id"], f"asset_{sha256_bytes(b'fake-result-video')[:16]}")

@@ -106,8 +106,8 @@ class ProjectIntegrityTests(unittest.TestCase):
     def test_draft_scenario_pack_matches_benchmark_rules(self) -> None:
         scenarios = json.loads((ROOT / "config" / "scenarios.json").read_text(encoding="utf-8"))
         self.assertEqual(scenarios["status"], "shadow")
-        self.assertEqual(len(scenarios["scenarios"]), 10)
-        self.assertEqual(sum(item["tier"] == "core" for item in scenarios["scenarios"]), 10)
+        self.assertEqual(len(scenarios["scenarios"]), 12)
+        self.assertEqual(sum(item["tier"] == "core" for item in scenarios["scenarios"]), 12)
         self.assertEqual(sum(item["tier"] == "supplementary" for item in scenarios["scenarios"]), 0)
 
     def test_operation_recipes_are_unambiguous(self) -> None:

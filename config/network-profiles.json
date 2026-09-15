@@ -1,0 +1,46 @@
+{
+  "$schema": "../schemas/network-profiles.schema.json",
+  "profile_pack_id": "xmax-natural-network-qualification",
+  "version": "1.0.0",
+  "profiles": [
+    {
+      "profile_id": "common-tun-webrtc-v1",
+      "version": "1.0.0",
+      "status": "active",
+      "kind": "natural_network_qualification",
+      "description": "TUN 保留下的常见稳定网络准入；用于排除网络波动，不用于弱网鲁棒性评测。",
+      "required_transport": {
+        "tun_required": true,
+        "candidate_pair_required": true
+      },
+      "preflight": {
+        "duration_s": 5,
+        "sample_interval_ms": 1000,
+        "min_samples": 4,
+        "max_rtt_p50_ms": 50,
+        "max_rtt_p95_ms": 80,
+        "max_candidate_switches": 0
+      },
+      "runtime": {
+        "sample_interval_ms": 1000,
+        "min_samples": 2,
+        "max_rtt_sample_ms": 120,
+        "max_rtt_p50_ms": 50,
+        "max_rtt_p95_ms": 80,
+        "max_inbound_jitter_p95_ms": 30,
+        "max_inbound_packet_loss_ratio": 0.01,
+        "max_outbound_packet_loss_ratio": 0.01,
+        "min_available_outgoing_bitrate_bps": 800000,
+        "max_candidate_switches": 0,
+        "max_disconnects": 0,
+        "max_consecutive_breach_s": 3,
+        "min_in_range_sample_ratio": 0.95
+      },
+      "retry": {
+        "default_max_network_retries": 3,
+        "max_allowed_network_retries": 5,
+        "cooldown_s": 5
+      }
+    }
+  ]
+}

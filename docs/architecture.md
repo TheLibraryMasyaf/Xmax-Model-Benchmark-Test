@@ -95,7 +95,7 @@ Builder通过可注册分配策略把TestPlan展开为冻结Task Batch。Worker�
 
 ### 4.3 Generation Runners
 
-- Offline Runner：XMAX官方文件上传协议、异步任务或 Session/RTC离线状态机、结果下载、费用和错误。
+- Offline Runner：按冻结Provider选择XMAX官方文件上传/异步任务、Session/RTC离线状态机或Decart Lucy 2.5 Queue API，统一产出结果、费用和错误事实。
 - Realtime Harness：在真实浏览器中运行 XMAX JavaScript SDK，录制输入/输出流、操作事件、RTC诊断和设备网络条件。
 
 两者只产出统一 GenerationRun，不负责视觉好坏判断。
@@ -110,7 +110,7 @@ Builder通过可注册分配策略把TestPlan展开为冻结Task Batch。Worker�
 
 ### 4.6 Evaluation Orchestrator
 
-加载当前 Benchmark 与 Scenario Pack，按维度路由 Judge，但Judge的唯一评分事实是逐细则`criterion_results`。Fusion先合并同一细则的多Judge结果，确定性汇总维度，执行P.1硬失败规则，再按显式核心场景规则计算`scenario_score`；当前Benchmark不计算`canonical_score`。单视频Evaluation保存细则覆盖，冻结批次另外保存P.2/P.3/RP.1/RP.2无档位报告指标。没有兼容 Judge 的细则标记为`uncovered`，证据不足则是`unassessable`；都不能伪造分数。
+加载当前 Benchmark 与 Scenario Pack，按维度路由 Judge，但Judge的唯一评分事实是逐细则`criterion_results`。Fusion先合并同一细则的多Judge结果，确定性汇总维度，执行P.1硬失败规则，再按显式核心场景规则计算`scenario_score`；当前Benchmark不计算`canonical_score`。单视频Evaluation保存细则覆盖，冻结批次另外保存P.2/P.3/P.4/RP.1/RP.2/RP.3无档位报告指标。没有兼容 Judge 的细则标记为`uncovered`，证据不足则是`unassessable`；都不能伪造分数。
 
 ### 4.7 Human Signal Hub
 

@@ -62,6 +62,7 @@
           "generation_mode": {"enum": ["offline", "realtime"]},
           "repeat_index": {"type": "integer", "minimum": 1},
           "model_id": {"type": "string"},
+          "generation_provider": {"enum": ["xmax", "decart"]},
           "operation_recipe_id": {"type": "string"},
           "operation_recipe_version": {"type": "string"},
           "evaluation_operation_contract": {

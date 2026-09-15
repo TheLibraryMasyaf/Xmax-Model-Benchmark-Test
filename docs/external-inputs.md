@@ -40,7 +40,7 @@
 
 ## 8. Run Request
 
-文件：`config/run-request.json`，Schema为 `schemas/run-request.schema.json`。只描述本轮显式授权的`stages`、`stage_inputs`、依赖策略、同步策略、模式、重复数、过滤和dry-run/smoke，不复制Benchmark或场景内容。`execution_mode`默认`streaming`，`pipeline_queue_size`默认4；设为`batch`才使用整批屏障。
+文件：`config/run-request.json`，Schema为 `schemas/run-request.schema.json`。只描述本轮显式授权的`stages`、`stage_inputs`、依赖策略、同步策略、模式、重复数、过滤和dry-run/smoke，不复制Benchmark或场景内容。`generation_provider`可为`xmax`或`decart`；Decart请求必须固定`model_id=lucy-2.5`并且只能包含`offline`。`execution_mode`默认`streaming`，`pipeline_queue_size`默认4；设为`batch`才使用整批屏障。
 
 `dependency_policy` 固定为`explicit_only`，`missing_input_policy`固定为`error`。Selector遵循`schemas/pipeline-selector.schema.json`；动态过滤在执行前冻结。`sync_policy`为`none / score_only / metadata_only / attachments_only / full`。默认重复5次，可被本轮或单Case覆盖。模型版本更新请求增加`comparison`。
 
@@ -48,7 +48,7 @@
 
 ## 9. Secrets
 
-`.env`允许：XMAX Key、飞书凭据、Codex路径和必要服务令牌。模板不包含真实值。密钥不能进入计划、Run记录、Codex Prompt、飞书字段或日志。
+`.env`允许：`XMAX_API_KEY`、`DECART_API_KEY`、飞书凭据、Codex路径和必要服务令牌。模板不包含真实值。密钥不能进入计划、Run记录、Codex Prompt、飞书字段或日志。
 
 ## 10. 接入检查
 

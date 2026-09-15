@@ -12,6 +12,7 @@ import hashlib
 import math
 from typing import Any
 
+from ..errors import ContractError
 from ..hashing import content_hash
 from ..tasks import TaskAllocator
 from ..time import utc_now
@@ -42,6 +43,7 @@ def generation_signature(case: dict[str, Any]) -> str:
             "mode": case.get("generation_mode"),
             "repeat_index": case.get("repeat_index"),
             "model_id": case.get("model_id"),
+            "generation_provider": case.get("generation_provider", "xmax"),
             "generation_config": case.get("generation_config", {}),
             "api_asset_bindings": case.get("api_asset_bindings", {}),
             "edited_video_asset_id": case.get("edited_video_asset_id"),
@@ -75,6 +77,7 @@ class TestPlanBuilder:
 
     # ------------------------------------------------------------------
     def preview(self, request: dict[str, Any]) -> dict[str, Any]:
+        self._validate_provider_modes(request)
         assets = self._load_assets(request)
         feeds, prompt_bundles, skipped = self._prepare(assets, request)
         cases, skipped_cases = self._expand(feeds, prompt_bundles, request)
@@ -92,12 +95,14 @@ class TestPlanBuilder:
         return budget
 
     def build(self, request: dict[str, Any]) -> dict[str, Any]:
+        self._validate_provider_modes(request)
         assets = self._load_assets(request)
         feeds, prompt_bundles, skipped = self._prepare(assets, request)
         cases, skipped_cases = self._expand(feeds, prompt_bundles, request)
         all_skipped = skipped + skipped_cases
 
         model_id = request.get("model_id", "x2.0")
+        generation_provider = request.get("generation_provider", "xmax")
         repeat_count = int(request.get("repeat_count", 5))
         seed = self._derive_seed(request)
         selection = self._selection(request)
@@ -109,6 +114,7 @@ class TestPlanBuilder:
             "scenario_pack_version": self._scenario_pack.get("version"),
             "recipe_pack_version": self._recipes.pack_version,
             "model_id": model_id,
+            "generation_provider": generation_provider,
             "repeat_count": repeat_count,
             "generation_modes": sorted(request.get("generation_modes", ["offline"])),
             "generation_config": request.get("generation_config", {}),
@@ -140,6 +146,7 @@ class TestPlanBuilder:
             created_at=self._clock.now() if self._clock else utc_now(),
             metadata={
                 "model_id": model_id,
+                "generation_provider": generation_provider,
                 "repeat_count": repeat_count,
                 "effective_repeat_count": (
                     1 if selection["strategy"] == "random_runs" else repeat_count
@@ -298,9 +305,12 @@ class TestPlanBuilder:
             for item in request.get("generation_mode_overrides", [])
         }
         model_id = request.get("model_id", "x2.0")
+        generation_provider = request.get("generation_provider", "xmax")
         repeat_count = int(request.get("repeat_count", 5))
         seed = self._derive_seed(request)
         enabled_modes = set(request.get("generation_modes", ["offline"]))
+        prompt_video_ids = self._prompt_video_ids()
+        prompt_image_ids = self._prompt_image_ids()
 
         candidates: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
@@ -343,7 +353,16 @@ class TestPlanBuilder:
                     )
                     continue
                 binding = self._recipes.bindings(recipe, mode)
-                combo = self._resolve_combo(feed, bundle, recipe, mode, binding, request)
+                combo = self._resolve_combo(
+                    feed,
+                    bundle,
+                    recipe,
+                    mode,
+                    binding,
+                    request,
+                    prompt_video_ids=prompt_video_ids,
+                    prompt_image_ids=prompt_image_ids,
+                )
                 if combo.get("skip_reason"):
                     skipped.append(
                         {
@@ -402,6 +421,7 @@ class TestPlanBuilder:
                 existing_max,
                 candidate["feed_number"],
                 model_id,
+                generation_provider,
                 seed,
                 request,
             )
@@ -447,6 +467,9 @@ class TestPlanBuilder:
         mode: str,
         binding: dict[str, str],
         request: dict[str, Any],
+        *,
+        prompt_video_ids: set[str],
+        prompt_image_ids: set[str],
     ) -> dict[str, Any]:
         ref_video_path = binding.get("refVideoPath")
         ref_image_path = binding.get("refImagePath")
@@ -454,16 +477,16 @@ class TestPlanBuilder:
         edited_role = recipe.get("edited_video_role")
         audio_role = recipe.get("expected_audio_source_role")
 
-        prompt_video_ids = [
-            aid for aid in bundle.prompt_asset_ids if aid in self._prompt_video_ids()
+        selected_prompt_video_ids = [
+            aid for aid in bundle.prompt_asset_ids if aid in prompt_video_ids
         ]
-        prompt_image_ids = [
-            aid for aid in bundle.prompt_asset_ids if aid in self._prompt_image_ids()
+        selected_prompt_image_ids = [
+            aid for aid in bundle.prompt_asset_ids if aid in prompt_image_ids
         ]
 
-        if ref_video_path == "prompt_video" and not prompt_video_ids:
+        if ref_video_path == "prompt_video" and not selected_prompt_video_ids:
             return {"skip_reason": f"recipe {recipe['recipe_id']} requires a prompt video"}
-        if ref_image_path == "prompt_image" and not prompt_image_ids:
+        if ref_image_path == "prompt_image" and not selected_prompt_image_ids:
             return {"skip_reason": f"recipe {recipe['recipe_id']} requires a prompt image"}
         if (
             mode == "offline"
@@ -490,15 +513,15 @@ class TestPlanBuilder:
         edited_video_asset_id = (
             feed["asset_id"]
             if edited_role == "feed_video" or edited_role == "realtime_input_stream"
-            else prompt_video_ids[0]
-            if prompt_video_ids
+            else selected_prompt_video_ids[0]
+            if selected_prompt_video_ids
             else None
         )
         expected_audio_source_asset_id = (
             feed["asset_id"]
             if audio_role == "feed_video" or audio_role == "realtime_input_stream"
-            else prompt_video_ids[0]
-            if prompt_video_ids
+            else selected_prompt_video_ids[0]
+            if selected_prompt_video_ids
             else None
         )
         if not edited_video_asset_id or not expected_audio_source_asset_id:
@@ -513,7 +536,7 @@ class TestPlanBuilder:
             }
         cost = self._estimate_generation_cost(
             feed=feed,
-            prompt_video_ids=prompt_video_ids,
+            prompt_video_ids=selected_prompt_video_ids,
             mode=mode,
             ref_video_path=ref_video_path,
             request=request,
@@ -524,8 +547,8 @@ class TestPlanBuilder:
             "scenario_id": scenario_id,
             "scene_tags": self._scene_tags(scenario_id),
             "api_bindings": binding,
-            "prompt_video_ids": prompt_video_ids,
-            "prompt_image_ids": prompt_image_ids,
+            "prompt_video_ids": selected_prompt_video_ids,
+            "prompt_image_ids": selected_prompt_image_ids,
             **cost,
         }
 
@@ -538,9 +561,12 @@ class TestPlanBuilder:
         ref_video_path: str | None,
         request: dict[str, Any],
     ) -> dict[str, Any]:
-        """Estimate credits with the documented XMAX billing formula."""
+        """Estimate provider-native billing from the frozen generation input."""
 
         generation = request.get("generation_config", {})
+        provider = request.get("generation_provider", "xmax")
+        if provider == "decart" and mode != "offline":
+            raise ContractError("Decart Lucy 2.5 supports offline generation only")
         if mode == "realtime":
             seconds = float(generation.get("duration_s", 3.0))
             return {
@@ -552,6 +578,15 @@ class TestPlanBuilder:
         if ref_video_path == "prompt_video" and prompt_video_ids:
             source = self._repository.get_asset(prompt_video_ids[0])
         seconds = min(float(source.get("media", {}).get("duration_s") or 0.0), 600.0)
+        if provider == "decart":
+            usd_per_second = float(generation.get("cost_usd_per_second", 0.04))
+            return {
+                "estimated_billable_duration_s": seconds,
+                "estimated_credits": 0,
+                "estimated_cost_usd": round(seconds * usd_per_second, 4),
+                "credit_formula": "not_applicable_decart_usd",
+                "cost_formula": "lucy_2_5_generated_seconds_x_usd_rate",
+            }
         quality = str(generation.get("quality", "hd"))
         quality_factor = 1.5 if quality == "hd" else 1.0
         fps = int(generation.get("fps", 24))
@@ -575,6 +610,7 @@ class TestPlanBuilder:
         existing_max: int,
         feed_number: str,
         model_id: str,
+        generation_provider: str,
         seed: int,
         request: dict[str, Any],
     ) -> dict[str, Any]:
@@ -586,6 +622,21 @@ class TestPlanBuilder:
             repeat_count=repeat_count,
             existing_max_suffix=existing_max,
         )
+        generation_config = {
+            **request.get("generation_config", {}),
+            "estimated_billable_duration_s": combo.get("estimated_billable_duration_s"),
+            "estimated_credits": combo.get("estimated_credits"),
+            "credit_formula": combo.get("credit_formula"),
+            "estimated_cost_usd": combo.get("estimated_cost_usd"),
+            "cost_formula": combo.get("cost_formula"),
+        }
+        from ..generation.feed_input import FEED_INPUT_POLICY
+        generation_config["feed_input_policy"] = FEED_INPUT_POLICY
+        if mode != "realtime":
+            generation_config.pop("network_profile_id", None)
+            generation_config.pop("network_profile_version", None)
+            generation_config.pop("network_profile_hash", None)
+            generation_config.pop("max_network_retries", None)
         case_key = {
             "feed_asset_id": feed["asset_id"],
             "prompt_text": bundle.prompt_text,
@@ -595,12 +646,8 @@ class TestPlanBuilder:
             "mode": mode,
             "repeat_index": repeat_index,
             "model_id": model_id,
-            "generation_config": {
-                **request.get("generation_config", {}),
-                "estimated_billable_duration_s": combo.get("estimated_billable_duration_s"),
-                "estimated_credits": combo.get("estimated_credits"),
-                "credit_formula": combo.get("credit_formula"),
-            },
+            "generation_provider": generation_provider,
+            "generation_config": generation_config,
             "binding_hash": recipe_binding_hash(recipe, mode, binding),
             "seed": seed,
         }
@@ -616,6 +663,7 @@ class TestPlanBuilder:
             "generation_mode": mode,
             "repeat_index": repeat_index,
             "model_id": model_id,
+            "generation_provider": generation_provider,
             "operation_recipe_id": recipe["recipe_id"],
             "operation_recipe_version": recipe.get("version", ""),
             "evaluation_operation_contract": recipe.get("evaluation_contract", {}),
@@ -625,15 +673,22 @@ class TestPlanBuilder:
             "scenario_id": combo["scenario_id"],
             "scenario_pack_version": self._scenario_pack.get("version", ""),
             "scene_tags": combo["scene_tags"],
-            "generation_config": {
-                **request.get("generation_config", {}),
-                "estimated_billable_duration_s": combo.get("estimated_billable_duration_s"),
-                "estimated_credits": combo.get("estimated_credits"),
-                "credit_formula": combo.get("credit_formula"),
-            },
+            "generation_config": generation_config,
         }
         frozen["generation_signature"] = generation_signature(frozen)
         return frozen
+
+    @staticmethod
+    def _validate_provider_modes(request: dict[str, Any]) -> None:
+        provider = request.get("generation_provider", "xmax")
+        modes = set(request.get("generation_modes", ["offline"]))
+        if provider == "decart" and modes != {"offline"}:
+            raise ContractError(
+                "generation_provider=decart requires generation_modes=[offline]; "
+                "realtime remains XMAX-only"
+            )
+        if provider == "decart" and request.get("model_id", "lucy-2.5") != "lucy-2.5":
+            raise ContractError("generation_provider=decart requires model_id=lucy-2.5")
 
     def _resolve_scenario(
         self, bundle: PromptBundle, recipe: dict[str, Any], mode: str

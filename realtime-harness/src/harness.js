@@ -141,21 +141,54 @@ try {
       Object.setPrototypeOf(TrackingPeerConnection, NativePeerConnection);
       window.RTCPeerConnection = TrackingPeerConnection;
     }
-    const snapshotRtc = async () => {
+    const snapshotRtc = async (phase) => {
+      const captured = [];
       for (const [peerIndex, peer] of peerConnections.entries()) {
         try {
           const report = await peer.getStats();
           const entries = [];
           report.forEach((entry) => {
-            if (["inbound-rtp", "outbound-rtp", "remote-inbound-rtp", "candidate-pair"].includes(entry.type)) {
+            if (["inbound-rtp", "outbound-rtp", "remote-inbound-rtp", "candidate-pair", "local-candidate", "remote-candidate", "transport"].includes(entry.type)) {
               entries.push(Object.fromEntries(Object.entries(entry)));
             }
           });
-          rtcLog.push({ tsMonotonicMs: performance.now(), tsWallMs: Date.now(), peerIndex, entries });
+          const sample = { phase, tsMonotonicMs: performance.now(), tsWallMs: Date.now(), peerIndex, entries };
+          rtcLog.push(sample);
+          captured.push(sample);
         } catch (error) {
-          rtcLog.push({ tsMonotonicMs: performance.now(), tsWallMs: Date.now(), peerIndex, error: String(error) });
+          const sample = { phase, tsMonotonicMs: performance.now(), tsWallMs: Date.now(), peerIndex, error: String(error) };
+          rtcLog.push(sample);
+          captured.push(sample);
         }
       }
+      return captured;
+    };
+    const selectedPair = (samples) => {
+      const pairs = samples.flatMap((sample) => sample.entries ?? []).filter(
+        (entry) => entry.type === "candidate-pair" && entry.state === "succeeded" && (entry.nominated || entry.selected),
+      );
+      return pairs.sort((left, right) => ((right.bytesSent ?? 0) + (right.bytesReceived ?? 0)) - ((left.bytesSent ?? 0) + (left.bytesReceived ?? 0)))[0] ?? null;
+    };
+    const percentile = (values, p) => {
+      if (!values.length) return null;
+      const ordered = [...values].sort((a, b) => a - b);
+      const position = (ordered.length - 1) * p / 100;
+      const lower = Math.floor(position), upper = Math.ceil(position);
+      return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower);
+    };
+    const preflightDecision = (samples, rules) => {
+      const pairs = samples.map((sample) => selectedPair([sample])).filter(Boolean);
+      const rtts = pairs.map((pair) => Number(pair.currentRoundTripTime) * 1000).filter(Number.isFinite);
+      const ids = pairs.map((pair) => pair.id);
+      const switches = ids.slice(1).filter((id, index) => id !== ids[index]).length;
+      const reasons = [];
+      if (samples.length < Number(rules.min_samples ?? 1) || pairs.length < Number(rules.min_samples ?? 1)) reasons.push("insufficient selected candidate-pair samples");
+      const p50 = percentile(rtts, 50), p95 = percentile(rtts, 95);
+      if (p50 == null || p95 == null) reasons.push("RTT evidence missing");
+      if (p50 != null && p50 > Number(rules.max_rtt_p50_ms)) reasons.push(`rtt_p50_ms ${p50} exceeds ${rules.max_rtt_p50_ms}`);
+      if (p95 != null && p95 > Number(rules.max_rtt_p95_ms)) reasons.push(`rtt_p95_ms ${p95} exceeds ${rules.max_rtt_p95_ms}`);
+      if (switches > Number(rules.max_candidate_switches ?? 0)) reasons.push(`candidate switches ${switches} exceeds ${rules.max_candidate_switches}`);
+      return { qualified: reasons.length === 0, reasons, sample_count: samples.length, rtt_p50_ms: p50, rtt_p95_ms: p95, candidate_switch_count: switches };
     };
 
     const sdk = await import("/sdk/index.js");
@@ -200,6 +233,8 @@ try {
       onRoomEvent: (event) => stamp("onRoomEvent", { event }),
     };
     const model = sdk.models.realtime(config.model ?? "x2.0");
+    const networkProfile = config.network_profile ?? null;
+    const autoStart = !networkProfile;
     const context = { prompt: config.prompt ?? "", ...(referenceUrl ? { refImageUrl: referenceUrl } : {}) };
     let source = null;
     let session;
@@ -218,7 +253,7 @@ try {
         },
         audio: { publish: true, subscribe: true },
         log: { rtc: true },
-        autoStart: true,
+        autoStart,
         ...connectionCallbacks,
       });
     } else if (inputMethod === "connect" && typeof client.realtime.connect === "function" && typeof client.realtime.connectMedia === "function") {
@@ -232,7 +267,7 @@ try {
         render: { remoteContainer: document.querySelector("#remote-host"), fit: "contain", drag: { enabled: false } },
         audio: { publish: true, subscribe: true },
         log: { rtc: true },
-        autoStart: true,
+        autoStart,
         ...connectionCallbacks,
       });
       source = { previewStream: ownedStream, destroy: () => ownedStream.getTracks().forEach((track) => track.stop()) };
@@ -252,7 +287,7 @@ try {
         },
         audio: { publish: true, subscribe: true },
         log: { rtc: true },
-        autoStart: true,
+        autoStart,
         ...connectionCallbacks,
       });
     } else {
@@ -267,7 +302,7 @@ try {
         initialState: {
           prompt: { text: context.prompt },
           image: referenceUrl,
-          autoStart: true,
+          autoStart,
         },
         drag: false,
         ...connectionCallbacks,
@@ -279,6 +314,43 @@ try {
     if (inputStream) {
       input.srcObject = inputStream;
       await input.play();
+    }
+    if (networkProfile) {
+      const rules = networkProfile.preflight;
+      const preflightSamples = [];
+      const until = performance.now() + Number(rules.duration_s) * 1000;
+      while (performance.now() < until) {
+        preflightSamples.push(...await snapshotRtc("preflight"));
+        await new Promise((resolve) => setTimeout(resolve, Number(rules.sample_interval_ms)));
+      }
+      const decision = preflightDecision(preflightSamples, rules);
+      if (networkProfile.required_transport?.tun_required && !config.network_environment?.tun_active) {
+        decision.reasons.push("required TUN route was not observed");
+        decision.qualified = false;
+      }
+      stamp("network_preflight", decision);
+      if (!decision.qualified || decision.reasons.length) {
+        await session.disconnect();
+        source?.destroy?.();
+        return {
+          sdk_version: sdkVersion,
+          session_uid: sessionUid,
+          callbacks, events, frames, rtc_log: rtcLog, state_changes: stateChanges,
+          network_environment: config.network_environment,
+          network_harness_decision: { status: "rejected_preflight", ...decision },
+          audio: { publish_requested: true, subscribe_requested: true, publish: false, subscribe: false, input_track_count: 0, remote_track_count: 0 },
+          single_round: true,
+          stream_setting: session.media?.streamSetting ?? null,
+          metrics: { frames_captured: 0, session_duration_s: 0 },
+        };
+      }
+      if (typeof session.start !== "function") {
+        await session.disconnect();
+        source?.destroy?.();
+        throw new Error("installed XMAX SDK does not support gated session.start()");
+      }
+      stamp("generation_start_call");
+      await session.start();
     }
     const deadline = performance.now() + 30000;
     while (performance.now() < deadline) {
@@ -296,6 +368,10 @@ try {
     events.push({ event: "task_start", plannedMs: 0, executedMs: 0, payload: {} });
     const scripted = config.tracks ?? [];
     let trackIndex = 0;
+    let nextRtcSampleMs = 0;
+    let networkBreachStartedMs = null;
+    let networkAborted = false;
+    let runtimeSelectedPairId = null;
     let lastOutputFeatureHash = null;
     const pendingResponseProbes = [];
     while ((performance.now() - started) < Number(config.duration_s ?? 3) * 1000) {
@@ -336,7 +412,53 @@ try {
         }
         trackIndex += 1;
       }
-      if (Math.floor(now / 1000) !== Math.floor((now - 1000 / 30) / 1000)) await snapshotRtc();
+      if (now >= nextRtcSampleMs) {
+        const samples = await snapshotRtc("runtime");
+        nextRtcSampleMs += Number(networkProfile?.runtime?.sample_interval_ms ?? 1000);
+        if (networkProfile) {
+          const pair = selectedPair(samples);
+          const rttMs = pair ? Number(pair.currentRoundTripTime) * 1000 : null;
+          const inbound = samples.flatMap((sample) => sample.entries ?? []).find(
+            (entry) => entry.type === "inbound-rtp" && (entry.kind ?? entry.mediaType) === "video",
+          );
+          const jitterMs = inbound?.jitter == null ? null : Number(inbound.jitter) * 1000;
+          const inboundDelivered = Number(inbound?.packetsReceived);
+          const inboundLost = Number(inbound?.packetsLost);
+          const inboundLoss = Number.isFinite(inboundDelivered) && Number.isFinite(inboundLost) && (inboundDelivered + Math.max(0, inboundLost)) > 0
+            ? Math.max(0, inboundLost) / (inboundDelivered + Math.max(0, inboundLost))
+            : null;
+          const outbound = samples.flatMap((sample) => sample.entries ?? []).find(
+            (entry) => entry.type === "outbound-rtp" && (entry.kind ?? entry.mediaType) === "video",
+          );
+          const remoteInbound = samples.flatMap((sample) => sample.entries ?? []).find(
+            (entry) => entry.type === "remote-inbound-rtp" && (entry.kind ?? entry.mediaType) === "video",
+          );
+          const outboundSent = Number(outbound?.packetsSent);
+          const outboundLost = Number(remoteInbound?.packetsLost);
+          const outboundLoss = Number.isFinite(outboundSent) && Number.isFinite(outboundLost) && (outboundSent + Math.max(0, outboundLost)) > 0
+            ? Math.max(0, outboundLost) / (outboundSent + Math.max(0, outboundLost))
+            : null;
+          const pairChanged = runtimeSelectedPairId != null && pair?.id != null && pair.id !== runtimeSelectedPairId;
+          if (pair?.id != null) runtimeSelectedPairId = pair.id;
+          const disconnected = stateChanges.some((entry) => ["disconnected", "failed", "closed"].includes(String(entry.state).toLowerCase()));
+          const breached = !pair
+            || !Number.isFinite(rttMs)
+            || rttMs > Number(networkProfile.runtime.max_rtt_sample_ms)
+            || (Number.isFinite(jitterMs) && jitterMs > Number(networkProfile.runtime.max_inbound_jitter_p95_ms))
+            || (Number.isFinite(pair?.availableOutgoingBitrate) && Number(pair.availableOutgoingBitrate) < Number(networkProfile.runtime.min_available_outgoing_bitrate_bps))
+            || (Number.isFinite(inboundLoss) && inboundLoss > Number(networkProfile.runtime.max_inbound_packet_loss_ratio))
+            || (Number.isFinite(outboundLoss) && outboundLoss > Number(networkProfile.runtime.max_outbound_packet_loss_ratio))
+            || pairChanged
+            || disconnected;
+          if (breached && networkBreachStartedMs == null) networkBreachStartedMs = performance.now();
+          if (!breached) networkBreachStartedMs = null;
+          if (pairChanged || disconnected || (networkBreachStartedMs != null && (performance.now() - networkBreachStartedMs) >= Number(networkProfile.runtime.max_consecutive_breach_s) * 1000)) {
+            networkAborted = true;
+            stamp("network_runtime_abort", { rttMs, jitterMs, inboundLoss, outboundLoss, availableOutgoingBitrate: pair?.availableOutgoingBitrate ?? null, pairChanged, disconnected });
+            break;
+          }
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 1000 / 30));
     }
     events.push({ event: "task_stop", plannedMs: performance.now() - started, executedMs: performance.now() - started, payload: {} });
@@ -381,6 +503,8 @@ try {
       sdk_version: sdkVersion,
       session_uid: sessionUid,
       callbacks, events, frames, rtc_log: rtcLog, state_changes: stateChanges,
+      network_environment: config.network_environment,
+      network_harness_decision: { status: networkAborted ? "rejected_runtime" : "completed", networkAborted },
       audio: {
         publish_requested: true,
         subscribe_requested: true,

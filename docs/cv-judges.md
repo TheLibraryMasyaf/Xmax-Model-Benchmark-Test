@@ -10,7 +10,7 @@ Python插件实现 `xmax_test.judges.base.JudgePlugin`，manifest符合 `schemas
 
 一个Judge可以支持多个维度，一个维度也可以绑定多个Judge。插件不得直接读取飞书、修改Benchmark或写最终总分。
 
-仓库内置三个可执行基线：`video-quality`用ffmpeg灰度帧覆盖P.1空画面、G1基础画质和G2时序信号；`audio-integrity`用PCM能量包络覆盖G3.1来源/完整性和G3.2可测时间轴对齐；`run-metrics`只覆盖P.1结果登记、实时G2.1帧更新和R1响应速度。实时SDK已请求订阅但远端输出流没有音频轨时，`audio-integrity`将G3标为不适用；离线结果缺少应有音轨，或远端已有音轨但录制文件丢失音轨，仍按0分处理。P.2/P.3/RP.1/RP.2由冻结批次报告器直接统计，不生成Judgment。无法解码或缺少实验时返回`assessable=false`，不返回中性占位分。
+仓库内置三个可执行基线：`video-quality`用ffmpeg灰度帧覆盖P.1空画面、G1基础画质和G2时序信号；`audio-integrity`用PCM能量包络覆盖G3.1来源/完整性和G3.2可测时间轴对齐；`run-metrics`只覆盖P.1结果登记、实时G2.1帧更新和R1响应速度。实时SDK已请求订阅但远端输出流没有音频轨时，`audio-integrity`将G3标为不适用；离线结果缺少应有音轨，或远端已有音轨但录制文件丢失音轨，仍按0分处理。P.2/P.3/P.4/RP.1/RP.2/RP.3由冻结批次报告器直接统计，不生成Judgment。无法解码或缺少实验时返回`assessable=false`，不返回中性占位分。
 
 当前`var/models/`中的DINOv2和MUSIQ权重属于候选资产，尚未注册成启用Judge，当前得分不会假装使用这些模型。开放语义、结构和跨帧现象由Qwen3-VL Shadow Judge补充；后续专项CV Challenger通过同一插件协议替换相应路由。
 

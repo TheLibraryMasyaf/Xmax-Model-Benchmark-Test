@@ -9,11 +9,14 @@ from __future__ import annotations
 import uuid
 import math
 import statistics
+import time
 from typing import Any
 
 from ...errors import ContractError
 from ...hashing import content_hash, file_sha256
+from ...planning.builder import generation_signature
 from ...time import utc_now
+from .network import NetworkProfileResolver, evaluate_network_qualification
 
 
 class FakeRealtimeHarness:
@@ -29,8 +32,10 @@ class FakeRealtimeHarness:
         self._clock = clock
         self._fps = fps
         self._artifacts = artifacts
+        self._attempt_count = 0
 
     def run_case(self, case: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+        self._attempt_count += 1
         bindings = case.get("api_asset_bindings", {})
         input_method = bindings.get("input_method", "connectMedia")
         ref_image_role = bindings.get("ref_image_role", "none")
@@ -122,16 +127,7 @@ class FakeRealtimeHarness:
             }
         )
 
-        rtc_log = [
-            {
-                "tsMonotonicMs": 500.0,
-                "tsWallMs": self._wall(500.0),
-                "resolution": {"width": content_width, "height": content_height},
-                "bitrateBps": 1_500_000,
-                "packetLossRatio": 0.001,
-                "rttMs": 45.0,
-            }
-        ]
+        rtc_log = self._rtc_log(config)
 
         state_changes = [
             {"state": "idle", "tsMonotonicMs": 0.0},
@@ -170,6 +166,10 @@ class FakeRealtimeHarness:
             "frames": frames,
             "events": events,
             "rtc_log": rtc_log,
+            "network_environment": config.get(
+                "network_environment",
+                {"tun_active": True, "active_tun_interfaces": ["utun0"]},
+            ),
             "state_changes": state_changes,
             "audio": audio,
             "single_round": True,
@@ -191,6 +191,72 @@ class FakeRealtimeHarness:
                 "producer_version": "fake-realtime-feed-capture-v1",
             }
         return result
+
+    def _rtc_log(self, config: dict[str, Any]) -> list[dict[str, Any]]:
+        if not config.get("network_profile"):
+            return [
+                {
+                    "tsMonotonicMs": 500.0,
+                    "tsWallMs": self._wall(500.0),
+                    "resolution": {"width": 1280, "height": 720},
+                    "bitrateBps": 1_500_000,
+                    "packetLossRatio": 0.001,
+                    "rttMs": 45.0,
+                }
+            ]
+        statuses = config.get("fake_network_attempt_statuses", ["qualified"])
+        status = statuses[min(self._attempt_count - 1, len(statuses) - 1)]
+        if status == "unverified":
+            return []
+        samples: list[dict[str, Any]] = []
+        for phase, count, start in (("preflight", 5, 500.0), ("runtime", 4, 6000.0)):
+            for index in range(count):
+                bad = (status == "rejected_preflight" and phase == "preflight") or (
+                    status == "rejected_runtime" and phase == "runtime"
+                )
+                rtt = 0.2 if bad else 0.035
+                samples.append(
+                    {
+                        "phase": phase,
+                        "tsMonotonicMs": start + index * 1000,
+                        "tsWallMs": self._wall(start + index * 1000),
+                        "peerIndex": 0,
+                        "entries": [
+                            {
+                                "id": "candidate-pair-1",
+                                "type": "candidate-pair",
+                                "state": "succeeded",
+                                "nominated": True,
+                                "currentRoundTripTime": rtt,
+                                "availableOutgoingBitrate": 2_000_000,
+                                "bytesSent": 1000 + index * 100,
+                                "bytesReceived": 2000 + index * 100,
+                            },
+                            {
+                                "id": "in-video",
+                                "type": "inbound-rtp",
+                                "kind": "video",
+                                "packetsLost": 0,
+                                "packetsReceived": 100 + index * 20,
+                                "jitter": 0.01,
+                            },
+                            {
+                                "id": "out-video",
+                                "type": "outbound-rtp",
+                                "kind": "video",
+                                "packetsSent": 100 + index * 20,
+                            },
+                            {
+                                "id": "remote-in-video",
+                                "type": "remote-inbound-rtp",
+                                "kind": "video",
+                                "localId": "out-video",
+                                "packetsLost": 0,
+                            },
+                        ],
+                    }
+                )
+        return samples
 
     def _wall(self, monotonic_ms: float) -> float:
         if self._clock is not None:
@@ -234,6 +300,7 @@ class RealtimeController:
         run_batch_id: str = "run-batch-realtime",
         validator: Any = None,
         clock: Any = None,
+        sleeper: Any = time.sleep,
     ) -> None:
         self._repository = repository
         self._artifacts = artifacts
@@ -242,6 +309,7 @@ class RealtimeController:
         self._run_batch_id = run_batch_id
         self._clock = clock
         self._validator = validator
+        self._sleeper = sleeper
 
     def run_case(
         self, case: dict[str, Any], config: dict[str, Any] | None = None
@@ -253,7 +321,66 @@ class RealtimeController:
             raise ContractError(
                 f"case {case['case_id']} has invalid realtime input_method: {input_method!r}"
             )
-        result = self._harness.run_case(case, config)
+        profile = config.get("network_profile")
+        maximum_retries = 0
+        if profile:
+            resolver = NetworkProfileResolver({"profiles": [profile]})
+            maximum_retries = resolver.retry_count(
+                profile, config.get("max_network_retries")
+            )
+        attempt_run_ids: list[str] = []
+        for attempt_index in range(1, maximum_retries + 2):
+            result = self._harness.run_case(case, config)
+            if profile:
+                qualification = evaluate_network_qualification(
+                    rtc_log=result.get("rtc_log", []),
+                    state_changes=result.get("state_changes", []),
+                    environment=result.get("network_environment"),
+                    profile=profile,
+                )
+            else:
+                qualification = {
+                    "required": False,
+                    "status": "not_required",
+                    "model_output_metrics_used": False,
+                }
+            run_id = f"run-{uuid.uuid4().hex[:16]}"
+            run = self._persist_attempt(
+                case,
+                config,
+                result,
+                input_method=input_method,
+                run_id=run_id,
+                qualification=qualification,
+                attempt_index=attempt_index,
+                maximum_retries=maximum_retries,
+                attempt_run_ids=[*attempt_run_ids, run_id],
+            )
+            attempt_run_ids.append(run_id)
+            if qualification["status"] in {"qualified", "not_required"}:
+                return run
+            if attempt_index <= maximum_retries:
+                cooldown = float(profile.get("retry", {}).get("cooldown_s", 0))
+                if cooldown:
+                    self._sleeper(cooldown)
+        return run
+
+    def _persist_attempt(
+        self,
+        case: dict[str, Any],
+        config: dict[str, Any],
+        result: dict[str, Any],
+        *,
+        input_method: str,
+        run_id: str,
+        qualification: dict[str, Any],
+        attempt_index: int,
+        maximum_retries: int,
+        attempt_run_ids: list[str],
+    ) -> dict[str, Any]:
+        bindings = case.get("api_asset_bindings", {})
+        profile = config.get("network_profile")
+        result["network_qualification"] = qualification
         input_capture = result.get("input_capture")
         if bindings.get("input_media_role") == "feed_capture":
             required_capture_fields = {
@@ -275,16 +402,29 @@ class RealtimeController:
             if input_capture["capture_policy"] != bindings.get("capture_frame_policy"):
                 raise ContractError("realtime Feed capture policy does not match the Case binding")
             self._artifacts.verify(input_capture["uri"], input_capture["sha256"])
-        run_id = f"run-{uuid.uuid4().hex[:16]}"
         metrics = {
             **result.get("metrics", {}),
+            "feed_preprocessing": result.get("feed_preprocessing"),
             "input_method": input_method,
             "input_media_role": bindings.get("input_media_role", "feed_video"),
             "interaction_profile_id": bindings.get("interaction_profile_id"),
             "audio": result.get("audio"),
             "single_round": result.get("single_round", True),
             "session_uid": result.get("session_uid"),
+            "generation_signature": case.get("generation_signature")
+            or generation_signature(case),
+            "network_qualification": qualification,
+            "network_attempt_index": attempt_index,
+            "max_network_retries": maximum_retries,
+            "network_retry_count": attempt_index - 1,
+            "network_attempt_run_ids": attempt_run_ids,
         }
+        if config.get("network_profile_id"):
+            metrics["network_profile_id"] = str(config["network_profile_id"])
+            metrics["network_profile_version"] = str(profile.get("version")) if profile else None
+            metrics["network_profile_hash"] = config.get("network_profile_hash")
+        if isinstance(config.get("latency_threshold_ms"), (int, float)):
+            metrics["latency_threshold_ms"] = float(config["latency_threshold_ms"])
         metrics = _derive_realtime_metrics(
             result.get("callbacks", []),
             result.get("frames", []),
@@ -313,12 +453,27 @@ class RealtimeController:
             else "not_provided_by_realtime_sdk"
         )
         metrics["audio"] = audio
+        if qualification["status"] not in {"qualified", "not_required"}:
+            metrics["network_error"] = {
+                "code": "xmax.network_unqualified",
+                "message": (
+                    f"network attempt {attempt_index}/{maximum_retries + 1} "
+                    f"was {qualification['status']}"
+                ),
+                "retryable": attempt_index <= maximum_retries,
+                "reasons": qualification.get("reasons", []),
+                "evidence_gaps": qualification.get("evidence_gaps", []),
+            }
         run = {
             "run_id": run_id,
             "run_batch_id": self._run_batch_id,
             "case_id": case["case_id"],
             "case_number": case["case_number"],
-            "status": "completed",
+            "status": (
+                "completed"
+                if qualification["status"] in {"qualified", "not_required"}
+                else "cancelled"
+            ),
             "model_id": case.get("model_id") or self.model_id,
             "mode": "realtime",
             "origin": "xmax_realtime",
@@ -332,6 +487,11 @@ class RealtimeController:
                         "input_method": input_method,
                         "input_media_role": bindings.get("input_media_role", "feed_video"),
                         "input_capture": result.get("input_capture"),
+                        "network_profile_id": config.get("network_profile_id"),
+                        "network_profile_version": (
+                            profile.get("version") if profile else None
+                        ),
+                        "network_profile_hash": config.get("network_profile_hash"),
                     }
                 ),
             },
@@ -341,6 +501,8 @@ class RealtimeController:
             "raw_events_uri": events_uri,
             "result_asset_id": result_asset_id,
         }
+        if run["status"] != "completed":
+            run["error"] = metrics["network_error"]
         self._repository.create_run(run)
         return self._repository.get_run(run_id)
 
@@ -396,6 +558,9 @@ class RealtimeController:
             "stream_setting": result.get("stream_setting"),
             "input_media_role": result.get("input_media_role"),
             "input_capture": result.get("input_capture"),
+            "network_environment": result.get("network_environment"),
+            "network_qualification": result.get("network_qualification"),
+            "network_harness_decision": result.get("network_harness_decision"),
         }
         stored = self._artifacts.put_bytes(
             "runs",
@@ -473,13 +638,23 @@ def _derive_realtime_metrics(
     if latencies:
         ordered = sorted(latencies)
         metrics.setdefault("first_output_change_ms", latencies[0])
+        metrics["interaction_latency_p50_ms"] = _percentile(ordered, 0.5)
         metrics["interaction_latency_p95_ms"] = _percentile(ordered, 0.95)
+        metrics["interaction_latency_p99_ms"] = _percentile(ordered, 0.99)
+        metrics["interaction_latency_jitter_ms"] = (
+            statistics.pstdev(latencies) if len(latencies) > 1 else 0.0
+        )
         metrics["interaction_latency_slope_ms_per_event"] = _linear_slope(latencies)
         mean = statistics.mean(latencies)
         metrics["latency_window_cv"] = (
             statistics.pstdev(latencies) / mean if len(latencies) > 1 and mean else 0.0
         )
         metrics["pending_event_peak"] = _pending_peak(probes)
+        threshold = metrics.get("latency_threshold_ms")
+        if isinstance(threshold, (int, float)) and float(threshold) > 0:
+            metrics["latency_threshold_exceed_ratio"] = sum(
+                value > float(threshold) for value in latencies
+            ) / len(latencies)
     return metrics
 
 

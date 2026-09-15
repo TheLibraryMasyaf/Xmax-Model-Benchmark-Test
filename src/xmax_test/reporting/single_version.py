@@ -639,8 +639,16 @@ def _evaluation_requirement_results(
         status = "reported" if applicable and isinstance(payload, dict) else "uncovered"
         if not applicable:
             status = "inapplicable_to_batch"
+        elif metric_id == "P.4" and not int(
+            (payload or {}).get("model_generation_elapsed_s", {}).get("observed_count") or 0
+        ):
+            status = "reported_no_separated_timing_evidence"
         elif metric_id == "RP.2" and not int((payload or {}).get("perturbation_run_count") or 0):
             status = "reported_no_perturbation_evidence"
+        elif metric_id == "RP.3" and not int(
+            (payload or {}).get("event_to_output_p95_ms", {}).get("observed_count") or 0
+        ):
+            status = "reported_no_continuous_latency_evidence"
         metric_rows.append(
             {
                 "requirement_id": metric_id,
@@ -684,6 +692,13 @@ def _reporting_metric_result_summary(metric_id: str, payload: dict[str, Any]) ->
             f"不稳定率{_pct(stability.get('unstable_group_rate_percent'))}，"
             f"评分口径不一致{stability.get('basis_mismatch_group_count', 0)}组"
         )
+    if metric_id == "P.4":
+        return (
+            f"离线Run {payload.get('run_count', 0)}，"
+            f"模型生成耗时观测{payload.get('model_generation_elapsed_s', {}).get('observed_count', 0)}，"
+            f"端到端交付观测{payload.get('end_to_end_delivery_elapsed_s', {}).get('observed_count', 0)}，"
+            f"RTF观测{payload.get('generation_rtf', {}).get('count', 0)}"
+        )
     if metric_id == "RP.1":
         return (
             f"实时Run {payload.get('run_count', 0)}，"
@@ -695,6 +710,12 @@ def _reporting_metric_result_summary(metric_id: str, payload: dict[str, Any]) ->
             f"实时Run {payload.get('run_count', 0)}，异常实验"
             f"{payload.get('perturbation_run_count', 0)}，恢复"
             f"{payload.get('recovered_run_count', 0)}"
+        )
+    if metric_id == "RP.3":
+        return (
+            f"实时Run {payload.get('run_count', 0)}，"
+            f"持续时延P95观测{payload.get('event_to_output_p95_ms', {}).get('observed_count', 0)}，"
+            f"网络Profile {len(payload.get('network_profile_ids', []))}个"
         )
     return "已取得结构化指标" if payload else "未取得指标"
 

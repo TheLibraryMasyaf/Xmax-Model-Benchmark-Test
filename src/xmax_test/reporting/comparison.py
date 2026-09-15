@@ -218,7 +218,7 @@ class ModelComparisonService:
                 "scenario_id": case.get("scenario_id"),
                 "scene_tags": case.get("scene_tags", {}),
                 "api_asset_bindings": case.get("api_asset_bindings", {}),
-                "generation_config": case.get("generation_config", {}),
+                "generation_config": _pairing_generation_config(case),
             }
         )
 
@@ -238,6 +238,24 @@ class ModelComparisonService:
         for key in sorted(set(baseline) & set(candidate)):
             left = baseline[key]
             right = candidate[key]
+            left_case = self._case_of(left)
+            right_case = self._case_of(right)
+            cross_provider = (
+                left_case.get("generation_provider")
+                and right_case.get("generation_provider")
+                and left_case.get("generation_provider")
+                != right_case.get("generation_provider")
+            )
+            left_generation_config = (
+                _pairing_generation_config(left_case)
+                if cross_provider
+                else left_case.get("generation_config", {})
+            )
+            right_generation_config = (
+                _pairing_generation_config(right_case)
+                if cross_provider
+                else right_case.get("generation_config", {})
+            )
             left_eval = left.get("_evaluation", {})
             right_eval = right.get("_evaluation", {})
             for field, left_value, right_value in (
@@ -264,8 +282,8 @@ class ModelComparisonService:
                 ),
                 (
                     "generation_config_hash",
-                    content_hash(self._case_of(left).get("generation_config", {})),
-                    content_hash(self._case_of(right).get("generation_config", {})),
+                    content_hash(left_generation_config),
+                    content_hash(right_generation_config),
                 ),
                 (
                     "judge_versions",
@@ -290,11 +308,22 @@ class ModelComparisonService:
         return differences
 
     def _common_generation_config_hash(self, pairs: list[dict[str, Any]]) -> str | None:
-        hashes = {
-            content_hash(self._case_of(pair[side]).get("generation_config", {}))
-            for pair in pairs
-            for side in ("baseline", "candidate")
-        }
+        hashes: set[str] = set()
+        for pair in pairs:
+            left = self._case_of(pair["baseline"])
+            right = self._case_of(pair["candidate"])
+            cross_provider = (
+                left.get("generation_provider")
+                and right.get("generation_provider")
+                and left.get("generation_provider") != right.get("generation_provider")
+            )
+            for case in (left, right):
+                config = (
+                    _pairing_generation_config(case)
+                    if cross_provider
+                    else case.get("generation_config", {})
+                )
+                hashes.add(content_hash(config))
         return next(iter(hashes)) if len(hashes) == 1 else None
 
     def _batch_reporting_metrics(self, runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -673,6 +702,41 @@ def _score_basis_signature(evaluation: dict[str, Any]) -> str | None:
             ),
         }
     )
+
+
+def _pairing_generation_config(case: dict[str, Any]) -> dict[str, Any]:
+    """Return the provider-neutral generation contract used for A/B pairing.
+
+    Provider-native quality controls and billing estimates cannot be equal
+    across XMAX and Lucy. They remain frozen on each Case for audit, but are
+    excluded from cross-provider identity. Legacy cases without an explicit
+    provider retain the previous full-config behavior.
+    """
+
+    config = dict(case.get("generation_config") or {})
+    if not case.get("generation_provider"):
+        return config
+    provider_native = {
+        "quality",
+        "fps",
+        "duration_s",
+        "resolution",
+        "enhance_prompt",
+        "self_anchor",
+        "seed",
+        "input_normalization_profile",
+        "estimated_billable_duration_s",
+        "estimated_credits",
+        "estimated_cost_usd",
+        "credit_formula",
+        "cost_formula",
+        "cost_usd_per_second",
+        "network_profile_id",
+        "network_profile_version",
+        "network_profile_hash",
+        "max_network_retries",
+    }
+    return {key: value for key, value in config.items() if key not in provider_native}
 
 
 def _repeat_stability_summary(

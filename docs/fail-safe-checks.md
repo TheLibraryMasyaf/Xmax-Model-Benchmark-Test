@@ -9,7 +9,8 @@
 - Run Request和Judge Registry JSON Schema，未知字段或拼写错误直接失败。
 - Benchmark、Scenario、Operation Recipe的版本和引用完整性。
 - 当前模式的所有适用维度至少有一个允许且启用的Judge。
-- XMAX Key、Qwen凭据、飞书映射与`lark-cli`、`ffmpeg/ffprobe`、实时Harness依赖。
+- 按生成Provider检查XMAX Key或Decart Key，以及Qwen凭据、飞书映射与`lark-cli`、`ffmpeg/ffprobe`、实时Harness依赖。
+- 实时生成必须能解析冻结的Network Profile，且网络重试数在0–5范围。
 - `sync`与`sync_policy`相互一致，付费生成有本轮批准。
 
 `context-check`用于提前展示全部缺项；它不是可选的安全开关，因为`run`内部会再执行一次。
@@ -24,7 +25,13 @@
 
 统一Run、独立`generate offline`、单条`task run`和批量`worker run`都必须经过该检查。TaskWorker在领取第一条任务前执行共享预检；预检失败时整批任务保持原状态，不能逐条改成`error`。
 
+Decart预检不发起计费网络请求：只验证`DECART_API_KEY`和本地`ffmpeg/ffprobe`可用，每条Case转码后再检查720p/H.264和200 MB上限。Lucy创建Job的POST不自动重试；响应丢失时留下非终态Run供对账，不把不确定状态当成可重试错误。
+
 流水线还有第二道熔断：不可重试异常立即停批；完全相同的异常连续达到`circuit_breaker_threshold`（默认3）时停批。熔断后必须修复根因并显式续跑，不得将阈值设成批次总数。
+
+### 2.1 实时网络准入
+
+真实实时Run在启动生成前必须验证TUN和WebRTC预检样本，生成期持续采样。`rejected_preflight`、`rejected_runtime`或`unverified`都落为`cancelled` Attempt，保留原始日志并按冻结参数重试；耗尽后返回partial/生成错误。网络不合格不等于模型生成失败，不得按0分写入评测或飞书。
 
 ## 3. 单条Case原子评测
 

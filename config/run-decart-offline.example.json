@@ -1,0 +1,23 @@
+{
+  "$schema": "../schemas/run-request.schema.json",
+  "request_id": "replace-decart-lucy-2-5-offline",
+  "stages": ["ingest", "plan", "generate", "preprocess", "evaluate"],
+  "stage_inputs": {},
+  "dependency_policy": "explicit_only",
+  "missing_input_policy": "error",
+  "sync_policy": "none",
+  "existing_results_request_path": null,
+  "benchmark_path": "BENCHMARK.md",
+  "scenario_pack_path": "config/scenarios.json",
+  "generation_provider": "decart",
+  "model_id": "lucy-2.5",
+  "generation_modes": ["offline"],
+  "execution_mode": "streaming",
+  "pipeline_queue_size": 2,
+  "repeat_count": 1,
+  "seed": 20260908,
+  "dry_run": true,
+  "smoke_limit": 1,
+  "filters": {},
+  "manifest_directory": "var/manifests"
+}

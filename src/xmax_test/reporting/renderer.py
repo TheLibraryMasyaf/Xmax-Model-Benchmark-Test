@@ -500,8 +500,10 @@ def _reporting_metric_placeholders(report: dict[str, Any]) -> dict[str, Any]:
     left_p2, right_p2 = baseline.get("P.2", {}), candidate.get("P.2", {})
     left_p3 = baseline.get("P.3", {}).get("diagnostic_stability", {})
     right_p3 = candidate.get("P.3", {}).get("diagnostic_stability", {})
+    left_p4, right_p4 = baseline.get("P.4", {}), candidate.get("P.4", {})
     left_rp1, right_rp1 = baseline.get("RP.1", {}), candidate.get("RP.1", {})
     left_rp2, right_rp2 = baseline.get("RP.2", {}), candidate.get("RP.2", {})
+    left_rp3, right_rp3 = baseline.get("RP.3", {}), candidate.get("RP.3", {})
     return {
         "baseline_p2": _p2_summary(left_p2),
         "candidate_p2": _p2_summary(right_p2),
@@ -514,6 +516,14 @@ def _reporting_metric_placeholders(report: dict[str, Any]) -> dict[str, Any]:
             right_p3.get("unstable_group_rate_percent"),
         ),
         "p3_explanation": "只比较评分口径一致的重复组；口径不一致组不进入分母。",
+        "baseline_p4": _p4_summary(left_p4),
+        "candidate_p4": _p4_summary(right_p4),
+        "p4_delta": _metric_delta_text(
+            (left_p4.get("generation_rtf") or {}).get("p50"),
+            (right_p4.get("generation_rtf") or {}).get("p50"),
+            " RTF",
+        ),
+        "p4_explanation": "只用独立的模型生成耗时计算RTF；旧合并耗时不代替。",
         "baseline_rp1": _rp1_summary(left_rp1),
         "candidate_rp1": _rp1_summary(right_rp1),
         "rp1_delta": _metric_delta_text(
@@ -529,6 +539,14 @@ def _reporting_metric_placeholders(report: dict[str, Any]) -> dict[str, Any]:
             right_rp2.get("automatic_recovery_rate_percent"),
         ),
         "rp2_explanation": "未执行异常实验时不得推断恢复能力。",
+        "baseline_rp3": _rp3_summary(left_rp3),
+        "candidate_rp3": _rp3_summary(right_rp3),
+        "rp3_delta": _metric_delta_text(
+            (left_rp3.get("event_to_output_p95_ms") or {}).get("p50"),
+            (right_rp3.get("event_to_output_p95_ms") or {}).get("p50"),
+            "ms",
+        ),
+        "rp3_explanation": "仅比较网络Profile一致的持续端到端时延；越低越好。",
     }
 
 
@@ -557,6 +575,19 @@ def _p3_summary(value: dict[str, Any]) -> str:
     )
 
 
+def _p4_summary(value: dict[str, Any]) -> str:
+    if not value or not int(value.get("run_count") or 0):
+        return "本批不适用"
+    observed = int((value.get("model_generation_elapsed_s") or {}).get("observed_count") or 0)
+    if not observed:
+        return f"离线Run {value.get('run_count', 0)}，缺少分离后的模型生成耗时"
+    return (
+        f"离线Run {value.get('run_count', 0)}，模型生成P50 "
+        f"{_fmt((value.get('model_generation_elapsed_s') or {}).get('p50'))}s，RTF P50 "
+        f"{_fmt((value.get('generation_rtf') or {}).get('p50'))}"
+    )
+
+
 def _rp1_summary(value: dict[str, Any]) -> str:
     if not value or not int(value.get("run_count") or 0):
         return "本批不适用"
@@ -576,6 +607,19 @@ def _rp2_summary(value: dict[str, Any]) -> str:
         f"异常实验{value.get('perturbation_run_count', 0)}，恢复"
         f"{value.get('recovered_run_count', 0)}，恢复率"
         f"{_fmt(value.get('automatic_recovery_rate_percent'))}%"
+    )
+
+
+def _rp3_summary(value: dict[str, Any]) -> str:
+    if not value or not int(value.get("run_count") or 0):
+        return "本批不适用"
+    observed = int((value.get("event_to_output_p95_ms") or {}).get("observed_count") or 0)
+    if not observed:
+        return f"实时Run {value.get('run_count', 0)}，缺少持续端到端时延证据"
+    return (
+        f"实时Run {value.get('run_count', 0)}，事件到输出P95的跨Run P50 "
+        f"{_fmt((value.get('event_to_output_p95_ms') or {}).get('p50'))}ms，"
+        f"网络Profile {len(value.get('network_profile_ids', []))}个"
     )
 
 
