@@ -411,6 +411,69 @@ class OpenAiCompatibleProviderTests(unittest.TestCase):
 
         self.assertEqual([item["model"] for item in requests], ["free-a"])
 
+    def test_operator_confirmed_quota_code_may_reach_budgeted_paid_fallback(self) -> None:
+        class Gate:
+            policy = SimpleNamespace(model="paid")
+
+            def __init__(self):
+                self.events = []
+
+            def reserve_paid_call(self):
+                self.events.append("reserve")
+                return {"reservation_id": "reservation-1"}
+
+            def settle(self, reservation_id, usage):
+                self.events.append(("settle", reservation_id, usage))
+
+            def release(self, reservation_id, *, reason):
+                self.events.append(("release", reservation_id, reason))
+
+            def forfeit(self, reservation_id, *, reason):
+                self.events.append(("forfeit", reservation_id, reason))
+
+        gate = Gate()
+        provider = OpenAiCompatibleProvider(
+            endpoint="https://example.test/compatible-mode/v1",
+            models=["free-a", "paid"],
+            api_key_env="TEST_QWEN_KEY",
+            response_format_type="json_object",
+            budget_gate=gate,
+            operator_confirmed_free_tier_codes=["insufficient_quota"],
+            transport_max_retries=0,
+        )
+        requests = []
+        success = _Response(
+            {
+                "choices": [{"message": {"content": '{"ok":true}'}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3},
+            }
+        )
+
+        def urlopen(request, timeout):
+            requests.append(json.loads(request.data))
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(
+                    "https://example.test",
+                    429,
+                    "quota",
+                    {},
+                    io.BytesIO(
+                        b'{"error":{"code":"insufficient_quota","message":"quota"}}'
+                    ),
+                )
+            return success
+
+        with mock.patch.dict("os.environ", {"TEST_QWEN_KEY": "sk-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=urlopen):
+                response = provider.complete_json(
+                    prompt="return JSON", image_paths=[], output_schema={"type": "object"}
+                )
+
+        self.assertEqual([item["model"] for item in requests], ["free-a", "paid"])
+        self.assertTrue(response.metadata["paid_fallback"])
+        self.assertEqual(gate.events[0], "reserve")
+        self.assertEqual(gate.events[1][0], "settle")
+
     def test_rate_limit_honors_retry_after_on_same_model(self) -> None:
         sleeps = []
         provider = OpenAiCompatibleProvider(

@@ -89,6 +89,7 @@ class MlmmJudge:
         prompt_hash = sha256_text(prompt)
         schema = _batch_output_schema(criteria_by_dimension)
         response = None
+        raw_uri = None
         last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 2):
             started = time.monotonic()
@@ -125,6 +126,11 @@ class MlmmJudge:
                         output_schema=schema,
                         media_inputs=[],
                     )
+                # Persist the exact provider envelope before local validation.
+                # A paid response can be billable yet fail the stricter local
+                # schema; retaining it is required for reconciliation and
+                # prevents an operator from having to retry blindly.
+                raw_uri = self._save_raw(response, prompt_hash)
                 errors = sorted(
                     Draft202012Validator(schema).iter_errors(response.payload),
                     key=lambda error: list(error.path),
@@ -156,6 +162,7 @@ class MlmmJudge:
                     duration_seconds=round(time.monotonic() - started, 3),
                     error_code=getattr(exc, "code", type(exc).__name__),
                     error=str(exc),
+                    raw_output_uri=raw_uri,
                 )
                 last_error = exc
                 response = None
@@ -176,7 +183,6 @@ class MlmmJudge:
             raise ExternalServiceError(
                 f"MLLM provider produced no valid result after retries: {last_error}"
             )
-        raw_uri = self._save_raw(response, prompt_hash)
         results = []
         seen: set[str] = set()
         for item in response.payload["judgments"]:
@@ -231,27 +237,47 @@ class MlmmJudge:
                     continue
                 if packet.get("training_eligible") is not True:
                     continue
-                examples = selected[dimension_id]
-                if len(examples) >= self._max_examples_per_dimension:
-                    continue
                 supervision = packet.get("supervision") or {}
                 label = supervision.get("label") or {}
-                examples.append(
+                selected[dimension_id].append(
                     {
                         "dimension_id": dimension_id,
+                        "criterion_id": label.get("criterion_id"),
+                        "score_hint": label.get("score_hint"),
                         "human_comment": supervision.get("raw_text"),
+                        "pairwise_relation": (
+                            (supervision.get("comparison") or {}).get("relation")
+                        ),
+                        "anchor_type": (
+                            "scored"
+                            if label.get("criterion_id") is not None
+                            and label.get("score_hint") is not None
+                            else "qualitative"
+                        ),
+                        "confidence": packet.get("confidence"),
                         "polarity": label.get("polarity"),
                         "severity": label.get("severity"),
                         "rationale": label.get("rationale"),
                     }
                 )
-        anchors = [item for items in selected.values() for item in items]
+        anchors = []
+        for items in selected.values():
+            ranked = sorted(
+                items,
+                key=lambda item: (
+                    item.get("anchor_type") == "scored",
+                    float(item.get("confidence") or 0.0),
+                ),
+                reverse=True,
+            )
+            anchors.extend(ranked[: self._max_examples_per_dimension])
         if not anchors:
             return prompt
         return (
             f"{prompt}\n\n"
             "人工校准锚点（仅是一般评分示例，不代表当前样本；"
-            "不得推断模型身份或预期输赢）：\n"
+            "不得推断模型身份或预期输赢；qualitative锚点只用于理解缺陷语义，"
+            "不得将空分值自行推成绝对分）：\n"
             f"{json.dumps(anchors, ensure_ascii=False, separators=(',', ':'))}"
         )
 

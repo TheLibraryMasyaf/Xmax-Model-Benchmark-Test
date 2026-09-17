@@ -1,10 +1,45 @@
 {
   "$schema": "../schemas/human-feedback-source.schema.json",
-  "source_id": "feishu-xlive-human-feedback",
-  "kind": "feishu_bitable",
+  "source_id": "feishu-xlive-pairwise-202609",
+  "kind": "feishu_evaluation_preprocessor",
   "app_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg",
-  "table_id": "tblNUhtfVZ6CC1F5",
-  "comment_field": "备注",
-  "video_fields": ["旧版模型生成结果", "新版模型生成结果"],
-  "review_context": "unknown"
+  "preprocessor": "xmax_test.feedback.preprocessors.xlive_pairwise:build_pack",
+  "review_context": "unknown",
+  "options": {
+    "review_table_id": "tblN9orj9S1UujJr",
+    "sample_table_id": "tblYytw02QPbYVsI",
+    "reviewer_user_id": "ou_7d5000995362495020d645bd49e82076",
+    "purpose_value": "人工评价",
+    "equivalent_value": "差不多",
+    "review_fields": {
+      "test_result_id": "测试结果编号",
+      "purpose": "记录用途",
+      "reviewer": "评价人",
+      "created_at": "创建时间",
+      "evaluation_number": "评价编号",
+      "sample_link": "关联样本",
+      "preference": "对比评价"
+    },
+    "sample_fields": {
+      "test_result_id": "测试结果编号",
+      "scenario": "核心场景",
+      "prompt_text": "prompt文字",
+      "feed_video": "feed视频",
+      "prompt_asset": "prompt素材"
+    },
+    "sides": {
+      "xmax": {
+        "video_field": "Xmax x2.0生成结果",
+        "comment_field": "Xmax评语",
+        "model_version": "x2.0",
+        "preference_value": "Xmax"
+      },
+      "decart": {
+        "video_field": "Decart Lucy 2.5生成结果",
+        "comment_field": "Decart评语",
+        "model_version": "Lucy 2.5",
+        "preference_value": "Decart"
+      }
+    }
+  }
 }

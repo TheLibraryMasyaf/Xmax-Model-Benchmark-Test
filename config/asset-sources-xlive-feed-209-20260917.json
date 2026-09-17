@@ -1,0 +1,20 @@
+{
+  "$schema": "../schemas/asset-sources.schema.json",
+  "sources": [
+    {
+      "source_id": "feishu-xlive-feed-209-20260917",
+      "kind": "feishu_bitable",
+      "enabled": true,
+      "url": "https://zcn0qf3aul03.feishu.cn/base/NdlnbJNiwadmlYsZDj8c9y7Hnhg?table=tblFhKTOdqsHdSzQ",
+      "app_token": "NdlnbJNiwadmlYsZDj8c9y7Hnhg",
+      "table_id": "tblFhKTOdqsHdSzQ",
+      "asset_kind": "prompt_text",
+      "field_mapping": {
+        "record_number": "测试结果编号",
+        "feed_reference": "feed视频",
+        "prompt_text": "prompt文字",
+        "prompt_reference": "prompt素材"
+      }
+    }
+  ]
+}

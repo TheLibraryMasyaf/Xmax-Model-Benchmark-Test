@@ -16,7 +16,7 @@ class BenchmarkContractTests(unittest.TestCase):
         self.assertEqual(sum(len(item["criteria"]) for item in contract["dimensions"]), 28)
         self.assertEqual(len(contract["reporting_metrics"]), 6)
         self.assertEqual(len(contract["weight_profiles"]), 2)
-        self.assertEqual(len(contract["scene_weight_rules"]), 18)
+        self.assertEqual(len(contract["scene_weight_rules"]), 20)
         self.assertTrue(
             all(item.get("implementation_base_only") for item in contract["weight_profiles"])
         )

@@ -39,6 +39,8 @@ class MlmmHumanNormalizer:
                         "criterion_id": criterion.get("criterion_id"),
                         "name": criterion.get("name"),
                         "definition": criterion.get("definition"),
+                        "not_applicable_when": criterion.get("not_applicable_when"),
+                        "anchors": criterion.get("anchors", {}),
                     }
                     for criterion in item.get("criteria", [])
                 ],
@@ -54,7 +56,10 @@ class MlmmHumanNormalizer:
             "如果只能知道方向而不能确定绝对程度，仍可映射现有维度并把severity设为unknown；"
             "只有连概念对应哪个维度都不能确定时才使用needs_clarification。"
             "结合可见视频证据映射到现有维度；证据不足时使用needs_clarification。"
-            "每个标签给出dimension_id、confidence、rationale、polarity和severity。"
+            "每个标签给出dimension_id、criterion_id、score_hint、confidence、rationale、polarity和severity。"
+            "dimension_id只能填维度ID（例如E4），criterion_id才填细则ID（例如E4.2），不得把细则ID填入dimension_id。"
+            "criterion_id必须是该维度已有细则；评语和视频证据足以支持时，score_hint按现有细则的0/1/2语义给出，"
+            "否则criterion_id或score_hint返回null。score_hint是待人工审核的校准提示，不是新的人工真值。"
             "polarity为positive/negative/mixed/neutral，severity为none/mild/moderate/severe/unknown。"
             "无法映射的新概念才生成dimension_proposal。只返回JSON。\n输入："
             + json.dumps(
@@ -62,6 +67,8 @@ class MlmmHumanNormalizer:
                     "raw_text": raw_signal.get("raw_text", ""),
                     "review_context": raw_signal.get("review_context", "unknown"),
                     "source_attachment_label": raw_signal.get("source_field"),
+                    "pairwise_projection": raw_signal.get("comparison"),
+                    "scenario": raw_signal.get("scenario"),
                     "video_evidence_image_count": len(image_paths),
                     "dimensions": dimensions,
                 },
@@ -76,13 +83,62 @@ class MlmmHumanNormalizer:
         )
         parsed = response.payload
         allowed = {item["dimension_id"] for item in dimensions if item.get("dimension_id")}
+        allowed_criteria = {
+            item["dimension_id"]: {
+                criterion["criterion_id"]
+                for criterion in item.get("criteria", [])
+                if criterion.get("criterion_id")
+            }
+            for item in dimensions
+            if item.get("dimension_id")
+        }
+        criterion_to_dimension = {
+            criterion_id: dimension_id
+            for dimension_id, criterion_ids in allowed_criteria.items()
+            for criterion_id in criterion_ids
+        }
         labels = []
+        allowed_polarities = {"positive", "negative", "mixed", "neutral"}
+        allowed_severities = {"none", "mild", "moderate", "severe", "unknown"}
         for label in parsed.get("normalized_labels", []):
-            if label.get("dimension_id") not in allowed:
+            dimension_id = label.get("dimension_id")
+            criterion_id = label.get("criterion_id")
+            if dimension_id not in allowed and dimension_id in criterion_to_dimension:
+                criterion_id = criterion_id or dimension_id
+                dimension_id = criterion_to_dimension[dimension_id]
+            if dimension_id not in allowed:
                 continue
             confidence = min(1.0, max(0.0, float(label.get("confidence", 0))))
-            labels.append({**label, "confidence": confidence})
+            if criterion_id not in allowed_criteria.get(dimension_id, set()):
+                criterion_id = None
+            raw_score_hint = label.get("score_hint") if criterion_id else None
+            score_hint = (
+                raw_score_hint
+                if isinstance(raw_score_hint, int)
+                and not isinstance(raw_score_hint, bool)
+                and raw_score_hint in {0, 1, 2}
+                else None
+            )
+            polarity = label.get("polarity")
+            if polarity not in allowed_polarities:
+                polarity = "neutral"
+            severity = label.get("severity")
+            if severity not in allowed_severities:
+                severity = "unknown"
+            labels.append(
+                {
+                    **label,
+                    "dimension_id": dimension_id,
+                    "criterion_id": criterion_id,
+                    "score_hint": score_hint,
+                    "polarity": polarity,
+                    "severity": severity,
+                    "confidence": confidence,
+                }
+            )
         status = parsed.get("mapping_status", "needs_clarification")
+        if status not in {"existing", "partial", "unmapped", "needs_clarification"}:
+            status = "needs_clarification"
         confidence = max((item["confidence"] for item in labels), default=0.0)
         normalized = {
             **raw_signal,
@@ -91,8 +147,20 @@ class MlmmHumanNormalizer:
             "mapping_status": status,
             "normalized_labels": labels,
             "dimension_proposal": parsed.get("dimension_proposal"),
-            "learning_permission": status in {"existing", "partial"}
-            and confidence >= self._threshold,
+            # MLLM mapping is a proposal, not human gold.  A separate explicit
+            # review decision grants learning_permission.
+            "learning_permission": False,
+            "normalization_review": {
+                "status": (
+                    "pending"
+                    if status in {"existing", "partial"}
+                    and confidence >= self._threshold
+                    else "not_eligible"
+                ),
+                "reviewer": None,
+                "reviewed_at": None,
+                "note": None,
+            },
             "normalizer_id": f"mlmm-provider:{response.provider_id}",
             "normalizer_version": self._version,
             "normalizer_model": response.model,
@@ -109,6 +177,78 @@ class MlmmHumanNormalizer:
             }
         )
         return normalized
+
+
+def canonicalize_normalized_signal(
+    signal: dict[str, Any], benchmark: dict[str, Any]
+) -> dict[str, Any]:
+    """Repair provider enum/ID drift locally, without another provider call."""
+
+    allowed_criteria = {
+        item["dimension_id"]: {
+            criterion["criterion_id"]
+            for criterion in item.get("criteria", [])
+            if criterion.get("criterion_id")
+        }
+        for item in benchmark.get("dimensions", [])
+        if item.get("dimension_id")
+    }
+    criterion_to_dimension = {
+        criterion_id: dimension_id
+        for dimension_id, criterion_ids in allowed_criteria.items()
+        for criterion_id in criterion_ids
+    }
+    labels = []
+    for raw_label in signal.get("normalized_labels", []):
+        label = dict(raw_label)
+        dimension_id = label.get("dimension_id")
+        criterion_id = label.get("criterion_id")
+        if dimension_id not in allowed_criteria and dimension_id in criterion_to_dimension:
+            criterion_id = criterion_id or dimension_id
+            dimension_id = criterion_to_dimension[dimension_id]
+        if dimension_id not in allowed_criteria:
+            continue
+        if criterion_id not in allowed_criteria[dimension_id]:
+            criterion_id = None
+        score_hint = label.get("score_hint") if criterion_id else None
+        if (
+            not isinstance(score_hint, int)
+            or isinstance(score_hint, bool)
+            or score_hint not in {0, 1, 2}
+        ):
+            score_hint = None
+        polarity = label.get("polarity")
+        if polarity not in {"positive", "negative", "mixed", "neutral"}:
+            polarity = "neutral"
+        severity = label.get("severity")
+        if severity not in {"none", "mild", "moderate", "severe", "unknown"}:
+            severity = "unknown"
+        confidence = min(1.0, max(0.0, float(label.get("confidence", 0))))
+        labels.append(
+            {
+                **label,
+                "dimension_id": dimension_id,
+                "criterion_id": criterion_id,
+                "score_hint": score_hint,
+                "polarity": polarity,
+                "severity": severity,
+                "confidence": confidence,
+            }
+        )
+    status = signal.get("mapping_status")
+    if status not in {"existing", "partial", "unmapped", "needs_clarification"}:
+        status = "needs_clarification"
+    updated = {**signal, "mapping_status": status, "normalized_labels": labels}
+    updated["normalized_hash"] = content_hash(
+        {
+            "signal_id": updated["signal_id"],
+            "labels": labels,
+            "status": status,
+            "normalizer_id": updated.get("normalizer_id"),
+            "normalizer_version": updated.get("normalizer_version"),
+        }
+    )
+    return updated
 
 
 class RuleNormalizer:
@@ -205,6 +345,12 @@ def _human_mlmm_output_schema() -> dict[str, Any]:
                         "rationale": {"type": "string"},
                         "polarity": {"enum": ["positive", "negative", "mixed", "neutral"]},
                         "severity": {"enum": ["none", "mild", "moderate", "severe", "unknown"]},
+                        "criterion_id": {"type": ["string", "null"]},
+                        "score_hint": {
+                            "type": ["integer", "null"],
+                            "minimum": 0,
+                            "maximum": 2,
+                        },
                     },
                     "additionalProperties": False,
                 },

@@ -11,6 +11,7 @@ from xmax_test.judges.mlmm.base import MlmmResponse
 from xmax_test.judges.mlmm.judge import MlmmJudge, _batch_output_schema
 from xmax_test.judges.registry import JudgeRegistry
 from xmax_test.judges.worker import JudgeWorker
+from xmax_test.storage.artifacts import ArtifactStore
 
 
 class FakeProvider:
@@ -229,28 +230,35 @@ class MlmmBatchTests(unittest.TestCase):
                 )
 
         provider = PaidInvalidProvider()
-        judge = MlmmJudge(
-            provider,
-            judge_id="mlmm",
-            version="2",
-            supported_dimensions=["C2"],
-            supported_modes=["offline"],
-            max_retries=5,
-        )
-        with self.assertRaises(EvaluationInfrastructurePausedError):
-            judge.evaluate(
-                {
-                    "run_id": "run-paid-invalid",
-                    "prompt": "blind batch",
-                    "dimension_contracts": [
-                        {
-                            "dimension_id": "C2",
-                            "version": "v1",
-                            "criteria": [{"criterion_id": "C2.1"}],
-                        }
-                    ],
-                }
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = ArtifactStore(Path(temporary) / "artifacts")
+            judge = MlmmJudge(
+                provider,
+                judge_id="mlmm",
+                version="2",
+                supported_dimensions=["C2"],
+                supported_modes=["offline"],
+                max_retries=5,
+                artifact_store=artifacts,
             )
+            with self.assertRaises(EvaluationInfrastructurePausedError):
+                judge.evaluate(
+                    {
+                        "run_id": "run-paid-invalid",
+                        "prompt": "blind batch",
+                        "dimension_contracts": [
+                            {
+                                "dimension_id": "C2",
+                                "version": "v1",
+                                "criteria": [{"criterion_id": "C2.1"}],
+                            }
+                        ],
+                    }
+                )
+            raw = artifacts.list("evaluations")
+            self.assertEqual(len(raw), 1)
+            saved = json.loads(artifacts.read_bytes(raw[0]).decode("utf-8"))
+            self.assertEqual(json.loads(saved["raw_text"]), {"judgments": []})
         self.assertEqual(len(provider.calls), 1)
 
     def test_only_anonymous_train_human_anchors_enter_prompt(self) -> None:
@@ -265,6 +273,7 @@ class MlmmBatchTests(unittest.TestCase):
                     "training_eligible": True,
                     "supervision": {
                         "raw_text": "人物风格稳定",
+                        "comparison": {"relation": "better_than"},
                         "label": {
                             "polarity": "positive",
                             "severity": "none",
@@ -310,8 +319,68 @@ class MlmmBatchTests(unittest.TestCase):
             )
         sent = provider.calls[0]["prompt"]
         self.assertIn("人物风格稳定", sent)
+        self.assertIn('"pairwise_relation":"better_than"', sent)
+        self.assertIn('"anchor_type":"qualitative"', sent)
         self.assertNotIn("留出集不可见", sent)
         self.assertNotIn("secret-train-id", sent)
+
+    def test_scored_anchor_is_preferred_over_qualitative_anchor(self) -> None:
+        provider = FakeProvider()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "learning.train.jsonl"
+            packets = [
+                {
+                    "signal_id": "qualitative-first",
+                    "dimension_id": "C2",
+                    "confidence": 0.99,
+                    "data_partition": "train",
+                    "training_eligible": True,
+                    "supervision": {
+                        "raw_text": "只有方向的定性锚点",
+                        "label": {"criterion_id": None, "score_hint": None},
+                    },
+                },
+                {
+                    "signal_id": "scored-second",
+                    "dimension_id": "C2",
+                    "confidence": 0.8,
+                    "data_partition": "train",
+                    "training_eligible": True,
+                    "supervision": {
+                        "raw_text": "有明确细则分值的锚点",
+                        "label": {"criterion_id": "C2.1", "score_hint": 2},
+                    },
+                },
+            ]
+            path.write_text(
+                "\n".join(json.dumps(item, ensure_ascii=False) for item in packets),
+                encoding="utf-8",
+            )
+            judge = MlmmJudge(
+                provider,
+                judge_id="mlmm",
+                version="2",
+                supported_dimensions=["C2"],
+                supported_modes=["offline"],
+                calibration_path=path,
+                max_examples_per_dimension=1,
+            )
+            judge.evaluate(
+                {
+                    "prompt": "blind batch",
+                    "dimension_contracts": [
+                        {
+                            "dimension_id": "C2",
+                            "version": "v1",
+                            "criteria": [{"criterion_id": "C2.1"}],
+                        }
+                    ],
+                    "evidence_images": [],
+                }
+            )
+        sent = provider.calls[0]["prompt"]
+        self.assertIn("有明确细则分值的锚点", sent)
+        self.assertNotIn("只有方向的定性锚点", sent)
 
     def test_human_normalizer_uses_video_evidence_and_provider(self) -> None:
         provider = FakeProvider()
@@ -332,7 +401,8 @@ class MlmmBatchTests(unittest.TestCase):
             ]
         }
         result = MlmmHumanNormalizer(provider).normalize(signal, benchmark)
-        self.assertTrue(result["learning_permission"])
+        self.assertFalse(result["learning_permission"])
+        self.assertEqual(result["normalization_review"]["status"], "pending")
         self.assertEqual(result["normalizer_id"], "mlmm-provider:fake_mlmm")
         self.assertEqual(provider.calls[0]["image_paths"], ["frame.jpg"])
 

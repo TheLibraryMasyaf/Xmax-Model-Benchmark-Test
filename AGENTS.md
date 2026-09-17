@@ -40,6 +40,8 @@
 
 参考目录只提供素材/API/历史实现证据，不是当前评测标准。禁止读取或复制 `参考文件/Xmax模型能力测试工作流/docs/评价标准.md` 作为新Benchmark。
 
+生产生成和评测的默认视频 Provider 固定为 `xmax`，默认模型由 `config/project.json` 的 `default_model` 决定。仓库中存在 Decart/Lucy 或其他 Provider 的适配器、密钥或测试模板，不构成对真实调用的授权。只有用户在当前任务中明确指定其他视频模型或 Provider 时，才允许在 Run Request 中切换；否则必须保持 `generation_provider=xmax`，不得因接口可用、模板存在或自行推断而改用其他模型。
+
 ## 3. 建设任务执行规则
 
 1. 在 `IMPLEMENTATION.md` 找到明确工作包和依赖。

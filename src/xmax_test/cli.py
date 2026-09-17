@@ -85,6 +85,7 @@ REQUIRED_PROJECT_FILES = (
     "schemas/existing-results.schema.json",
     "schemas/feishu-config.schema.json",
     "schemas/human-feedback-source.schema.json",
+    "schemas/human-evaluation-import-pack.schema.json",
     "schemas/judge-registry.schema.json",
     "schemas/interaction-profiles.schema.json",
     "schemas/network-profiles.schema.json",
@@ -436,6 +437,9 @@ class Composition:
                     provider_config.get("retry_backoff_max_seconds", 8.0)
                 ),
                 retry_jitter_seconds=float(provider_config.get("retry_jitter_seconds", 0.25)),
+                operator_confirmed_free_tier_codes=provider_config.get(
+                    "operator_confirmed_free_tier_codes", []
+                ),
             )
         if provider_name == "python_plugin":
             provider_entrypoint = provider_config.get("entrypoint", "")
@@ -2503,16 +2507,30 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("feedback").add_argument("--input", required=True)
     sub.add_parser("import-media").add_argument("--input", required=True)
     sub.add_parser("import-feishu").add_argument("--config", required=True)
+    prepare_parser = sub.add_parser(
+        "prepare-feishu", help="materialize Feishu evaluations into an immutable pack"
+    )
+    prepare_parser.add_argument("--config", required=True)
+    prepare_parser.add_argument("--output", required=True)
+    import_pack_parser = sub.add_parser("import-pack")
+    import_pack_parser.add_argument("--input", required=True)
+    import_pack_parser.add_argument("--download-workers", type=int, default=1)
     normalize_parser = sub.add_parser("normalize")
     normalize_parser.add_argument("--pending", action="store_true")
+    normalize_parser.add_argument("--unnormalized", action="store_true")
     normalize_parser.add_argument("--signal-id", action="append", default=[])
     normalize_parser.add_argument("--rule-based", action="store_true")
     normalize_parser.add_argument("--workers", type=int, default=1)
+    repair_normalization_parser = sub.add_parser("repair-normalizations")
+    repair_normalization_parser.add_argument("--signal-id", action="append", required=True)
     partition_parser = sub.add_parser("partition")
     partition_parser.add_argument("--output", required=True)
     partition_parser.add_argument("--repartition", action="store_true")
     override_parser = sub.add_parser("apply-overrides")
     override_parser.add_argument("--signal-id", action="append", default=[])
+    sub.add_parser("review-normalizations").add_argument("--input", required=True)
+    export_review_parser = sub.add_parser("export-normalization-review")
+    export_review_parser.add_argument("--output", required=True)
     challenger_parser = sub.add_parser("build-challenger")
     challenger_parser.add_argument("--judge-id", required=True)
     challenger_parser.add_argument("--version", required=True)
@@ -2689,6 +2707,63 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
         _emit(args, "human.import-feishu", data, ok=ok)
         return 0 if ok else EXIT_PARTIAL
 
+    if args.action == "prepare-feishu":
+        import importlib
+
+        config = load_config(
+            composition.root / args.config,
+            "human-feedback-source.schema.json",
+            base_dir=composition.root,
+        )
+        if config.get("kind") != "feishu_evaluation_preprocessor":
+            raise ConfigError("human prepare-feishu requires a preprocessor source config")
+        module_name, object_name = str(config["preprocessor"]).split(":", 1)
+        builder = getattr(importlib.import_module(module_name), object_name)
+        pack = builder(composition.feishu_client(read_only=True), config)
+        output = composition.root / args.output
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8")
+        validated = load_config(
+            output,
+            "human-evaluation-import-pack.schema.json",
+            base_dir=composition.root,
+        )
+        data = {
+            "output": str(output.resolve()),
+            "source_id": validated["source_id"],
+            "audit": validated["audit"],
+        }
+        _emit(args, "human.prepare-feishu", data)
+        return 0
+
+    if args.action == "import-pack":
+        from .feedback.evaluation_pack import HumanEvaluationPackImporter
+        from .feedback.media_importer import HumanMediaImporter
+
+        path = composition.root / args.input
+        pack = load_config(
+            path,
+            "human-evaluation-import-pack.schema.json",
+            base_dir=composition.root,
+        )
+        media_importer = HumanMediaImporter(
+            composition.database, composition.artifacts, clock=composition.clock
+        )
+        importer = HumanEvaluationPackImporter(
+            composition.feishu_client(read_only=True),
+            media_importer,
+            download_root=composition.root / "var" / "downloads" / "human-evaluations",
+        )
+        outcome = importer.import_pack(
+            pack,
+            source_file=str(path.resolve()),
+            download_workers=args.download_workers,
+        )
+        data = {key: value for key, value in outcome.items() if key != "signals"}
+        ok = not data["errors"] and not data["download_errors"]
+        _emit(args, "human.import-pack", data, ok=ok)
+        return 0 if ok else EXIT_PARTIAL
+
     if args.action == "normalize":
         from .feedback.normalizer import MlmmHumanNormalizer, RuleNormalizer
         from .feedback.proposals import DimensionProposalService
@@ -2697,7 +2772,9 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
         requested = set(args.signal_id)
         if requested:
             signals = [item for item in signals if item.get("signal_id") in requested]
-        if args.pending:
+        if args.unnormalized:
+            signals = [item for item in signals if not item.get("normalizer_id")]
+        elif args.pending:
             signals = [
                 item
                 for item in signals
@@ -2780,6 +2857,23 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
         _emit(args, "human.normalize", data, ok=not errors)
         return 0 if not errors else EXIT_PARTIAL
 
+    if args.action == "repair-normalizations":
+        from .feedback.normalizer import canonicalize_normalized_signal
+
+        requested = set(args.signal_id)
+        repaired = []
+        for signal in composition.database.list_human_signals():
+            if signal.get("signal_id") not in requested:
+                continue
+            composition.database.update_human_signal(
+                canonicalize_normalized_signal(signal, composition.benchmark)
+            )
+            repaired.append(signal["signal_id"])
+        missing = sorted(requested - set(repaired))
+        data = {"repaired": len(repaired), "signal_ids": repaired, "missing": missing}
+        _emit(args, "human.repair-normalizations", data, ok=not missing)
+        return 0 if not missing else EXIT_PARTIAL
+
     if args.action == "apply-overrides":
         from .feedback.overrides import HumanOverrideService
 
@@ -2805,6 +2899,121 @@ def _human_action(composition: Composition, args: argparse.Namespace) -> int:
         data = {"applied": len(applied), "overrides": applied, "errors": errors}
         _emit(args, "human.apply-overrides", data, ok=not errors)
         return 0 if not errors else EXIT_PARTIAL
+
+    if args.action == "review-normalizations":
+        from .feedback.review import NormalizationReviewService
+
+        path = composition.root / args.input
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        decisions = payload if isinstance(payload, list) else payload.get("decisions", [])
+        data = NormalizationReviewService(composition.database).apply(decisions)
+        _emit(args, "human.review-normalizations", data, ok=not data["errors"])
+        return 0 if not data["errors"] else EXIT_PARTIAL
+
+    if args.action == "export-normalization-review":
+        output = composition.root / args.output
+        output.parent.mkdir(parents=True, exist_ok=True)
+        items = []
+        signals = composition.database.list_human_signals()
+        dimensions = {
+            item["dimension_id"]: {
+                criterion["criterion_id"] for criterion in item.get("criteria", [])
+            }
+            for item in composition.benchmark.get("dimensions", [])
+        }
+        audit = {
+            "total_signals": len(signals),
+            "pending": 0,
+            "not_eligible": 0,
+            "learning_enabled": 0,
+            "normalized_labels": 0,
+            "scored_criterion_labels": 0,
+            "qualitative_labels": 0,
+            "dimension_only_labels": 0,
+            "unscored_labels": 0,
+            "invalid_dimension_labels": 0,
+            "invalid_criterion_labels": 0,
+            "invalid_score_hint_labels": 0,
+            "invalid_polarity_labels": 0,
+            "invalid_severity_labels": 0,
+        }
+        for signal in signals:
+            review = signal.get("normalization_review") or {}
+            status = review.get("status")
+            if status in {"pending", "not_eligible"}:
+                audit[status] += 1
+            if signal.get("learning_permission"):
+                audit["learning_enabled"] += 1
+            for label in signal.get("normalized_labels", []):
+                audit["normalized_labels"] += 1
+                dimension_id = label.get("dimension_id")
+                criterion_id = label.get("criterion_id")
+                score_hint = label.get("score_hint")
+                if criterion_id is None:
+                    audit["dimension_only_labels"] += 1
+                if score_hint is None:
+                    audit["unscored_labels"] += 1
+                if criterion_id is not None and score_hint is not None:
+                    audit["scored_criterion_labels"] += 1
+                else:
+                    audit["qualitative_labels"] += 1
+                if dimension_id not in dimensions:
+                    audit["invalid_dimension_labels"] += 1
+                elif criterion_id is not None and criterion_id not in dimensions[dimension_id]:
+                    audit["invalid_criterion_labels"] += 1
+                if score_hint is not None and score_hint not in {0, 1, 2}:
+                    audit["invalid_score_hint_labels"] += 1
+                if label.get("polarity") not in {
+                    "positive", "negative", "mixed", "neutral"
+                }:
+                    audit["invalid_polarity_labels"] += 1
+                if label.get("severity") not in {
+                    "none", "mild", "moderate", "severe", "unknown"
+                }:
+                    audit["invalid_severity_labels"] += 1
+            if status != "pending":
+                continue
+            items.append(
+                {
+                    "signal_id": signal["signal_id"],
+                    "sample_id": signal.get("sample_id"),
+                    "raw_text": signal.get("raw_text"),
+                    "scenario": signal.get("scenario"),
+                    "model_version": signal.get("model_version"),
+                    "comparison": signal.get("comparison"),
+                    "side": (signal.get("annotations") or {}).get("side"),
+                    "test_result_id": (signal.get("annotations") or {}).get(
+                        "test_result_id"
+                    ),
+                    "source_record_id": signal.get("source_record_id"),
+                    "video_path": signal.get("video_path"),
+                    "evidence_images": signal.get("evidence_images", []),
+                    "normalized_labels": signal.get("normalized_labels", []),
+                    "normalizer": {
+                        "id": signal.get("normalizer_id"),
+                        "version": signal.get("normalizer_version"),
+                        "model": signal.get("normalizer_model"),
+                    },
+                }
+            )
+        payload = {
+            "review_status": "pending",
+            "audit": audit,
+            "signals": items,
+            "decisions": [
+                {
+                    "signal_id": item["signal_id"],
+                    "decision": None,
+                    "reviewer": None,
+                    "note": None,
+                }
+                for item in items
+            ],
+        }
+        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        data = {"output": str(output.resolve()), "signals": len(items)}
+        _emit(args, "human.export-normalization-review", data)
+        return 0
 
     if args.action == "build-challenger":
         from .feedback.training import HumanLearningService

@@ -35,7 +35,14 @@ class HumanMediaImporter:
     ) -> dict[str, Any]:
         prepared = []
         errors = []
+        existing_ids = {
+            item.get("signal_id") for item in self._repository.list_human_signals()
+        }
+        skipped_existing = 0
         for index, record in enumerate(records):
+            if record.get("signal_id") in existing_ids:
+                skipped_existing += 1
+                continue
             try:
                 prepared.append(self._prepare(record))
             except Exception as exc:
@@ -52,6 +59,7 @@ class HumanMediaImporter:
             **outcome,
             "errors": errors + outcome["errors"],
             "prepared": len(prepared),
+            "skipped_existing": skipped_existing,
         }
 
     def _prepare(self, record: dict[str, Any]) -> dict[str, Any]:

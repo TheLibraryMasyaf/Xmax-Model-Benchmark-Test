@@ -23,7 +23,7 @@
 | P6 Preprocessing | DONE | Feed/Prompt/Result分组抽帧、事件窗口、ROI、缓存和manifest | 真实运行需`ffmpeg/ffprobe` |
 | P7 Judges | DONE | Provider中立MLLM、Qwen多模型视频候选/Codex适配器、Case原子多维评测、15模型免费链、末位`qwen3-vl-flash`付费兜底、180秒可审计超时、99元硬闸门、运行事实Metric、音轨Metric、基础ffmpeg CV与插件边界 | DINOv2/MUSIQ等候选权重尚未注册为启用Judge；专项CV后续以Challenger接入 |
 | P8 Evaluation | DONE | Orchestrator、P/G/E/R细则级Judge路由、P.1硬门槛、核心场景分、P.2/P.3/P.4/RP.1/RP.2/RP.3批次报告事实、精确批次续跑和结果Schema | G3、E5、R1.2/R2.3等仍由实际样本是否具备对应音轨、物理关系或连续交互实验决定可评性；P.4分离耗时，RP.3网络事实已受Network Profile准入保护，仍需付费smoke校准真实SDK统计完整性 |
-| P9 Human Signals | DONE | 飞书视频+评语导入、不可变原文、Provider中立Normalizer、追加式人工Override、训练/校准/Holdout隔离、MLMM校准包与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
+| P9 Human Signals | DONE | 飞书多表预处理+通用导入包、成对评价对称投影、不可变原文、Provider中立Normalizer、人工审核闸门、Train/Calibration/Holdout隔离、MLMM校准锚点与CV Trainer插件Challenger | 单条反馈不热更新Champion；新版本须经Holdout验证后显式发布 |
 | P10 Feishu | DONE | Sheet/Base/Wiki读取，Case Upsert/附件/Ledger/回读/对账，评分百分比转换 | 真库写入与附件回下载待获得明确授权后smoke |
 | P11 Release/Replay | DONE | Challenger、Holdout验证、回放、发布和回滚 | 发布仍需明确operator和验证文件 |
 | P12 Reporting | DONE | 精确Run/Evaluation Batch的版本对比与单版本报告、Case/维度/细则多统计量、Benchmark全部评分细则与非评分指标覆盖清单、P.3标准差稳定性诊断、人工修订、P0/P1/P2、JSON/Markdown | 对比阈值随Score Schema版本维护；无阈值时不臆造绝对合格线 |
@@ -222,9 +222,9 @@ CLI目标：`xmax-test evaluate --run-batch-id|--run-id ...`。
 
 目标文件：`feedback/importer.py`、`feedback/normalizer.py`、`feedback/router.py`、`feedback/proposals.py`、`feedback/overrides.py`、`feedback/training.py`、`storage/sqlite.py`。
 
-CLI目标：`xmax-test human import|feedback|normalize|partition`。
+CLI目标：`xmax-test human prepare-feishu|import-pack|import|feedback|normalize|repair-normalizations|export-normalization-review|review-normalizations|partition`。
 
-验收：原文与AI原分不可覆盖；人工总分/细则分以追加Override形成有效分；未知细则拒绝；低置信度不进入学习；unmapped产生提案；Train生成MLMM校准包或调用CV Trainer；单条override不热更新Judge；Holdout无法被训练读取，Challenger必须验证后显式发布。
+验收：原文与AI原分不可覆盖；多表关联由来源预处理器生成不可变导入包；相对评价保留成对关系并对称投影；MLLM映射未经人工审核不得获得学习权限；人工总分/细则分以追加Override形成有效分；未知维度或细则不进入学习；低置信度不进入学习；unmapped产生提案；Train生成MLLM校准包或调用CV Trainer；单条override不热更新Judge；Holdout无法被训练读取，Challenger必须验证后显式发布。
 
 ### P10 Feishu
 

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XMAX Human Evaluation Import Pack",
+  "type": "object",
+  "required": ["pack_version", "source_id", "base_token", "created_at", "results", "evaluations", "audit"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "pack_version": {"const": "1.0"},
+    "source_id": {"type": "string", "minLength": 1},
+    "base_token": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "results": {"type": "array", "items": {"$ref": "#/$defs/result"}},
+    "evaluations": {"type": "array", "items": {"$ref": "#/$defs/evaluation"}},
+    "audit": {"type": "object"}
+  },
+  "$defs": {
+    "source_ref": {
+      "type": "object",
+      "required": ["table_id", "record_id", "field_id", "field_name"],
+      "properties": {
+        "base_token": {"type": "string", "minLength": 1},
+        "table_id": {"type": "string", "minLength": 1},
+        "record_id": {"type": "string", "minLength": 1},
+        "field_id": {"type": "string", "minLength": 1},
+        "field_name": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "field_snapshot": {
+      "type": "object",
+      "required": ["source", "value", "value_hash"],
+      "properties": {
+        "source": {"$ref": "#/$defs/source_ref"},
+        "value": {},
+        "value_hash": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "required": ["sample_id", "test_result_id", "side", "model_version", "fields"],
+      "properties": {
+        "sample_id": {"type": "string", "minLength": 1},
+        "test_result_id": {"type": "string", "minLength": 1},
+        "side": {"type": "string", "minLength": 1},
+        "model_version": {"type": "string", "minLength": 1},
+        "fields": {
+          "type": "object",
+          "required": ["video", "scenario", "prompt_text", "feed_video", "prompt_asset"],
+          "properties": {
+            "video": {"$ref": "#/$defs/field_snapshot"},
+            "scenario": {"$ref": "#/$defs/field_snapshot"},
+            "prompt_text": {"$ref": "#/$defs/field_snapshot"},
+            "feed_video": {"$ref": "#/$defs/field_snapshot"},
+            "prompt_asset": {"$ref": "#/$defs/field_snapshot"}
+          },
+          "additionalProperties": {"$ref": "#/$defs/field_snapshot"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "participant": {
+      "type": "object",
+      "required": ["sample_id", "side", "comment"],
+      "properties": {
+        "sample_id": {"type": "string", "minLength": 1},
+        "side": {"type": "string", "minLength": 1},
+        "comment": {"$ref": "#/$defs/field_snapshot"}
+      },
+      "additionalProperties": false
+    },
+    "evaluation": {
+      "type": "object",
+      "required": ["comparison_id", "test_result_id", "source_record_id", "review_context", "reviewer", "reviewed_at", "preference", "participants"],
+      "properties": {
+        "comparison_id": {"type": "string", "minLength": 1},
+        "test_result_id": {"type": "string", "minLength": 1},
+        "source_record_id": {"type": "string", "minLength": 1},
+        "review_context": {"enum": ["blind", "ai_assisted", "not_applicable", "unknown"]},
+        "reviewer": {"$ref": "#/$defs/field_snapshot"},
+        "reviewed_at": {"$ref": "#/$defs/field_snapshot"},
+        "preference": {
+          "type": "object",
+          "required": ["relation", "better_sample_id", "worse_sample_id", "source"],
+          "properties": {
+            "relation": {"enum": ["preference", "equivalent"]},
+            "better_sample_id": {"type": ["string", "null"]},
+            "worse_sample_id": {"type": ["string", "null"]},
+            "source": {"$ref": "#/$defs/field_snapshot"}
+          },
+          "additionalProperties": false
+        },
+        "participants": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/participant"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

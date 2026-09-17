@@ -24,20 +24,31 @@
 → Train / Calibration / Holdout分区
 ```
 
-LLM转写进入人工评测池，但只有通过检查且获得 `learning_permission` 的记录才能进入学习池。
+LLM转写进入人工评测池，但只能产生 `normalization_review.status = pending` 的候选映射，不能自动成为人工真值。审核通过后才赋予 `learning_permission`，再进入学习池。
+
+多表或多跳关联由来源预处理器解析，通用导入器只读取不可变 `HumanEvaluationImportPack`。相对评价在包中保留一条规范化pairwise记录，导入时再对称投影为两条单视频信号；缺失的单侧评语不会被伪造。
 
 可执行命令：
 
 ```bash
 xmax-test human import --input <independent-dataset.json>
 xmax-test human feedback --input <ai-result-feedback.json>
+xmax-test human prepare-feishu --config <source.json> --output <import-pack.json>
+xmax-test human import-pack --input <import-pack.json>
 xmax-test human normalize --pending
+xmax-test human export-normalization-review --output var/feedback/normalization-review.json
+xmax-test human repair-normalizations --signal-id <signal-id>
+xmax-test human review-normalizations --input <review-decisions.json>
 xmax-test human partition --output var/feedback/learning.jsonl
 xmax-test human build-challenger --judge-id <id> --version <version> --route mlmm --train var/feedback/learning.train.jsonl
 xmax-test judges promote --judge-id <id> --version <version> --validation <holdout-validation.json>
 ```
 
 导入保留时间段、ROI、bbox/mask/关键点、人工分数和Feed/Prompt/Result Asset ID等扩展监督字段，Normalizer不能删除或改写它们。
+
+Normalizer将有明确细则与0/1/2提示分的标签标为可评分锚点；只能确定缺陷方向的相对评语保留为定性锚点，不得把空分值补猜为绝对分。相对记录的 `better_than` / `worse_than` 关系会随学习包保留；评分Judge只使用Train分区中已审批的匿名锚点。
+
+`export-normalization-review` 同时输出原评语、视频/抽帧路径、测试组合、成对关系、结构审计统计和可填写的 `decisions` 数组。审核人补入 `decision=approved|rejected`、`reviewer` 及可选 `note` 后，同一文件可直接交给 `review-normalizations`。若审核只覆盖部分飞书评分字段，决定中应提供 `approved_labels=[{criterion_id, score_hint}]`；系统只把这些明确展示并确认的细则写入 `reviewed_normalized_labels`，同一评语中未展示的定性、空分或其他细则不会连带获得学习权限。相对关系也必须通过 `approved_comparison` 单独确认，否则字段级审核不会把原始pairwise关系带入学习包。省略 `approved_labels` 仅用于兼容明确执行整条评价审核的旧流程。`repair-normalizations` 只在本地修复供应商输出的枚举或ID漂移，不会再次上传素材，也不会自动授予 `learning_permission`。
 
 ## 3. 统一HumanSignal
 

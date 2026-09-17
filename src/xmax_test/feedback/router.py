@@ -65,7 +65,17 @@ class LearningRouter:
         if partition not in PARTITIONS:
             raise ContractError(f"invalid data partition: {partition!r}")
         candidates = []
-        for label in signal.get("normalized_labels", []):
+        labels = signal.get("reviewed_normalized_labels")
+        if labels is None:
+            # Backward compatibility for trusted rule-normalized signals and
+            # review records created before label-scoped review was introduced.
+            labels = signal.get("normalized_labels", [])
+        comparison = (
+            signal.get("reviewed_comparison")
+            if "reviewed_comparison" in signal
+            else signal.get("comparison")
+        )
+        for label in labels:
             route_kind = self._route_for_dimension(label.get("dimension_id", ""))
             candidates.append(
                 {
@@ -84,6 +94,8 @@ class LearningRouter:
                         "raw_text": signal.get("raw_text"),
                         "label": label,
                         "annotations": signal.get("annotations", {}),
+                        "signal_kind": signal.get("signal_kind"),
+                        "comparison": comparison,
                         "human_score_percent": signal.get("human_score_percent"),
                         "human_verdict": signal.get("human_verdict"),
                     },

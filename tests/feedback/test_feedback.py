@@ -17,9 +17,14 @@ from jsonschema import Draft202012Validator
 from xmax_test.benchmark import load_benchmark_contract
 from xmax_test.errors import ContractError
 from xmax_test.feedback.importer import HumanSignalImporter
-from xmax_test.feedback.normalizer import MlmmHumanNormalizer, RuleNormalizer
+from xmax_test.feedback.normalizer import (
+    MlmmHumanNormalizer,
+    RuleNormalizer,
+    canonicalize_normalized_signal,
+)
 from xmax_test.feedback.overrides import HumanOverrideService
 from xmax_test.feedback.proposals import DimensionProposalService
+from xmax_test.feedback.review import NormalizationReviewService
 from xmax_test.feedback.router import LearningRouter
 from xmax_test.feedback.training import HumanLearningService
 from xmax_test.judges.mlmm.base import MlmmResponse
@@ -126,7 +131,180 @@ class NormalizerTests(FeedbackTestBase):
         raw = self.signal("原始人工评价")
         normalized = MlmmHumanNormalizer(Provider()).normalize(raw, self.benchmark)
         self.assertEqual(normalized["raw_text"], "原始人工评价")
-        self.assertTrue(normalized["learning_permission"])
+        self.assertFalse(normalized["learning_permission"])
+        self.assertEqual(normalized["normalization_review"]["status"], "pending")
+
+    def test_mlmm_mapping_requires_explicit_human_review_before_learning(self) -> None:
+        class Provider:
+            provider_id = "fake"
+
+            def complete_json(self, **_kwargs):
+                payload = {
+                    "mapping_status": "existing",
+                    "normalized_labels": [{
+                        "dimension_id": "E2", "criterion_id": "E2.1", "score_hint": 1,
+                        "confidence": 0.9, "rationale": "matched", "polarity": "negative",
+                        "severity": "moderate",
+                    }],
+                    "dimension_proposal": None,
+                }
+                return MlmmResponse(payload=payload, raw_text=json.dumps(payload), provider_id="fake", model="fake")
+
+        normalized = MlmmHumanNormalizer(Provider()).normalize(self.signal("边界破损"), self.benchmark)
+        self.repository.append_human_signal(normalized)
+        self.assertEqual(self.router.route(normalized), [])
+        result = NormalizationReviewService(self.repository).apply([
+            {"signal_id": "signal-1", "decision": "approved", "reviewer": "reviewer"}
+        ])
+        self.assertEqual(result["approved"], 1)
+        reviewed = self.repository.get_human_signal("signal-1")
+        self.assertTrue(reviewed["learning_permission"])
+
+    def test_label_scoped_review_activates_only_confirmed_scored_criteria(self) -> None:
+        signal = {
+            **self.signal("边界较差，但人物还原准确"),
+            "mapping_status": "existing",
+            "normalizer_id": "mlmm-provider:qwen",
+            "normalizer_version": "2.0.0",
+            "learning_permission": False,
+            "normalization_review": {"status": "pending"},
+            "normalized_labels": [
+                {
+                    "dimension_id": "E2", "criterion_id": "E2.1", "score_hint": 0,
+                    "confidence": 0.9, "polarity": "negative", "severity": "severe",
+                },
+                {
+                    "dimension_id": "E3", "criterion_id": "E3.2", "score_hint": 2,
+                    "confidence": 0.8, "polarity": "positive", "severity": "none",
+                },
+                {
+                    "dimension_id": "E4", "criterion_id": None, "score_hint": None,
+                    "confidence": 0.7, "polarity": "mixed", "severity": "unknown",
+                },
+            ],
+        }
+        self.repository.append_human_signal(signal)
+
+        result = NormalizationReviewService(self.repository).apply([
+            {
+                "signal_id": "signal-1",
+                "decision": "approved",
+                "reviewer": "human",
+                "approved_labels": [{"criterion_id": "E3.2", "score_hint": 2}],
+                "review_source": {"type": "feishu_field_confirmation"},
+            }
+        ])
+
+        self.assertEqual(result["approved"], 1)
+        reviewed = self.repository.get_human_signal("signal-1")
+        self.assertEqual(reviewed["normalization_review"]["scope"], "selected_labels")
+        self.assertEqual(
+            [item["criterion_id"] for item in reviewed["reviewed_normalized_labels"]],
+            ["E3.2"],
+        )
+        packets = self.router.route({**reviewed, "data_partition": "train"})
+        self.assertEqual(len(packets), 1)
+        self.assertEqual(packets[0]["supervision"]["label"]["criterion_id"], "E3.2")
+        self.assertIsNone(packets[0]["supervision"]["comparison"])
+
+    def test_label_scoped_review_rejects_unknown_criterion(self) -> None:
+        signal = {
+            **self.signal("边界较差"),
+            "mapping_status": "existing",
+            "normalizer_id": "mlmm-provider:qwen",
+            "normalizer_version": "2.0.0",
+            "learning_permission": False,
+            "normalization_review": {"status": "pending"},
+            "normalized_labels": [{
+                "dimension_id": "E2", "criterion_id": "E2.1", "score_hint": 0,
+                "confidence": 0.9, "polarity": "negative", "severity": "severe",
+            }],
+        }
+        self.repository.append_human_signal(signal)
+        result = NormalizationReviewService(self.repository).apply([
+            {
+                "signal_id": "signal-1",
+                "decision": "approved",
+                "reviewer": "human",
+                "approved_labels": [{"criterion_id": "E9.9", "score_hint": 2}],
+            }
+        ])
+        self.assertEqual(result["approved"], 0)
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertFalse(self.repository.get_human_signal("signal-1")["learning_permission"])
+
+    def test_mlmm_normalizer_canonicalizes_criterion_id_used_as_dimension_id(self) -> None:
+        class Provider:
+            provider_id = "fake"
+
+            def complete_json(self, **_kwargs):
+                payload = {
+                    "mapping_status": "existing",
+                    "normalized_labels": [{
+                        "dimension_id": "E2.1", "criterion_id": "E2.1", "score_hint": 0,
+                        "confidence": 0.9, "rationale": "matched", "polarity": "negative",
+                        "severity": "severe",
+                    }],
+                    "dimension_proposal": None,
+                }
+                return MlmmResponse(
+                    payload=payload,
+                    raw_text=json.dumps(payload),
+                    provider_id="fake",
+                    model="fake",
+                )
+
+        normalized = MlmmHumanNormalizer(Provider()).normalize(
+            self.signal("编辑边界破损"), self.benchmark
+        )
+        self.assertEqual(normalized["normalized_labels"][0]["dimension_id"], "E2")
+        self.assertEqual(normalized["normalized_labels"][0]["criterion_id"], "E2.1")
+
+    def test_mlmm_normalizer_canonicalizes_invalid_optional_enums(self) -> None:
+        class Provider:
+            provider_id = "fake"
+
+            def complete_json(self, **_kwargs):
+                payload = {
+                    "mapping_status": "existing",
+                    "normalized_labels": [{
+                        "dimension_id": "E2", "criterion_id": "E2.1", "score_hint": 9,
+                        "confidence": 0.9, "rationale": "insufficient evidence",
+                        "polarity": "unknown", "severity": "uncertain",
+                    }],
+                    "dimension_proposal": None,
+                }
+                return MlmmResponse(
+                    payload=payload,
+                    raw_text=json.dumps(payload),
+                    provider_id="fake",
+                    model="fake",
+                )
+
+        normalized = MlmmHumanNormalizer(Provider()).normalize(
+            self.signal("证据不足"), self.benchmark
+        )
+        label = normalized["normalized_labels"][0]
+        self.assertIsNone(label["score_hint"])
+        self.assertEqual(label["polarity"], "neutral")
+        self.assertEqual(label["severity"], "unknown")
+
+    def test_existing_normalization_can_be_repaired_without_provider_call(self) -> None:
+        signal = {
+            **self.signal("证据不足"),
+            "mapping_status": "existing",
+            "normalizer_id": "mlmm-provider:qwen",
+            "normalizer_version": "2.0.0",
+            "normalized_labels": [{
+                "dimension_id": "E3", "criterion_id": None, "score_hint": None,
+                "confidence": 0.7, "rationale": "insufficient evidence",
+                "polarity": "unknown", "severity": "unknown",
+            }],
+        }
+        repaired = canonicalize_normalized_signal(signal, self.benchmark)
+        self.assertEqual(repaired["normalized_labels"][0]["polarity"], "neutral")
+        self.assertEqual(repaired["normalized_labels"][0]["severity"], "unknown")
+        self.assertTrue(repaired["normalized_hash"])
 
     def test_matched_keyword_maps_to_existing_dimension(self) -> None:
         raw = self.signal("编辑边界准确，换装效果自然")
@@ -183,6 +361,8 @@ class RouterTests(FeedbackTestBase):
             "review_context": "blind",
             "mapping_status": "existing",
             "normalized_labels": [{"dimension_id": "E2", "confidence": 0.9}],
+            "signal_kind": "pairwise_projection",
+            "comparison": {"relation": "better_than"},
             "learning_permission": True,
             "data_partition": "train",
         }
@@ -222,6 +402,12 @@ class RouterTests(FeedbackTestBase):
             [[100, 300]],
         )
         self.assertEqual(packets[0]["evidence_refs"]["result_asset_id"], "asset-result")
+        self.assertEqual(
+            packets[0]["supervision"]["comparison"]["relation"], "better_than"
+        )
+        self.assertEqual(
+            packets[0]["supervision"]["signal_kind"], "pairwise_projection"
+        )
         schema = json.loads(
             (ROOT / "schemas" / "learning-candidate.schema.json").read_text(encoding="utf-8")
         )

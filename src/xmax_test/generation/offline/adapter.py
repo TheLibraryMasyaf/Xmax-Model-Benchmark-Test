@@ -447,7 +447,13 @@ class OfflineGenerationAdapter:
     def _resolve_assets(
         self, case: dict[str, Any], ref_video_role: str, ref_image_role: str | None
     ) -> dict[str, Any]:
-        feed = self._asset_file(case["feed_asset_id"])
+        # Assets are content-addressed.  One byte-identical video may have
+        # several record-scoped business bindings (for example a historical
+        # Prompt video and a current Feed video).  The frozen Case role is the
+        # generation contract; the first physical registry role is provenance,
+        # not a reason to reject the same verified media under another video
+        # role.
+        feed = self._asset_file(case["feed_asset_id"], expected_kind="feed_video")
         feed = self._feed_preprocessor.prepare(feed)
         self._feed_evidence = feed.get("feed_preprocessing", {})
         if ref_video_role == "feed_video" and feed.get("kind") != "feed_video":
@@ -457,7 +463,9 @@ class OfflineGenerationAdapter:
         ref_video = (
             feed
             if ref_video_role == "feed_video"
-            else self._asset_file(case.get("edited_video_asset_id") or "")
+            else self._asset_file(
+                case.get("edited_video_asset_id") or "", expected_kind="prompt_video"
+            )
         )
         ref_image = None
         if ref_image_role == "prompt_image":
@@ -468,12 +476,14 @@ class OfflineGenerationAdapter:
             ]
             if not prompt_images:
                 raise ValidationError(f"case {case['case_id']} requires a prompt image")
-            ref_image = self._asset_file(prompt_images[0])
+            ref_image = self._asset_file(prompt_images[0], expected_kind="prompt_image")
         elif ref_image_role == "feed_capture":
             ref_image = feed if feed.get("kind") == "feed_image" else self._feed_capture(feed)
         return {"ref_video": ref_video, "ref_image": ref_image}
 
-    def _asset_file(self, asset_id: str) -> dict[str, Any]:
+    def _asset_file(
+        self, asset_id: str, *, expected_kind: str | None = None
+    ) -> dict[str, Any]:
         from ...errors import NotFoundError
 
         try:
@@ -483,11 +493,31 @@ class OfflineGenerationAdapter:
         path = self._artifacts.resolve(asset["uri"])
         if not path.is_file():
             raise ValidationError(f"asset file missing: {asset_id}")
+        physical_kind = str(asset.get("kind") or "")
+        effective_kind = expected_kind or physical_kind
+        if expected_kind is not None:
+            expected_family = expected_kind.rsplit("_", 1)[-1]
+            physical_family = physical_kind.rsplit("_", 1)[-1]
+            mime_family = str(asset.get("mime_type") or "").split("/", 1)[0]
+            media = asset.get("media", {})
+            media_family = (
+                "video"
+                if media.get("video_codec") or media.get("fps")
+                else "image"
+                if media.get("image_format")
+                else ""
+            )
+            if expected_family not in {physical_family, mime_family, media_family}:
+                raise ValidationError(
+                    f"asset {asset_id} cannot bind as {expected_kind}; "
+                    f"physical kind is {physical_kind!r}, mime is {asset.get('mime_type')!r}"
+                )
         return {
             "asset_id": asset_id,
             "path": str(path),
             "sha256": asset.get("sha256"),
-            "kind": asset.get("kind"),
+            "kind": effective_kind,
+            "physical_asset_kind": physical_kind,
             "mime_type": asset.get("mime_type"),
             "media": asset.get("media", {}),
         }

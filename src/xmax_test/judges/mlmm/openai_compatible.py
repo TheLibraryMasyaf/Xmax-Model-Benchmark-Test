@@ -63,6 +63,7 @@ class OpenAiCompatibleProvider:
         retry_backoff_seconds: float = 1.0,
         retry_backoff_max_seconds: float = 8.0,
         retry_jitter_seconds: float = 0.25,
+        operator_confirmed_free_tier_codes: list[str] | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         random_fn: Callable[[float, float], float] = random.uniform,
     ) -> None:
@@ -91,6 +92,11 @@ class OpenAiCompatibleProvider:
         self._retry_backoff_seconds = float(retry_backoff_seconds)
         self._retry_backoff_max_seconds = float(retry_backoff_max_seconds)
         self._retry_jitter_seconds = float(retry_jitter_seconds)
+        self._operator_confirmed_free_tier_codes = {
+            str(item).strip().lower()
+            for item in (operator_confirmed_free_tier_codes or [])
+            if str(item).strip()
+        }
         self._sleep = sleep_fn
         self._random = random_fn
         if self._transport_max_retries < 0:
@@ -361,6 +367,17 @@ class OpenAiCompatibleProvider:
         paid_reservation: dict[str, Any] | None,
         transport_failures: dict[str, int],
     ) -> None:
+        if (
+            current_model != self._paid_model
+            and self._operator_confirmed_free_tier_codes.intersection(
+                failure.provider_codes
+            )
+        ):
+            failure = _ProviderFailure(
+                "free_tier_exhausted",
+                failure.summary,
+                provider_codes=failure.provider_codes,
+            )
         if failure.kind == "free_tier_exhausted":
             if current_model == self._paid_model:
                 state = self._budget_gate.pause(
@@ -525,6 +542,7 @@ class _ProviderFailure:
     kind: str
     summary: str
     retry_after_seconds: float | None = None
+    provider_codes: tuple[str, ...] = ()
 
 
 def _classify_provider_error(
@@ -552,11 +570,13 @@ def _classify_provider_error(
         error = payload.get("error")
         if isinstance(error, dict):
             sources.insert(0, error)
-    codes = " ".join(
-        str(source.get(key) or "")
+    provider_codes = tuple(
+        str(source.get(key) or "").strip().lower()
         for source in sources
         for key in ("code", "type")
-    ).lower()
+        if str(source.get(key) or "").strip()
+    )
+    codes = " ".join(provider_codes)
     messages = " ".join(str(source.get("message") or "") for source in sources).lower()
     lowered = f"{codes} {messages} {body.lower()}"
     summary = _safe_error_summary(body)
@@ -571,7 +591,9 @@ def _classify_provider_error(
         )
     )
     if confirmed_free_tier:
-        return _ProviderFailure("free_tier_exhausted", summary)
+        return _ProviderFailure(
+            "free_tier_exhausted", summary, provider_codes=provider_codes
+        )
 
     if status == 429 or any(
         token in codes for token in ("throttl", "rate_limit", "ratelimit", "too_many_requests")
@@ -580,6 +602,7 @@ def _classify_provider_error(
             "rate_limited",
             summary,
             retry_after_seconds=_retry_after_seconds(headers),
+            provider_codes=provider_codes,
         )
 
     quota_like = any(
@@ -594,25 +617,30 @@ def _classify_provider_error(
         )
     )
     if quota_like:
-        return _ProviderFailure("quota_review_required", summary)
+        return _ProviderFailure(
+            "quota_review_required", summary, provider_codes=provider_codes
+        )
 
     if status in {401, 403} or any(
         token in codes
         for token in ("unauthorized", "authentication", "invalid_api_key", "access_denied")
     ):
-        return _ProviderFailure("authentication_failed", summary)
+        return _ProviderFailure(
+            "authentication_failed", summary, provider_codes=provider_codes
+        )
 
     if status == 408 or status >= 500:
         return _ProviderFailure(
             "service_unavailable",
             summary,
             retry_after_seconds=_retry_after_seconds(headers),
+            provider_codes=provider_codes,
         )
 
     if 400 <= status < 500:
-        return _ProviderFailure("invalid_request", summary)
+        return _ProviderFailure("invalid_request", summary, provider_codes=provider_codes)
 
-    return _ProviderFailure("provider_error", summary)
+    return _ProviderFailure("provider_error", summary, provider_codes=provider_codes)
 
 
 def _retry_after_seconds(headers: Mapping[str, Any]) -> float | None:

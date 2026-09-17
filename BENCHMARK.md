@@ -7,7 +7,7 @@
 {
   "$schema": "./schemas/benchmark.schema.json",
   "schema_version": "1.2",
-  "benchmark_version": "0.4.0-draft",
+  "benchmark_version": "0.4.1-draft",
   "status": "shadow",
   "provisional": true,
   "review_after": "first_round_pger_calibration",
@@ -170,7 +170,9 @@
     {"rule_id": "core-moving-camera-effects-offline", "version": "0.4.0-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-offline-0.4"], "when": {"all": [{"scenario_id": "core-moving-camera-effects"}, {"mode": "offline"}]}, "weight_overrides": {"G1": 10, "G2": 10, "G3": 3, "E1": 12, "E2": 10, "E3": 12, "E4": 25, "E5": 18}},
     {"rule_id": "core-moving-camera-effects-realtime", "version": "0.4.0-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-realtime-0.4"], "when": {"all": [{"scenario_id": "core-moving-camera-effects"}, {"mode": "realtime"}]}, "weight_overrides": {"G1": 8, "G2": 8, "G3": 2, "E1": 12, "E2": 9, "E3": 10, "E4": 19, "E5": 14, "R1": 7, "R2": 11}},
     {"rule_id": "core-long-single-host-live-replacement-realtime", "version": "0.4.0-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-realtime-0.4"], "when": {"all": [{"scenario_id": "core-long-single-host-live-replacement"}, {"mode": "realtime"}]}, "weight_overrides": {"G1": 8, "G2": 11, "G3": 3, "E1": 12, "E2": 12, "E3": 14, "E4": 18, "E5": 5, "R1": 7, "R2": 10}},
-    {"rule_id": "core-long-multi-host-live-replacement-realtime", "version": "0.4.0-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-realtime-0.4"], "when": {"all": [{"scenario_id": "core-long-multi-host-live-replacement"}, {"mode": "realtime"}]}, "weight_overrides": {"G1": 7, "G2": 11, "G3": 3, "E1": 13, "E2": 14, "E3": 13, "E4": 17, "E5": 5, "R1": 6, "R2": 11}}
+    {"rule_id": "core-long-multi-host-live-replacement-realtime", "version": "0.4.0-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-realtime-0.4"], "when": {"all": [{"scenario_id": "core-long-multi-host-live-replacement"}, {"mode": "realtime"}]}, "weight_overrides": {"G1": 7, "G2": 11, "G3": 3, "E1": 13, "E2": 14, "E3": 13, "E4": 17, "E5": 5, "R1": 6, "R2": 11}},
+    {"rule_id": "core-offcenter-composition-replacement-offline", "version": "0.4.1-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-offline-0.4"], "when": {"all": [{"scenario_id": "core-offcenter-composition-replacement"}, {"mode": "offline"}]}, "weight_overrides": {"G1": 9, "G2": 9, "G3": 3, "E1": 17, "E2": 17, "E3": 18, "E4": 20, "E5": 7}},
+    {"rule_id": "core-nonstandard-instruction-replacement-offline", "version": "0.4.1-draft", "status": "shadow", "priority": 100, "applicable_profile_ids": ["scene-base-offline-0.4"], "when": {"all": [{"scenario_id": "core-nonstandard-instruction-replacement"}, {"mode": "offline"}]}, "weight_overrides": {"G1": 8, "G2": 8, "G3": 3, "E1": 25, "E2": 12, "E3": 15, "E4": 22, "E5": 7}}
   ],
   "hard_gates": [
     {"gate_id": "invalid-result-block-score", "version": "0.3.0-draft", "status": "shadow", "condition": {"dimension_id": "P", "criterion_id": "P.1", "score_equals": 0}, "action": {"type": "block_score", "final_verdict": "invalid_result"}}
@@ -181,6 +183,7 @@
       "weight_profile_by_mode": {"offline": "scene-base-offline-0.4", "realtime": "scene-base-realtime-0.4"}, "require_scene_weight_rule": true, "canonical_score_enabled": false, "outputs": ["scenario_score"], "case_score_output": "scenario_score", "comparison_policy_status": "pending_first_round"}
   ],
   "change_log": [
+    {"version": "0.4.1-draft", "date": "2026-09-16", "summary": "Classified off-center composition replacement and non-standard instruction replacement as core offline scenarios and added exact scene-weight rules for both."},
     {"version": "0.4.0-draft", "date": "2026-09-07", "summary": "Added E1.4 dynamic-instruction adherence, E2.3 non-target preservation, E4.4 cross-view geometry and the E5 physical/environment dimension; added P.4 and RP.3 reporting metrics; reweighted all core scenes and added long single-host and multi-host live replacement scenarios."},
     {"version": "0.3.0-draft", "date": "2026-08-25", "summary": "Replaced C/O/R scoring with P gate, objective G quality, E generation effect and concise realtime R standards; moved P/RP batch performance out of single-video scoring; added 10 core scenes and 16 exact mode-specific weight rules."},
     {"version": "0.2.1-draft", "date": "2026-08-24", "summary": "Historical criterion-level C/O/R Shadow contract retained in persisted results and Git history."}
@@ -191,7 +194,7 @@
 
 ## 1. 适用范围与当前状态
 
-适用于XMAX基于原视频、摄像头流、Prompt文字及单份Prompt图片或视频素材的离线与实时生成，不包含纯文本直接生成视频。当前`benchmark_version = 0.4.0-draft`，全部合同仍为Shadow。
+适用于XMAX基于原视频、摄像头流、Prompt文字及单份Prompt图片或视频素材的离线与实时生成，不包含纯文本直接生成视频。当前`benchmark_version = 0.4.1-draft`，全部合同仍为Shadow。
 
 ## 2. 评分方法
 
@@ -242,8 +245,10 @@
 | core-moving-camera-effects | offline / realtime | 23 / 18 | 77 / 64 | — / 18 |
 | core-long-single-host-live-replacement | realtime | 22 | 61 | 17 |
 | core-long-multi-host-live-replacement | realtime | 21 | 62 | 17 |
+| core-offcenter-composition-replacement | offline | 21 | 79 | — |
+| core-nonstandard-instruction-replacement | offline | 19 | 81 | — |
 
-精确权重位于18条`scene_weight_rules`中，均与来源文档第3章一致。G3/E3或E5细则不适用时归一化，不以0分代替。
+精确权重位于20条`scene_weight_rules`中；其中新增的非常规构图与非标准指令两条规则为0.4.1 Shadow校准规则。G3/E3或E5细则不适用时归一化，不以0分代替。
 
 ## 6. Judge职责
 

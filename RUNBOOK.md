@@ -46,6 +46,8 @@ python3 -m venv .venv
 
 ## 4. 标准运行
 
+标准生产生成和评测默认使用 `generation_provider=xmax` 与项目配置的 XMAX 默认模型。只有用户在当前任务中明确点名其他视频模型或 Provider 时，才允许在本轮 Run Request 中改写；已安装的适配器、可用密钥、历史配置或测试模板都不构成切换授权。不得为了补跑失败任务而静默改用其他 Provider。
+
 新生成自动去掉 Feed 视频的第一个解码帧（不判断是否封面），两个离线 Provider 及浏览器实时 Feed 输入均适用。音频同步裁剪，换动作的 Feed 参考截图重新提取，Prompt 视频不裁剪。无需新增 CLI 开关。已完成旧组合不自动补跑；主动重生成需显式选择新计划范围并授权。源文件和 `artifact://feed-preprocessing/` 中的输入/输出哈希回执应一并保留，防止跨进程重复裁剪。
 
 ```bash

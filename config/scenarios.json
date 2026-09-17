@@ -1,18 +1,18 @@
 {
   "$schema": "../schemas/scenario-pack.schema.json",
   "scenario_pack_id": "xmax-core-scenarios",
-  "version": "0.3.0-draft",
+  "version": "0.3.1-draft",
   "status": "shadow",
   "provisional": true,
   "review_after": "first_round_pger_calibration",
   "tag_definitions": {
     "input_dimension": {
       "description": "核心输入视频难点",
-      "values": ["自拍", "复杂场景或复杂光线", "宠物", "快速或复杂运动", "缓慢移动镜头", "多镜头或多阶段", "多主体", "长时间单人直播", "长时间多人直播"]
+      "values": ["自拍", "复杂场景或复杂光线", "宠物", "快速或复杂运动", "缓慢移动镜头", "多镜头或多阶段", "多主体", "非常规构图", "长时间单人直播", "长时间多人直播"]
     },
     "instruction_dimension": {
       "description": "核心指令对象或目的",
-      "values": ["修改主体", "宠物互动", "修改环境或风格", "新增主体与互动", "生成特效"]
+      "values": ["修改主体", "宠物互动", "修改环境或风格", "新增主体与互动", "生成特效", "非标准指令"]
     }
   },
   "scenarios": [
@@ -159,6 +159,30 @@
       "weight_policy": "scene_rule",
       "source_characteristics": "除长时漂移与性能退化外，多人交叉和换位会放大串人、错绑、非目标误改及遮挡后身份映射丢失。",
       "source_weight_rationale": "实时G/E/R为21/62/17；E1/E2/R2高于单人场景以突出目标映射和非目标保持，E3/E4检查多主体身份持续。"
+    },
+    {
+      "scenario_id": "core-offcenter-composition-replacement",
+      "name": "非常规构图中的主体替换",
+      "aliases": ["主体不在镜头中心的非常规构图进行各类替换"],
+      "description": "对位于画面边缘、局部出镜、大面积留白或被前景遮挡的主体进行替换，保持原构图、目标范围和非目标区域。",
+      "tier": "core",
+      "tags": {"input_dimension": "非常规构图", "instruction_dimension": "修改主体"},
+      "supported_modes": ["offline"],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "目标不在中心会放大检测遗漏、边缘裁切、错改背景和遮挡恢复问题。",
+      "source_weight_rationale": "离线G/E为21/79；E2与E3重点检查编辑边界、非目标保持与参考还原。"
+    },
+    {
+      "scenario_id": "core-nonstandard-instruction-replacement",
+      "name": "非标准指令替换",
+      "aliases": ["输入非标准指令进行替换"],
+      "description": "使用口语、简写、语序非标准、信息不完整或含约束的指令执行人物、服装、角色或其他主体替换。",
+      "tier": "core",
+      "tags": {"input_dimension": "自拍", "instruction_dimension": "非标准指令"},
+      "supported_modes": ["offline"],
+      "weight_policy": "scene_rule",
+      "source_characteristics": "主要风险是意图理解偏差、约束漏执行、擅自补全与目标对象错绑。",
+      "source_weight_rationale": "离线G/E为19/81；E1权重最高，E4检查执行后的整体完成度。"
     }
   ]
 }

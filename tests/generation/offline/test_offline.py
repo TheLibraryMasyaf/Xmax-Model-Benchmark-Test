@@ -128,6 +128,25 @@ class OfflineTestBase(unittest.TestCase):
 
 
 class RestBindingTests(OfflineTestBase):
+    def test_content_addressed_video_uses_frozen_feed_role(self) -> None:
+        from unittest.mock import Mock
+
+        case = self.image_case()
+        case["feed_asset_id"] = "prompt-vid"
+        case["edited_video_asset_id"] = "prompt-vid"
+        case["expected_audio_source_asset_id"] = "prompt-vid"
+        adapter = self.adapter()
+        processor = Mock()
+        processor.prepare.side_effect = lambda feed: feed
+        adapter._feed_preprocessor = processor
+
+        prepared = adapter.prepare(case)
+
+        bound_feed = processor.prepare.call_args.args[0]
+        self.assertEqual(bound_feed["kind"], "feed_video")
+        self.assertEqual(bound_feed["physical_asset_kind"], "prompt_video")
+        self.assertEqual(prepared["assets"]["ref_video"]["kind"], "feed_video")
+
     def test_feed_processing_precedes_both_video_and_capture_bindings(self):
         from unittest.mock import Mock
         for case in [self.image_case(), self.video_case()]:

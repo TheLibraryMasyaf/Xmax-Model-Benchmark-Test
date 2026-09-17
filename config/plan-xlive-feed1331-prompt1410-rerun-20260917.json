@@ -1,0 +1,21 @@
+{
+  "request_id": "xlive-feed1331-prompt1410-rerun-x2.0-20260917",
+  "generation_provider": "xmax",
+  "model_id": "x2.0",
+  "generation_modes": ["offline"],
+  "repeat_count": 1,
+  "seed": 20260917,
+  "combination_selection": {
+    "strategy": "matched_record_groups"
+  },
+  "filters": {
+    "source_ids": ["feishu-xlive-feed1331-prompt1410-rerun-20260917"]
+  },
+  "scenario_overrides": {
+    "recvvnQBYiI6Hh": "core-pet-replacement"
+  },
+  "generation_config": {
+    "quality": "hd",
+    "fps": 24
+  }
+}

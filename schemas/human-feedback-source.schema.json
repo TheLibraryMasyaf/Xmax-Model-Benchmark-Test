@@ -1,22 +1,47 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "XMAX Human Feedback Source",
-  "type": "object",
-  "required": ["source_id", "kind", "app_token", "table_id", "comment_field", "video_fields"],
-  "properties": {
-    "$schema": {"type": "string"},
-    "source_id": {"type": "string", "minLength": 1},
-    "kind": {"const": "feishu_bitable"},
-    "app_token": {"type": "string", "minLength": 1},
-    "table_id": {"type": "string", "minLength": 1},
-    "comment_field": {"type": "string", "minLength": 1},
-    "video_fields": {
-      "type": "array",
-      "items": {"type": "string", "minLength": 1},
-      "minItems": 1,
-      "uniqueItems": true
+  "oneOf": [
+    {"$ref": "#/$defs/legacy_bitable"},
+    {"$ref": "#/$defs/evaluation_preprocessor"}
+  ],
+  "$defs": {
+    "legacy_bitable": {
+      "type": "object",
+      "required": ["source_id", "kind", "app_token", "table_id", "comment_field", "video_fields"],
+      "properties": {
+        "$schema": {"type": "string"},
+        "source_id": {"type": "string", "minLength": 1},
+        "kind": {"const": "feishu_bitable"},
+        "app_token": {"type": "string", "minLength": 1},
+        "table_id": {"type": "string", "minLength": 1},
+        "comment_field": {"type": "string", "minLength": 1},
+        "video_fields": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "review_context": {"enum": ["blind", "ai_assisted", "not_applicable", "unknown"]}
+      },
+      "additionalProperties": false
     },
-    "review_context": {"enum": ["blind", "ai_assisted", "not_applicable", "unknown"]}
-  },
-  "additionalProperties": false
+    "evaluation_preprocessor": {
+      "type": "object",
+      "required": ["source_id", "kind", "app_token", "preprocessor", "options"],
+      "properties": {
+        "$schema": {"type": "string"},
+        "source_id": {"type": "string", "minLength": 1},
+        "kind": {"const": "feishu_evaluation_preprocessor"},
+        "app_token": {"type": "string", "minLength": 1},
+        "preprocessor": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "options": {"type": "object"},
+        "review_context": {"enum": ["blind", "ai_assisted", "not_applicable", "unknown"]}
+      },
+      "additionalProperties": false
+    }
+  }
 }

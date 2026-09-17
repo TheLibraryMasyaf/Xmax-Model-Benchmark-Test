@@ -15,6 +15,7 @@
     "signal_id": {"type": "string"},
     "sample_id": {"type": "string"},
     "evaluation_id": {"type": ["string", "null"]},
+    "signal_kind": {"enum": ["absolute", "pairwise_projection"]},
     "source_type": {
       "enum": [
         "human_dataset",
@@ -29,6 +30,7 @@
     },
     "mapping_status": {"enum": ["existing", "partial", "unmapped", "needs_clarification"]},
     "normalized_labels": {"type": "array", "items": {"type": "object"}},
+    "reviewed_normalized_labels": {"type": "array", "items": {"type": "object"}},
     "dimension_proposal": {"type": ["object", "null"]},
     "learning_permission": {"type": "boolean"},
     "data_partition": {"enum": ["train", "calibration", "holdout", "unassigned", null]},
@@ -41,6 +43,10 @@
     "result_asset_id": {"type": ["string", "null"]},
     "human_score_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
     "human_verdict": {"type": ["string", "null"]},
+    "comparison": {"type": ["object", "null"]},
+    "reviewed_comparison": {"type": ["object", "null"]},
+    "source_provenance": {"type": ["object", "null"]},
+    "normalization_review": {"type": ["object", "null"]},
     "annotations": {
       "type": "object",
       "description": "Optional time ranges, ROI, bbox, mask, keypoint or other trainer-ready supervision."
